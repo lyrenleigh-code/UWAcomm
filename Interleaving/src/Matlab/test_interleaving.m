@@ -9,6 +9,12 @@
 %   在MATLAB命令行执行 >> run('test_interleaving.m')
 
 clc; close all;
+
+% 添加跨模块依赖路径
+proj_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+addpath(fullfile(proj_root, 'ChannelCoding', 'src', 'Matlab'));
+addpath(fullfile(proj_root, 'Interleaving', 'src', 'Matlab'));
+
 fprintf('========================================\n');
 fprintf('  交织/解交织模块 — 单元测试\n');
 fprintf('========================================\n\n');
@@ -197,20 +203,18 @@ fprintf('\n--- 3. 卷积交织器 ---\n\n');
 
 %% 测试3.1：基本回环（含延迟对齐）
 try
-    data = 1:120;
-    B = 4; M = 5;
-    total_delay = (B-1) * M;          % 固定总延迟
+    data = 1:240;
+    B = 4; M = 3;
+    total_delay = (B-1) * M * B;      % 固定总延迟 = (B-1)*M*B 个样本
 
     [intlv, ~, ~] = conv_interleave(data, B, M);
     deintlv = conv_deinterleave(intlv, B, M);
 
     % 卷积交织+解交织引入固定延迟，跳过过渡段后应一致
     valid_start = total_delay + 1;
-    if valid_start <= length(data)
-        data_valid = data(1:end - total_delay);
-        deintlv_valid = deintlv(valid_start:end);
-        assert(isequal(deintlv_valid, data_valid), '有效段解交织不一致');
-    end
+    data_valid = data(1:end - total_delay);
+    deintlv_valid = deintlv(valid_start:end);
+    assert(isequal(deintlv_valid, data_valid), '有效段解交织不一致');
 
     fprintf('[通过] 3.1 卷积交织回环 | B=%d, M=%d, 总延迟=%d\n', B, M, total_delay);
     pass_count = pass_count + 1;
@@ -240,9 +244,9 @@ end
 %% 测试3.3：大数据量回环
 try
     rng(20);
-    data = randi([0 1], 1, 1000);
-    B = 6; M = 12;
-    total_delay = (B-1) * M;
+    data = randi([0 1], 1, 5000);
+    B = 4; M = 6;
+    total_delay = (B-1) * M * B;
 
     [intlv, ~, ~] = conv_interleave(data, B, M);
     deintlv = conv_deinterleave(intlv, B, M);
@@ -251,7 +255,7 @@ try
     deintlv_valid = deintlv(total_delay+1:end);
     assert(isequal(deintlv_valid, data_valid), '大数据量解交织不一致');
 
-    fprintf('[通过] 3.3 大数据量(1000) | B=%d, M=%d, 有效段完全一致\n', B, M);
+    fprintf('[通过] 3.3 大数据量(5000) | B=%d, M=%d, 总延迟=%d, 有效段一致\n', B, M, total_delay);
     pass_count = pass_count + 1;
 catch e
     fprintf('[失败] 3.3 大数据量 | %s\n', e.message);

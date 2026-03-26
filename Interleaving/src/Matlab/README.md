@@ -50,17 +50,17 @@ deintlv = random_deinterleave(intlv, perm);
 
 - B条支路，第i支路延迟为 (i-1)*M 个符号（i=1,...,B）
 - 输入符号按轮转分配到各支路，经不同延迟后输出
-- 解交织器延迟互补：第i支路延迟为 (B-i)*M，总延迟恒为 (B-1)*M
-- 适合流式处理，交织+解交织后有效段完全还原
+- 解交织器延迟互补：第i支路延迟为 (B-i)*M，每支路每B个样本访问一次
+- 交织+解交织总延迟 = (B-1)*M*B 个样本，有效段完全还原
 
 ```matlab
-data = 1:120;
-B = 4; M = 5;                         % 4支路，延迟增量5
+data = 1:240;
+B = 4; M = 3;                         % 4支路，延迟增量3
 [intlv, ~, ~] = conv_interleave(data, B, M);
 deintlv = conv_deinterleave(intlv, B, M);
 
-% 前(B-1)*M = 15个样本为零过渡，之后完全还原
-total_delay = (B-1) * M;
+% 前(B-1)*M*B = 36个样本为零过渡，之后完全还原
+total_delay = (B-1) * M * B;
 deintlv(total_delay+1:end)             % == data(1:end-total_delay)
 ```
 
@@ -68,7 +68,7 @@ deintlv(total_delay+1:end)             % == data(1:end-total_delay)
 
 | 特性 | 块交织 | 随机交织 | 卷积交织 |
 |------|--------|----------|----------|
-| 延迟 | 一帧 | 一帧 | (B-1)*M个符号 |
+| 延迟 | 一帧 | 一帧 | (B-1)*M*B个符号 |
 | 突发打散能力 | 取决于行数 | 全局均匀 | 取决于B*M |
 | 适用场景 | 帧级批处理 | Turbo码、通用 | 流式传输 |
 | 参数 | num_rows, num_cols | seed | num_branches, branch_delay |
@@ -78,7 +78,7 @@ deintlv(total_delay+1:end)             % == data(1:end-total_delay)
 - **输入数据**：任意数值序列（比特、符号、软值均可），行/列向量均可
 - **块交织**：返回 num_rows, num_cols, pad_len，解交织时必须传入
 - **随机交织**：返回 perm（置换索引），解交织时必须传入
-- **卷积交织**：返回 num_branches, branch_delay，解交织时必须传入；注意前(B-1)*M个输出为零过渡
+- **卷积交织**：返回 num_branches, branch_delay，解交织时必须传入；注意前(B-1)*M*B个输出为零过渡
 
 ## 运行测试
 
