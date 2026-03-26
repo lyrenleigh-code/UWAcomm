@@ -274,8 +274,11 @@
       <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
-      <span class="cf-block cf-rxonly">* 多普勒补偿</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-rxonly">10 多普勒补偿</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">7' 导频→时域均衡(LMS/DFE)</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">12 迭代处理</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">2' 信道解码</span><span class="cf-arrow">→</span>
@@ -305,9 +308,11 @@
       <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
-      <span class="cf-block cf-rxonly">* 复自相关幅相联合→重采样</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-rxonly">10 复自相关幅相联合→重采样</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">7' 前导估计信道→块FFT→MMSE→IFFT</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-iter">12 Turbo迭代(可选,3~6次)</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">4' LLR软判决</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">2' Viterbi/BCJR译码</span><span class="cf-arrow">→</span>
@@ -338,8 +343,9 @@
       <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
-      <span class="cf-block cf-rxonly">* 多普勒补偿</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-rxonly">10 多普勒补偿</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">7' 导频提取→估计&amp;均衡</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">12 迭代处理</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">5' 相关解扩</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">→</span>
@@ -371,9 +377,10 @@
       <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
-      <span class="cf-block cf-rxonly">* 重采样+残余CFO补偿</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-rxonly">10 重采样+残余CFO补偿</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">6' 去CP+FFT</span><span class="cf-arrow">→</span>
-      <span class="cf-block cf-on-rx">7' 导频→LS信道估计→FDE均衡</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">7' 导频→LS估计→FDE均衡</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">12 迭代处理</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
@@ -404,10 +411,11 @@
       <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">8' 去整帧CP+帧解析</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
-      <span class="cf-block cf-rxonly">* 多普勒(可弱化)</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-rxonly">10 多普勒(可弱化)</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">6' Wigner变换+SFFT→DD域</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">7' DD域嵌入导频→稀疏路径估计</span><span class="cf-arrow">→</span>
-      <span class="cf-block cf-iter">12 MP均衡器(BP迭代,10~30次)</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-iter">12 MP均衡器(BP,10~30次)</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">4' LLR软判决</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">2' 信道解码</span><span class="cf-arrow">→</span>
@@ -438,8 +446,9 @@
       <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
-      <span class="cf-block cf-rxonly">* 多普勒补偿</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-rxonly">10 多普勒补偿</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">7' 导频提取→估计&amp;均衡</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">12 迭代处理</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">5' 解跳频</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">4' 能量检测</span><span class="cf-arrow">→</span>
