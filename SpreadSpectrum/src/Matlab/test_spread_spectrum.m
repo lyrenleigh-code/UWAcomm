@@ -305,8 +305,97 @@ catch e
     fail_count = fail_count + 1;
 end
 
-%% ==================== 六、异常输入 ==================== %%
-fprintf('\n--- 6. 异常输入测试 ---\n\n');
+%% ==================== 六、跳频(FH)扩频 ==================== %%
+fprintf('\n--- 6. 跳频(FH)扩频 ---\n\n');
+
+%% 6.1 跳频图案生成
+try
+    num_freqs = 16;
+    [pat1, ~] = gen_hop_pattern(100, num_freqs, 42);
+    [pat2, ~] = gen_hop_pattern(100, num_freqs, 42);
+    [pat3, ~] = gen_hop_pattern(100, num_freqs, 99);
+
+    assert(isequal(pat1, pat2), '相同seed应产生相同图案');
+    assert(~isequal(pat1, pat3), '不同seed应产生不同图案');
+    assert(all(pat1 >= 0) && all(pat1 < num_freqs), '图案取值越界');
+    assert(length(unique(pat1)) > 1, '图案不应为常数');
+
+    fprintf('[通过] 6.1 跳频图案生成 | 100跳, %d频率, seed确定性验证\n', num_freqs);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 6.1 跳频图案 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 6.2 跳频/去跳频回环
+try
+    num_freqs = 8;
+    freq_in = [0 3 7 2 5 1 4 6 0 3];
+    [pattern, ~] = gen_hop_pattern(length(freq_in), num_freqs, 10);
+
+    hopped = fh_spread(freq_in, pattern, num_freqs);
+    freq_out = fh_despread(hopped, pattern, num_freqs);
+
+    assert(isequal(freq_out, freq_in), '去跳频后索引不一致');
+    assert(~isequal(hopped, freq_in), '跳频后不应与原始相同');
+    assert(all(hopped >= 0) && all(hopped < num_freqs), '跳频后索引越界');
+
+    fprintf('[通过] 6.2 FH回环 | 10符号, %d频率\n', num_freqs);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 6.2 FH回环 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 6.3 FH-MFSK全链路（联合Modulation模块）
+try
+    % 添加调制模块路径
+    proj_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+    addpath(fullfile(proj_root, 'Modulation', 'src', 'Matlab'));
+
+    rng(50);
+    M = 8; num_freqs = 16;
+    bits_in = randi([0 1], 1, 60);    % 20个3-bit符号
+
+    % 发端：MFSK映射 → 跳频
+    [freq_idx, ~, ~] = mfsk_modulate(bits_in, M, 'gray');
+    [pattern, ~] = gen_hop_pattern(length(freq_idx), num_freqs, 77);
+    hopped = fh_spread(freq_idx, pattern, num_freqs);
+
+    % 收端：去跳频 → MFSK解映射
+    dehopped = fh_despread(hopped, pattern, num_freqs);
+    bits_out = mfsk_demodulate(dehopped, M, 'gray');
+
+    assert(isequal(bits_out, bits_in), 'FH-MFSK全链路解码不一致');
+
+    fprintf('[通过] 6.3 FH-MFSK全链路 | 8FSK+16频跳频, 60bit完全还原\n');
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 6.3 FH-MFSK全链路 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 6.4 跳频频率分散性
+try
+    num_freqs = 16;
+    [pattern, ~] = gen_hop_pattern(1600, num_freqs, 0);
+
+    % 统计各频率出现次数，应近似均匀
+    counts = histcounts(pattern, 0:num_freqs);
+    expected = 1600 / num_freqs;
+    max_dev = max(abs(counts - expected)) / expected;
+
+    assert(max_dev < 0.2, '频率分布偏差过大');
+
+    fprintf('[通过] 6.4 频率分散性 | %d频率均匀度偏差<20%%\n', num_freqs);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 6.4 频率分散性 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% ==================== 七、异常输入 ==================== %%
+fprintf('\n--- 7. 异常输入测试 ---\n\n');
 
 try
     caught = 0;
@@ -319,10 +408,13 @@ try
     try det_dcd([]); catch; caught=caught+1; end
     try det_ded([]); catch; caught=caught+1; end
     try gen_msequence(1); catch; caught=caught+1; end         % degree<2
+    try fh_spread([], [1 2], 4); catch; caught=caught+1; end
+    try fh_despread([], [1 2], 4); catch; caught=caught+1; end
+    try gen_hop_pattern(0, 8, 0); catch; caught=caught+1; end % num_hops<1
 
-    assert(caught == 9, '部分函数未对异常输入报错');
+    assert(caught == 12, '部分函数未对异常输入报错');
 
-    fprintf('[通过] 6.1 异常输入拒绝 | 9项均正确报错\n');
+    fprintf('[通过] 7.1 异常输入拒绝 | 12项均正确报错\n');
     pass_count = pass_count + 1;
 catch e
     fprintf('[失败] 6.1 异常输入 | %s\n', e.message);
