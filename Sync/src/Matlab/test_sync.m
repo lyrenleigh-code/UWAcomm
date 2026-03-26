@@ -68,9 +68,9 @@ try
     acorr = xcorr(code13);
     peak = max(acorr);
     sidelobes = acorr; sidelobes(length(code13)) = 0;
-    assert(max(abs(sidelobes)) <= 1, 'Barker旁瓣应<=1');
+    assert(max(abs(sidelobes)) <= 1 + 1e-6, 'Barker旁瓣应<=1');
 
-    fprintf('[通过] 1.4 Barker(13) | 旁瓣最大=%d\n', max(abs(sidelobes)));
+    fprintf('[通过] 1.4 Barker(13) | 旁瓣最大=%.4f\n', max(abs(sidelobes)));
     pass_count = pass_count + 1;
 catch e
     fprintf('[失败] 1.4 Barker | %s\n', e.message);
@@ -101,7 +101,7 @@ end
 %% 2.2 有噪声ZC同步
 try
     rng(10);
-    [preamble, ~] = gen_zc_seq(255, 5);
+    [preamble, ~] = gen_zc_seq(255, 7);
     offset = 300;
     noise = 0.5 * (randn(1, 1500) + 1j*randn(1, 1500));
     received = noise;
