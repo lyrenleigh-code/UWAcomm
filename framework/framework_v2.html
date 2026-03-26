@@ -203,11 +203,11 @@
     <div class="arrow-down"></div>
     <div class="module mod-opt"><span class="num">5</span>扩频<div class="detail">DSSS直扩 / FH跳频 / CSK</div></div>
     <div class="arrow-down"></div>
-    <div class="module mod-opt"><span class="num">6</span>多载波 / 多域变换<span class="badge-mod">拆分</span><div class="detail">OFDM: IFFT+CP</div><div class="detail-new">OTFS: ISFFT+Heisenberg（独立体制）</div></div>
+    <div class="module mod-opt"><span class="num">6</span>多载波 / 多域变换 + CP<span class="badge-mod">含CP</span><div class="detail">OFDM: IFFT+CP插入 | SC-FDE: 分块CP</div><div class="detail-new">OTFS: ISFFT+Heisenberg+整帧CP</div></div>
     <div class="arrow-down"></div>
     <div class="module mod-req"><span class="num">7</span>导频插入<div class="detail">训练序列 / 频域导频</div><div class="detail-new">OTFS: DD域嵌入单脉冲导频+保护区</div></div>
     <div class="arrow-down"></div>
-    <div class="module mod-req"><span class="num">8</span>同步序列插入 + 帧组装<div class="detail">LFM/HFM前导 + 保护间隔</div><div class="detail-new">SC-FDE: 前/后导码（测速）| OTFS: 整帧CP</div></div>
+    <div class="module mod-req"><span class="num">8</span>同步序列插入 + 帧组装<div class="detail">LFM/HFM/ZC/Barker前导 + 帧结构</div><div class="detail-new">粗同步 + CFO粗估计 + 细定时</div></div>
     <div class="arrow-down"></div>
     <div class="module mod-req"><span class="num">9</span>脉冲成形 / 上变频<div class="detail">基带 → 通带，DA转换，功放发射</div></div>
   </div>
@@ -224,7 +224,7 @@
     <div class="chain-label rx-label">接 收 端</div>
     <div class="module mod-req-rx"><span class="num" style="background:#b85c2a">9'</span>匹配滤波 / 下变频<div class="detail">通带 → 基带，AD采样</div></div>
     <div class="arrow-down"></div>
-    <div class="module mod-req-rx"><span class="num" style="background:#b85c2a">8'</span>同步检测 + 帧解析<div class="detail">帧同步 / 定时同步 / 帧结构拆解</div></div>
+    <div class="module mod-req-rx"><span class="num" style="background:#b85c2a">8'</span>同步检测 + 帧解析<div class="detail">粗同步(匹配滤波) + CFO粗估计 + 细定时 + 帧拆解</div></div>
     <div class="arrow-arr"></div>
     <div class="module mod-new-arr"><span class="num">11</span>阵列接收预处理<span class="badge-new">NEW</span><div class="detail-new">时延标定 → 空时变采样重建 → 等效 M·fs 高速率信号</div><div class="detail">可选，需多阵元；对下游模块透明</div></div>
     <div class="arrow-down"></div>
@@ -234,7 +234,7 @@
     <div class="arrow-iter"></div>
     <div class="module mod-new-iter"><span class="num">12</span>迭代处理<span class="badge-new">NEW</span><div class="detail-new">SC-FDE: Turbo软干扰消除（SISO均衡 ⇌ BCJR译码）</div><div class="detail-new">OTFS: MP消息传递均衡（变量节点 ⇌ 观测节点）</div><div class="detail">可选；跳过则直接硬判决</div></div>
     <div class="arrow-down"></div>
-    <div class="module mod-opt-rx"><span class="num">6'</span>逆变换<div class="detail">OFDM: 去CP+FFT &nbsp; OTFS: Wigner+SFFT</div></div>
+    <div class="module mod-opt-rx"><span class="num">6'</span>去CP + 逆变换<div class="detail">OFDM: 去CP+FFT | SC-FDE: 去CP+分块FFT</div><div class="detail-new">OTFS: 去整帧CP+Wigner+SFFT</div></div>
     <div class="arrow-down"></div>
     <div class="module mod-opt-rx"><span class="num">5'</span>解扩<div class="detail">相关解扩 / 解跳频 / DCD/DED检测</div></div>
     <div class="arrow-down"></div>
