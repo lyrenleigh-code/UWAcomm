@@ -466,6 +466,100 @@ catch e
     fail_count = fail_count + 1;
 end
 
+%% 5.5 16QAM全链路（映射→成形→DA→上变频→AD→下变频→匹配→判决）
+try
+    rng(74);
+    fs = 48000; fc = 12000; sps = 8; rolloff = 0.25; span = 6;
+    bps = 4; num_sym = 300; margin = span + 2;
+    bits_in = randi([0 1], 1, num_sym * bps);
+
+    % TX: 映射 → 成形 → DA(I/Q分别) → 上变频
+    [symbols, ~, ~] = qam_modulate(bits_in, 16, 'gray');
+    [shaped, ~, ~] = pulse_shape(symbols, sps, 'rrc', rolloff, span);
+    [da_I, ~] = da_convert(real(shaped), 14, 'quantize');
+    [da_Q, ~] = da_convert(imag(shaped), 14, 'quantize');
+    [passband, ~] = upconvert(da_I + 1j*da_Q, fs, fc);
+
+    % RX: AD → 下变频 → 匹配 → 取中间段 → AGC → 判决
+    [ad_out, ~] = ad_convert(passband, 14, 'quantize');
+    bw = fs / sps;
+    [baseband, ~] = downconvert(ad_out, fs, fc, bw);
+    [filtered, ~] = match_filter(baseband, sps, 'rrc', rolloff, span);
+
+    best_ber = 1;
+    for d = 0:sps-1
+        idx = d+1 : sps : length(filtered);
+        n = min(length(idx), num_sym);
+        if n <= 2*margin, continue; end
+
+        rx_sym = filtered(idx(margin+1 : n-margin));
+        rx_sym = rx_sym / sqrt(mean(abs(rx_sym).^2));
+
+        valid_bits_start = margin * bps + 1;
+        valid_bits_end = (n - margin) * bps;
+        bits_valid = bits_in(valid_bits_start : valid_bits_end);
+
+        [bits_hard, ~] = qam_demodulate(rx_sym, 16, 'gray');
+        b = sum(bits_hard ~= bits_valid) / length(bits_valid);
+        if b < best_ber, best_ber = b; end
+    end
+    assert(best_ber < 0.15, '16QAM全链路BER过高');
+
+    fprintf('[通过] 5.5 16QAM全链路 | 中间%d符号, 14bit DA/AD, BER=%.1f%%\n', ...
+            num_sym - 2*margin, best_ber*100);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 5.5 16QAM全链路 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 5.6 64QAM全链路
+try
+    rng(75);
+    fs = 96000; fc = 12000; sps = 16; rolloff = 0.25; span = 6;
+    bps = 6; num_sym = 400; margin = span + 2;
+    bits_in = randi([0 1], 1, num_sym * bps);
+
+    % TX: 映射 → 成形 → DA(16bit高精度) → 上变频
+    [symbols, ~, ~] = qam_modulate(bits_in, 64, 'gray');
+    [shaped, ~, ~] = pulse_shape(symbols, sps, 'rrc', rolloff, span);
+    [da_I, ~] = da_convert(real(shaped), 16, 'quantize');
+    [da_Q, ~] = da_convert(imag(shaped), 16, 'quantize');
+    [passband, ~] = upconvert(da_I + 1j*da_Q, fs, fc);
+
+    % RX: AD(16bit) → 下变频 → 匹配 → 取中间段 → AGC → 判决
+    [ad_out, ~] = ad_convert(passband, 16, 'quantize');
+    bw = fs / sps;
+    [baseband, ~] = downconvert(ad_out, fs, fc, bw);
+    [filtered, ~] = match_filter(baseband, sps, 'rrc', rolloff, span);
+
+    best_ber = 1;
+    for d = 0:sps-1
+        idx = d+1 : sps : length(filtered);
+        n = min(length(idx), num_sym);
+        if n <= 2*margin, continue; end
+
+        rx_sym = filtered(idx(margin+1 : n-margin));
+        rx_sym = rx_sym / sqrt(mean(abs(rx_sym).^2));
+
+        valid_bits_start = margin * bps + 1;
+        valid_bits_end = (n - margin) * bps;
+        bits_valid = bits_in(valid_bits_start : valid_bits_end);
+
+        [bits_hard, ~] = qam_demodulate(rx_sym, 64, 'gray');
+        b = sum(bits_hard ~= bits_valid) / length(bits_valid);
+        if b < best_ber, best_ber = b; end
+    end
+    assert(best_ber < 0.15, '64QAM全链路BER过高');
+
+    fprintf('[通过] 5.6 64QAM全链路 | 中间%d符号, 16bit DA/AD, BER=%.1f%%\n', ...
+            num_sym - 2*margin, best_ber*100);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 5.6 64QAM全链路 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
 %% ==================== 六、异常输入 ==================== %%
 fprintf('\n--- 6. 异常输入测试 ---\n\n');
 
