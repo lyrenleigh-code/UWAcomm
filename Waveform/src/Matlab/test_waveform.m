@@ -37,21 +37,22 @@ end
 %% 1.2 RRC发+RRC收=RC（零ISI验证）
 try
     sps = 8; rolloff = 0.25; span = 8;
-    % 发送单个脉冲
-    [shaped, h_tx, ~] = pulse_shape(1, sps, 'rrc', rolloff, span);
+    % 发送脉冲序列（中间放单个1，前后足够多零）
+    impulse = [zeros(1,10), 1, zeros(1,10)];
+    [shaped, ~, ~] = pulse_shape(impulse, sps, 'rrc', rolloff, span);
     % 收端匹配滤波
-    [filtered, h_rx] = match_filter(shaped, sps, 'rrc', rolloff, span);
+    [filtered, ~] = match_filter(shaped, sps, 'rrc', rolloff, span);
 
-    % 找到峰值位置，检查前后sps整数倍处是否为零
-    [~, peak_pos] = max(abs(filtered));
-    isi_positions = peak_pos + (-3:3)*sps;
+    % 找到峰值位置，检查前后sps整数倍处的ISI
+    [peak_val, peak_pos] = max(abs(filtered));
+    isi_positions = peak_pos + (-5:5)*sps;
     isi_positions = isi_positions(isi_positions > 0 & isi_positions <= length(filtered));
     isi_positions(isi_positions == peak_pos) = [];
 
     isi_values = abs(filtered(isi_positions));
-    max_isi = max(isi_values) / abs(filtered(peak_pos));
+    max_isi = max(isi_values) / peak_val;
 
-    assert(max_isi < 0.05, 'ISI过大');
+    assert(isscalar(max_isi) && max_isi < 0.05, 'ISI过大');
 
     fprintf('[通过] 1.2 RRC+RRC=RC零ISI | 最大ISI/峰值=%.4f\n', max_isi);
     pass_count = pass_count + 1;
@@ -69,16 +70,17 @@ try
     [shaped, ~, ~] = pulse_shape(symbols_in, sps, 'rrc', rolloff, span);
     [filtered, ~] = match_filter(shaped, sps, 'rrc', rolloff, span);
 
-    % 最优采样点下采样
+    % 最优采样点下采样（注意不超出信号长度）
     delay = span*sps/2;
-    sampled = filtered(delay+1:sps:delay+100*sps);
-    sampled = sampled(1:min(length(sampled), 100));
+    sample_idx = delay+1 : sps : length(filtered);
+    num_valid = min(length(sample_idx), 100);
+    sampled = filtered(sample_idx(1:num_valid));
     decisions = sign(real(sampled));
 
-    ber = sum(decisions(1:length(decisions)) ~= symbols_in(1:length(decisions))) / length(decisions);
+    ber = sum(decisions ~= symbols_in(1:num_valid)) / num_valid;
     assert(ber == 0, '无噪声回环BER应为0');
 
-    fprintf('[通过] 1.3 成形+匹配滤波回环 | 100符号, BER=0\n');
+    fprintf('[通过] 1.3 成形+匹配滤波回环 | %d符号, BER=0\n', num_valid);
     pass_count = pass_count + 1;
 catch e
     fprintf('[失败] 1.3 成形+匹配回环 | %s\n', e.message);
@@ -92,12 +94,13 @@ fprintf('\n--- 2. 上下变频 ---\n\n');
 try
     fs = 48000; fc = 12000;
     rng(20);
-    N = 2000;
-    baseband_in = randn(1,N) + 1j*randn(1,N);
-    baseband_in = baseband_in / max(abs(baseband_in));
+    % 生成带限基带信号（带宽 < LPF截止频率）
+    sps_test = 8;
+    sym = randn(1,250) + 1j*randn(1,250);
+    [baseband_in, ~, ~] = pulse_shape(sym, sps_test, 'rrc', 0.35, 6);
 
     [passband, ~] = upconvert(baseband_in, fs, fc);
-    [baseband_out, ~] = downconvert(passband, fs, fc, fc/2);
+    [baseband_out, ~] = downconvert(passband, fs, fc, fs/sps_test);
 
     % 归一化后比较相关性
     corr_coeff = abs(sum(baseband_out .* conj(baseband_in))) / ...
@@ -139,18 +142,20 @@ try
     [passband, ~] = upconvert(shaped, fs, fc);
 
     % RX: 下变频 → 匹配滤波 → 下采样 → 判决
-    [baseband, ~] = downconvert(passband, fs, fc, fc/2);
+    bw = fs / sps;                     % 基带信号带宽
+    [baseband, ~] = downconvert(passband, fs, fc, bw);
     [filtered, ~] = match_filter(baseband, sps, 'rrc', rolloff, span);
 
     delay = span*sps/2;
-    sampled = filtered(delay+1:sps:delay+50*sps);
-    sampled = sampled(1:min(length(sampled),50));
+    sample_idx = delay+1 : sps : length(filtered);
+    num_valid = min(length(sample_idx), 50);
+    sampled = filtered(sample_idx(1:num_valid));
     decisions = sign(real(sampled));
 
-    ber = sum(decisions ~= symbols_in(1:length(decisions))) / length(decisions);
+    ber = sum(decisions ~= symbols_in(1:num_valid)) / num_valid;
     assert(ber < 0.05, 'BPSK端到端BER过高');
 
-    fprintf('[通过] 2.3 BPSK端到端 | %d符号, BER=%.1f%%\n', length(decisions), ber*100);
+    fprintf('[通过] 2.3 BPSK端到端 | %d符号, BER=%.1f%%\n', num_valid, ber*100);
     pass_count = pass_count + 1;
 catch e
     fprintf('[失败] 2.3 BPSK端到端 | %s\n', e.message);
