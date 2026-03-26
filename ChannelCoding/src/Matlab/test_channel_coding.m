@@ -296,17 +296,136 @@ catch e
     fail_count = fail_count + 1;
 end
 
-%% ==================== 四、异常输入测试 ==================== %%
-fprintf('\n--- 4. 异常输入测试 ---\n\n');
+%% ==================== 四、LDPC码测试 ==================== %%
+fprintf('\n--- 4. LDPC 低密度奇偶校验码 ---\n\n');
 
-%% 测试4.1：空输入
+%% 测试4.1：无噪声编解码回环
+try
+    rng(70);
+    n_ldpc = 64; rate_ldpc = 0.5;
+    k_ldpc = round(n_ldpc * rate_ldpc);
+    msg = randi([0 1], 1, k_ldpc);
+
+    [codeword, H_ldpc, G_ldpc] = ldpc_encode(msg, n_ldpc, rate_ldpc, 0);
+
+    % 验证码字满足校验方程
+    syndrome = mod(H_ldpc * codeword.', 2);
+    assert(all(syndrome == 0), '码字不满足校验方程');
+
+    % 无噪声软值
+    soft_rx = 2*codeword - 1;          % 0→-1, 1→+1
+    [decoded, ~, iters] = ldpc_decode(soft_rx, H_ldpc, k_ldpc, 20, 50);
+    assert(isequal(decoded, msg), '无噪声解码不一致');
+
+    fprintf('[通过] 4.1 LDPC(%d,%d)无噪声回环 | 迭代%d次收敛\n', ...
+            n_ldpc, k_ldpc, iters);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 4.1 LDPC无噪声回环 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 测试4.2：H*G'=0 验证
+try
+    n_ldpc = 64; rate_ldpc = 0.5;
+    k_ldpc = round(n_ldpc * rate_ldpc);
+    [~, H_ldpc, G_ldpc] = ldpc_encode(zeros(1, k_ldpc), n_ldpc, rate_ldpc, 0);
+
+    product = mod(H_ldpc * G_ldpc.', 2);
+    assert(all(product(:) == 0), 'H*G'' mod 2 不为零矩阵');
+
+    fprintf('[通过] 4.2 LDPC H*G''=0 | 生成矩阵与校验矩阵正交\n');
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 4.2 LDPC H*G''=0 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 测试4.3：AWGN信道下BP译码
+try
+    rng(80);
+    n_ldpc = 128; rate_ldpc = 0.5;
+    k_ldpc = round(n_ldpc * rate_ldpc);
+    msg = randi([0 1], 1, k_ldpc * 2);  % 2个码块
+
+    [codeword, H_ldpc, ~] = ldpc_encode(msg, n_ldpc, rate_ldpc, 5);
+
+    % BPSK + AWGN
+    bpsk = 2*codeword - 1;
+    snr_db = 4.0;
+    sigma = 1 / sqrt(2 * rate_ldpc * 10^(snr_db/10));
+    rx = bpsk + sigma * randn(size(bpsk));
+
+    [decoded, ~, iters] = ldpc_decode(rx, H_ldpc, k_ldpc, snr_db, 50);
+    ber = sum(decoded ~= msg) / length(msg);
+
+    fprintf('[通过] 4.3 LDPC AWGN译码 | SNR=%ddB, BER=%.1f%%, 迭代=[%s]\n', ...
+            snr_db, ber*100, num2str(iters));
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 4.3 LDPC AWGN译码 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 测试4.4：不同码长和码率
+try
+    configs = {[32, 0.5], [64, 0.75], [128, 0.5]};
+    all_ok = true;
+
+    for c = 1:length(configs)
+        n_t = configs{c}(1);
+        r_t = configs{c}(2);
+        k_t = round(n_t * r_t);
+        msg_t = randi([0 1], 1, k_t);
+        [cw_t, H_t, ~] = ldpc_encode(msg_t, n_t, r_t, c);
+
+        syn_t = mod(H_t * cw_t.', 2);
+        if ~all(syn_t == 0)
+            all_ok = false;
+            fprintf('  LDPC(%d,%d) 校验失败\n', n_t, k_t);
+        end
+    end
+    assert(all_ok, '部分配置校验失败');
+
+    fprintf('[通过] 4.4 多码长码率 | (32,16) (64,48) (128,64) 校验均通过\n');
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 4.4 多码长码率 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 测试4.5：seed一致性
+try
+    n_ldpc = 64; rate_ldpc = 0.5;
+    k_ldpc = round(n_ldpc * rate_ldpc);
+    msg = zeros(1, k_ldpc);
+
+    [~, H1, ~] = ldpc_encode(msg, n_ldpc, rate_ldpc, 42);
+    [~, H2, ~] = ldpc_encode(msg, n_ldpc, rate_ldpc, 42);
+    [~, H3, ~] = ldpc_encode(msg, n_ldpc, rate_ldpc, 99);
+
+    assert(isequal(H1, H2), '相同seed应产生相同H矩阵');
+    assert(~isequal(H1, H3), '不同seed应产生不同H矩阵');
+
+    fprintf('[通过] 4.5 LDPC seed一致性 | 相同seed→相同H, 不同seed→不同H\n');
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 4.5 LDPC seed一致性 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% ==================== 五、异常输入测试 ==================== %%
+fprintf('\n--- 5. 异常输入测试 ---\n\n');
+
+%% 测试5.1：空输入
 try
     caught = 0;
     funcs = {@() hamming_encode([], 3), ...
              @() hamming_decode([], 3), ...
              @() conv_encode([]), ...
-             @() turbo_encode([])};
-    names = {'hamming_encode', 'hamming_decode', 'conv_encode', 'turbo_encode'};
+             @() turbo_encode([]), ...
+             @() ldpc_encode([])};
+    names = {'hamming_encode', 'hamming_decode', 'conv_encode', 'turbo_encode', 'ldpc_encode'};
 
     for k = 1:length(funcs)
         try
@@ -317,30 +436,31 @@ try
     end
     assert(caught == length(funcs), '部分函数未对空输入报错');
 
-    fprintf('[通过] 4.1 空输入拒绝 | 4个函数均正确报错\n');
+    fprintf('[通过] 5.1 空输入拒绝 | 5个函数均正确报错\n');
     pass_count = pass_count + 1;
 catch e
-    fprintf('[失败] 4.1 空输入拒绝 | %s\n', e.message);
+    fprintf('[失败] 5.1 空输入拒绝 | %s\n', e.message);
     fail_count = fail_count + 1;
 end
 
-%% 测试4.2：非二进制输入
+%% 测试5.2：非二进制输入
 try
     caught = 0;
     try hamming_encode([0 1 2 3], 3); catch; caught = caught+1; end
     try conv_encode([0 0.5 1]); catch; caught = caught+1; end
     try turbo_encode([3 4 5]); catch; caught = caught+1; end
+    try ldpc_encode([0 1 2 3]); catch; caught = caught+1; end
 
-    assert(caught == 3, '部分函数未对非二进制输入报错');
+    assert(caught == 4, '部分函数未对非二进制输入报错');
 
-    fprintf('[通过] 4.2 非二进制输入拒绝 | 3个编码函数均正确报错\n');
+    fprintf('[通过] 5.2 非二进制输入拒绝 | 4个编码函数均正确报错\n');
     pass_count = pass_count + 1;
 catch e
-    fprintf('[失败] 4.2 非二进制输入拒绝 | %s\n', e.message);
+    fprintf('[失败] 5.2 非二进制输入拒绝 | %s\n', e.message);
     fail_count = fail_count + 1;
 end
 
-%% 测试4.3：Hamming块长度不匹配
+%% 测试5.3：Hamming块长度不匹配
 try
     caught = false;
     try
@@ -350,10 +470,10 @@ try
     end
     assert(caught, 'Hamming应对非k整数倍长度报错');
 
-    fprintf('[通过] 4.3 Hamming块长度校验 | 非4整数倍输入被正确拒绝\n');
+    fprintf('[通过] 5.3 Hamming块长度校验 | 非4整数倍输入被正确拒绝\n');
     pass_count = pass_count + 1;
 catch e
-    fprintf('[失败] 4.3 Hamming块长度校验 | %s\n', e.message);
+    fprintf('[失败] 5.3 Hamming块长度校验 | %s\n', e.message);
     fail_count = fail_count + 1;
 end
 
