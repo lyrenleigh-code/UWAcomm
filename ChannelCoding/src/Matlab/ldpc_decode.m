@@ -71,8 +71,9 @@ for b = 1:num_blocks
     idx = (b-1)*n + 1 : b*n;
     rx_block = received(idx);
 
-    % 信道LLR
-    L_ch = Lc * rx_block;
+    % 信道LLR: BP约定 LLR=log(P(0)/P(1))，正值→bit 0
+    % 输入约定：正值→bit 1，故取反对齐
+    L_ch = -Lc * rx_block;
 
     % 执行BP译码
     [hard_bits, llr_final, iters] = bp_decode_block(L_ch, H, m, n, ...
