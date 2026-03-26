@@ -297,8 +297,123 @@ catch e
     fail_count = fail_count + 1;
 end
 
-%% ==================== 五、异常输入 ==================== %%
-fprintf('\n--- 5. 异常输入测试 ---\n\n');
+%% ==================== 五、符号映射联合测试 ==================== %%
+fprintf('\n--- 5. 与Modulation模块联合测试 ---\n\n');
+
+% 添加调制模块路径
+proj_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+addpath(fullfile(proj_root, 'Modulation', 'src', 'Matlab'));
+
+%% 5.1 QPSK全链路（映射→成形→上变频→下变频→匹配→软判决）
+try
+    rng(70);
+    fs = 48000; fc = 12000; sps = 8; rolloff = 0.35; span = 6;
+    bits_in = randi([0 1], 1, 400);    % 200个QPSK符号
+
+    % TX: 符号映射 → 成形 → DA → 上变频
+    [symbols, ~, ~] = qam_modulate(bits_in, 4, 'gray');
+    [shaped, ~, ~] = pulse_shape(symbols, sps, 'rrc', rolloff, span);
+    [da_out, ~] = da_convert(real(shaped), 14, 'quantize');
+    da_out_q = da_convert(imag(shaped), 14, 'quantize');
+    shaped_da = da_out + 1j * da_out_q;
+    [passband, ~] = upconvert(shaped_da, fs, fc);
+
+    % RX: AD → 下变频 → 匹配 → 判决
+    [ad_out, ~] = ad_convert(passband, 14, 'quantize');
+    bw = fs / sps;
+    [baseband, ~] = downconvert(ad_out, fs, fc, bw);
+    [filtered, ~] = match_filter(baseband, sps, 'rrc', rolloff, span);
+
+    % 搜索最优偏移 + 硬判决
+    best_ber = 1;
+    for d = 0:sps-1
+        idx = d+1 : sps : length(filtered);
+        n = min(length(idx), 200);
+        rx_sym = filtered(idx(1:n));
+        [bits_hard, ~] = qam_demodulate(rx_sym, 4, 'gray');
+        b = sum(bits_hard ~= bits_in(1:length(bits_hard))) / length(bits_hard);
+        if b < best_ber, best_ber = b; end
+    end
+    assert(best_ber < 0.15, 'QPSK全链路BER过高');
+
+    fprintf('[通过] 5.1 QPSK全链路 | 200符号, 14bit DA/AD, BER=%.1f%%\n', best_ber*100);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 5.1 QPSK全链路 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 5.2 16QAM成形+匹配（无变频，纯基带）
+try
+    rng(71);
+    sps = 8; rolloff = 0.25; span = 6;
+    bits_in = randi([0 1], 1, 800);    % 200个16QAM符号
+
+    % TX: 映射 → 成形
+    [symbols, ~, ~] = qam_modulate(bits_in, 16, 'gray');
+    [shaped, ~, ~] = pulse_shape(symbols, sps, 'rrc', rolloff, span);
+
+    % RX: 匹配 → 软判决
+    [filtered, ~] = match_filter(shaped, sps, 'rrc', rolloff, span);
+
+    best_ber = 1;
+    for d = 0:sps-1
+        idx = d+1 : sps : length(filtered);
+        n = min(length(idx), 200);
+        rx_sym = filtered(idx(1:n));
+        [bits_hard, ~] = qam_demodulate(rx_sym, 16, 'gray');
+        b = sum(bits_hard ~= bits_in(1:length(bits_hard))) / length(bits_hard);
+        if b < best_ber, best_ber = b; end
+    end
+    assert(best_ber == 0, '基带16QAM回环BER应为0');
+
+    fprintf('[通过] 5.2 16QAM基带回环 | 200符号, BER=0\n');
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 5.2 16QAM基带回环 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 5.3 MFSK+FSK波形生成+频率检测回环
+try
+    rng(72);
+    addpath(fullfile(proj_root, 'SpreadSpectrum', 'src', 'Matlab'));
+
+    M = 4; f0 = 2000; spacing = 200; fs = 16000; dur = 0.02;
+    bits_in = randi([0 1], 1, 40);     % 20个4-FSK符号
+
+    % TX: MFSK映射 → FSK波形
+    [freq_idx, ~, ~] = mfsk_modulate(bits_in, M, 'gray');
+    [waveform, ~, freqs] = gen_fsk_waveform(freq_idx, M, f0, spacing, fs, dur);
+
+    % RX: 逐符号FFT频率检测 → MFSK解映射
+    samples_per_sym = round(dur * fs);
+    detected_idx = zeros(1, 20);
+    for s = 1:20
+        seg = waveform((s-1)*samples_per_sym+1 : s*samples_per_sym);
+        % 各频率的能量
+        energies = zeros(1, M);
+        for k = 1:M
+            ref = cos(2*pi*freqs(k)*(0:samples_per_sym-1)/fs);
+            energies(k) = abs(sum(seg .* ref))^2;
+        end
+        [~, best_k] = max(energies);
+        detected_idx(s) = best_k - 1;
+    end
+    bits_out = mfsk_demodulate(detected_idx, M, 'gray');
+    ber = sum(bits_out ~= bits_in) / length(bits_in);
+
+    assert(ber == 0, 'MFSK+FSK波形回环解码错误');
+
+    fprintf('[通过] 5.3 MFSK+FSK波形回环 | 4-FSK, 20符号, BER=0\n');
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 5.3 MFSK+FSK波形回环 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% ==================== 六、异常输入 ==================== %%
+fprintf('\n--- 6. 异常输入测试 ---\n\n');
 
 try
     caught = 0;
@@ -312,10 +427,10 @@ try
 
     assert(caught == 7, '部分函数未对空输入报错');
 
-    fprintf('[通过] 5.1 空输入拒绝 | 7个函数均正确报错\n');
+    fprintf('[通过] 6.1 空输入拒绝 | 7个函数均正确报错\n');
     pass_count = pass_count + 1;
 catch e
-    fprintf('[失败] 5.1 空输入 | %s\n', e.message);
+    fprintf('[失败] 6.1 空输入 | %s\n', e.message);
     fail_count = fail_count + 1;
 end
 
