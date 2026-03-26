@@ -343,33 +343,43 @@ catch e
     fail_count = fail_count + 1;
 end
 
-%% 5.2 16QAM成形+匹配（无变频，纯基带）
+%% 5.2 16QAM成形+匹配（无变频，纯基带，跳过边缘）
 try
     rng(71);
     sps = 8; rolloff = 0.25; span = 6;
-    bits_in = randi([0 1], 1, 800);    % 200个16QAM符号
+    bps = 4;                           % 16QAM = 4 bit/符号
+    num_sym = 300;                     % 多生成一些，只检验中间段
+    margin = span + 2;                 % 跳过首尾边缘符号数
+    bits_in = randi([0 1], 1, num_sym * bps);
 
     % TX: 映射 → 成形
     [symbols, ~, ~] = qam_modulate(bits_in, 16, 'gray');
     [shaped, ~, ~] = pulse_shape(symbols, sps, 'rrc', rolloff, span);
 
-    % RX: 匹配 → AGC归一化 → 判决
+    % RX: 匹配 → 取中间段 → AGC → 判决
     [filtered, ~] = match_filter(shaped, sps, 'rrc', rolloff, span);
 
     best_ber = 1;
     for d = 0:sps-1
         idx = d+1 : sps : length(filtered);
-        n = min(length(idx), 200);
-        rx_sym = filtered(idx(1:n));
-        % AGC: 归一化到与发端星座相同的单位平均功率
+        n = min(length(idx), num_sym);
+        if n <= 2*margin, continue; end
+
+        % 取中间段，跳过边缘
+        rx_sym = filtered(idx(margin+1 : n-margin));
         rx_sym = rx_sym / sqrt(mean(abs(rx_sym).^2));
+
+        valid_bits_start = margin * bps + 1;
+        valid_bits_end = (n - margin) * bps;
+        bits_valid = bits_in(valid_bits_start : valid_bits_end);
+
         [bits_hard, ~] = qam_demodulate(rx_sym, 16, 'gray');
-        b = sum(bits_hard ~= bits_in(1:length(bits_hard))) / length(bits_hard);
+        b = sum(bits_hard ~= bits_valid) / length(bits_valid);
         if b < best_ber, best_ber = b; end
     end
-    assert(best_ber == 0, '基带16QAM回环BER应为0');
+    assert(best_ber == 0, '基带16QAM中间段BER应为0');
 
-    fprintf('[通过] 5.2 16QAM基带回环 | 200符号, BER=0\n');
+    fprintf('[通过] 5.2 16QAM基带回环 | 中间%d符号, BER=0\n', num_sym - 2*margin);
     pass_count = pass_count + 1;
 catch e
     fprintf('[失败] 5.2 16QAM基带回环 | %s\n', e.message);
