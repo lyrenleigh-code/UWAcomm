@@ -34,7 +34,7 @@ if mod(length(received), n) ~= 0
 end
 
 %% ========== 3. 构造校验矩阵H ========== %%
-[~, H] = hamming_encode(zeros(1, k), r);
+[~, ~, H] = hamming_encode(zeros(1, k), r);
 
 %% ========== 4. 分块译码 ========== %%
 num_blocks = length(received) / n;
