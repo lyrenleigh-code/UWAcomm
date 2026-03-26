@@ -56,7 +56,10 @@ end
 H = build_ldpc_H(n, m, H_seed);
 
 %% ========== 4. 高斯消元化为系统形式，求生成矩阵G ========== %%
-G = build_generator_from_H(H, n, k, m);
+[G, col_perm] = build_generator_from_H(H, n, k, m);
+
+% 对H做相同的列重排，使前k列为信息位，后m列为校验位
+H = H(:, col_perm);
 
 %% ========== 5. 分块编码 ========== %%
 num_blocks = length(message) / k;
@@ -112,7 +115,7 @@ rng(rng_state);
 end
 
 % --------------- 辅助函数2：从H矩阵通过高斯消元求G矩阵 --------------- %
-function G = build_generator_from_H(H, n, k, m)
+function [G, col_perm] = build_generator_from_H(H, n, k, m)
 % BUILD_GENERATOR_FROM_H 通过GF(2)高斯消元将H化为系统形式，求生成矩阵G
 % 输入参数：
 %   H - m x n 校验矩阵
@@ -120,11 +123,11 @@ function G = build_generator_from_H(H, n, k, m)
 %   k - 信息位长度
 %   m - 校验位长度
 % 输出参数：
-%   G - k x n 生成矩阵，系统形式 [I_k | P']
+%   G        - k x n 生成矩阵，系统形式 [I_k | P']
+%   col_perm - 列重排索引 (1xn)，info列在前k位，parity列在后m位
 
-% 对H做列主元高斯消元，将其化为 [A | I_m] 形式
-% 为此对 [H | I_m] 做行变换
-H_aug = [H, eye(m)];
+% 对H做列主元高斯消元
+H_aug = H;
 col_order = 1:n;                       % 记录列交换
 
 for i = 1:m
@@ -162,22 +165,18 @@ for i = 1:m
     end
 end
 
-% 从消元结果提取系统形式
-% col_order 的前m列对应校验位，剩余k列对应信息位
+% col_order前m个为主元列(校验位)，后k个为自由列(信息位)
 parity_cols = col_order(1:m);
 info_cols = col_order(m+1:n);
 
-% 提取 P 矩阵：H 系统形式下 [I_m | P] 中的 P
-% 对消元后的H按列重排
-H_rearranged = H_aug(:, [info_cols, parity_cols]);
+% 列重排：信息列在前，校验列在后
+col_perm = [info_cols, parity_cols];
+
+% 提取P矩阵：对消元后的H_aug按[info, parity]顺序取列
+H_rearranged = H_aug(:, col_perm);
 P = H_rearranged(:, 1:k);             % m x k 矩阵
 
-% 生成矩阵 G = [I_k | P'] (按原始列顺序重排)
-G_sys = [eye(k), P.'];                % k x n 系统形式
-
-% 将列顺序恢复到原始顺序
-G = zeros(k, n);
-G(:, info_cols) = G_sys(:, 1:k);
-G(:, parity_cols) = G_sys(:, k+1:n);
+% 生成矩阵 G = [I_k | P']，标准系统形式
+G = [eye(k), P.'];
 
 end
