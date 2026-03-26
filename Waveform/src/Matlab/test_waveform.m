@@ -424,6 +424,48 @@ catch e
     fail_count = fail_count + 1;
 end
 
+%% 5.4 64QAM基带回环（高阶调制验证）
+try
+    rng(73);
+    sps = 8; rolloff = 0.25; span = 6;
+    bps = 6;                           % 64QAM = 6 bit/符号
+    num_sym = 400;
+    margin = span + 2;
+    bits_in = randi([0 1], 1, num_sym * bps);
+
+    % TX: 映射 → 成形
+    [symbols, ~, ~] = qam_modulate(bits_in, 64, 'gray');
+    [shaped, ~, ~] = pulse_shape(symbols, sps, 'rrc', rolloff, span);
+
+    % RX: 匹配 → 取中间段 → AGC → 判决
+    [filtered, ~] = match_filter(shaped, sps, 'rrc', rolloff, span);
+
+    best_ber = 1;
+    for d = 0:sps-1
+        idx = d+1 : sps : length(filtered);
+        n = min(length(idx), num_sym);
+        if n <= 2*margin, continue; end
+
+        rx_sym = filtered(idx(margin+1 : n-margin));
+        rx_sym = rx_sym / sqrt(mean(abs(rx_sym).^2));
+
+        valid_bits_start = margin * bps + 1;
+        valid_bits_end = (n - margin) * bps;
+        bits_valid = bits_in(valid_bits_start : valid_bits_end);
+
+        [bits_hard, ~] = qam_demodulate(rx_sym, 64, 'gray');
+        b = sum(bits_hard ~= bits_valid) / length(bits_valid);
+        if b < best_ber, best_ber = b; end
+    end
+    assert(best_ber == 0, '基带64QAM中间段BER应为0');
+
+    fprintf('[通过] 5.4 64QAM基带回环 | 中间%d符号, BER=0\n', num_sym - 2*margin);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 5.4 64QAM基带回环 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
 %% ==================== 六、异常输入 ==================== %%
 fprintf('\n--- 6. 异常输入测试 ---\n\n');
 
