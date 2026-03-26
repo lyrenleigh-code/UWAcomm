@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>水声通信算法模块化框架 v2.0</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "SimHei", sans-serif;
+    background: #f0f4f8;
+    color: #1a2a3a;
+    padding: 32px;
+  }
+  h1 { text-align: center; font-size: 26px; margin-bottom: 8px; color: #0d2137; }
+  .subtitle { text-align: center; font-size: 14px; color: #667; margin-bottom: 8px; }
+  .version-badge { text-align: center; font-size: 12px; margin-bottom: 36px; }
+  .version-badge span { background: #2a6cb8; color: #fff; border-radius: 12px; padding: 3px 14px; margin-right: 8px; }
+  .version-badge span.new-tag { background: #c0390a; }
+
+  /* Adjustment Notice */
+  .adjust-banner { background: #fff8e1; border: 1.5px solid #c89520; border-radius: 10px; padding: 18px 24px; margin-bottom: 32px; }
+  .adjust-banner h4 { font-size: 14px; color: #8a5e00; margin-bottom: 10px; }
+  .adjust-banner h4::before { content: '⚠  '; }
+  .adjust-list { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 32px; font-size: 12px; color: #6a4800; }
+  .adjust-list li { list-style: none; padding-left: 18px; position: relative; line-height: 1.7; }
+  .adjust-list li.adj-add::before { content: '+'; position:absolute;left:0;color:#2a8a4a;font-weight:bold; }
+  .adjust-list li.adj-mod::before { content: '✎'; position:absolute;left:0;color:#2a6cb8;font-weight:bold; }
+  .adjust-list li.adj-split::before { content: '⑂'; position:absolute;left:0;color:#8a2ab8;font-weight:bold; }
+
+  .section-title { font-size: 18px; font-weight: bold; margin: 32px 0 18px 0; padding-left: 12px; border-left: 4px solid #2a6cb8; color: #1a3a5c; }
+
+  /* Framework layout */
+  .framework { display: flex; align-items: stretch; justify-content: center; gap: 24px; margin-bottom: 40px; }
+  .chain { display: flex; flex-direction: column; align-items: center; gap: 0; min-width: 290px; }
+  .chain-label { font-size: 16px; font-weight: bold; padding: 10px 36px; border-radius: 8px; margin-bottom: 12px; letter-spacing: 2px; }
+  .tx-label { background: #2a6cb8; color: #fff; }
+  .rx-label { background: #b85c2a; color: #fff; }
+
+  .module { width: 272px; padding: 10px 14px; border-radius: 6px; text-align: center; font-size: 14px; font-weight: 500; border: 2px solid; position: relative; line-height: 1.4; }
+  .module .num { position: absolute; left: -14px; top: 50%; transform: translateY(-50%); width: 28px; height: 28px; border-radius: 50%; font-size: 11px; font-weight: bold; display: flex; align-items: center; justify-content: center; color: #fff; }
+  .module .detail { font-size: 11px; color: #556; font-weight: normal; margin-top: 2px; }
+  .module .detail-new { font-size: 11px; color: #1a6a3a; font-weight: normal; margin-top: 2px; font-style: italic; }
+
+  .mod-req    { background: #e8f0fb; border-color: #2a6cb8; }
+  .mod-req .num { background: #2a6cb8; }
+  .mod-req-rx { background: #fbeee8; border-color: #b85c2a; }
+  .mod-req-rx .num { background: #b85c2a; }
+  .mod-opt    { background: #fff8e1; border-color: #c89520; border-style: dashed; }
+  .mod-opt .num { background: #c89520; }
+  .mod-opt-rx { background: #fff8e1; border-color: #c89520; border-style: dashed; }
+  .mod-opt-rx .num { background: #c89520; }
+  .mod-rxonly { background: #e8f8ee; border-color: #2a8a4a; border-style: dotted; border-width: 2px; }
+  .mod-rxonly .num { background: #2a8a4a; }
+  .mod-new-arr { background: #f0e8fb; border-color: #7a2ab8; border-style: dashed; border-width: 2px; }
+  .mod-new-arr .num { background: #7a2ab8; }
+  .mod-new-iter { background: #e8faf5; border-color: #1a8a6a; border-style: dashed; border-width: 2px; }
+  .mod-new-iter .num { background: #1a8a6a; }
+
+  .badge-new { display:inline-block; background:#c0390a; color:#fff; font-size:9px; padding:1px 5px; border-radius:4px; margin-left:5px; vertical-align:middle; font-weight:bold; }
+  .badge-mod { display:inline-block; background:#2a6cb8; color:#fff; font-size:9px; padding:1px 5px; border-radius:4px; margin-left:5px; vertical-align:middle; font-weight:bold; }
+
+  .arrow-down { width:2px; height:18px; background:#8899aa; position:relative; }
+  .arrow-down::after { content:''; position:absolute; bottom:-5px; left:-4px; border-left:5px solid transparent; border-right:5px solid transparent; border-top:6px solid #8899aa; }
+  .arrow-arr { width:2px; height:18px; background:#7a2ab8; position:relative; }
+  .arrow-arr::after { content:''; position:absolute; bottom:-5px; left:-4px; border-left:5px solid transparent; border-right:5px solid transparent; border-top:6px solid #7a2ab8; }
+  .arrow-iter { width:2px; height:18px; background:#1a8a6a; position:relative; }
+  .arrow-iter::after { content:''; position:absolute; bottom:-5px; left:-4px; border-left:5px solid transparent; border-right:5px solid transparent; border-top:6px solid #1a8a6a; }
+
+  .channel-block { display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:160px; }
+  .channel-box { width:140px; padding:20px 12px; background:linear-gradient(135deg,#1a4a7a,#2a6cb8); color:#fff; border-radius:12px; text-align:center; font-size:15px; font-weight:bold; letter-spacing:1px; box-shadow:0 4px 16px rgba(42,108,184,0.3); }
+  .channel-box .ch-detail { font-size:11px; font-weight:normal; opacity:0.85; margin-top:8px; line-height:1.5; }
+  .channel-arrow { font-size:28px; color:#2a6cb8; margin:8px 0; }
+
+  /* Legend */
+  .legend { display:flex; gap:18px; justify-content:center; margin:20px 0 32px 0; flex-wrap:wrap; }
+  .legend-item { display:flex; align-items:center; gap:8px; font-size:12px; }
+  .legend-box { width:34px; height:18px; border-radius:4px; border:2px solid; }
+  .lg-req    { background:#e8f0fb; border-color:#2a6cb8; }
+  .lg-opt    { background:#fff8e1; border-color:#c89520; border-style:dashed; }
+  .lg-rxonly { background:#e8f8ee; border-color:#2a8a4a; border-style:dotted; }
+  .lg-arr    { background:#f0e8fb; border-color:#7a2ab8; border-style:dashed; }
+  .lg-iter   { background:#e8faf5; border-color:#1a8a6a; border-style:dashed; }
+
+  /* Config cards */
+  .configs { display:flex; flex-direction:column; gap:20px; margin-top:20px; }
+  .config-card { background:#fff; border-radius:10px; padding:18px 22px; box-shadow:0 2px 10px rgba(0,0,0,0.07); border-left:5px solid; }
+  .config-card h3 { font-size:16px; margin-bottom:3px; }
+  .config-card .config-sub { font-size:12px; color:#778; margin-bottom:12px; }
+  .config-flow { display:flex; flex-wrap:nowrap; align-items:center; gap:4px; font-size:12px; padding:6px 0; overflow-x:auto; }
+  .config-flow .cf-block { padding:5px 9px; border-radius:5px; font-weight:500; white-space:nowrap; font-size:11.5px; }
+  .cf-on       { background:#e0edfa; color:#1a4a7a; border:1px solid #a0c4e8; }
+  .cf-on-rx    { background:#fbe8e0; color:#7a2a1a; border:1px solid #e8b0a0; }
+  .cf-rxonly   { background:#e0f5e8; color:#1a6a3a; border:1px solid #a0d8b8; font-style:italic; }
+  .cf-off      { background:#f0f0f0; color:#aab; border:1px solid #ddd; text-decoration:line-through; }
+  .cf-special  { background:#fff3d0; color:#7a5a00; border:1px solid #e0c870; }
+  .cf-special-rx { background:#fff3d0; color:#7a5a00; border:1px solid #e0c870; }
+  .cf-arr      { background:#f0e8fb; color:#5a1a8a; border:1px solid #c0a0e8; font-style:italic; }
+  .cf-iter     { background:#e8faf5; color:#0a5a3a; border:1px solid #90d0b8; font-style:italic; }
+  .cf-arrow    { color:#99a; font-size:13px; flex-shrink:0; }
+  .cf-arrow-arr { color:#7a2ab8; font-size:13px; flex-shrink:0; }
+  .cf-channel  { background:#1a4a7a; color:#fff; border-radius:5px; padding:5px 12px; font-weight:bold; }
+  .flow-label  { font-size:11px; font-weight:bold; padding:4px 9px; border-radius:4px; margin-right:4px; white-space:nowrap; min-width:30px; text-align:center; flex-shrink:0; }
+  .fl-tx { background:#2a6cb8; color:#fff; }
+  .fl-rx { background:#b85c2a; color:#fff; }
+  .config-flow + .config-flow { margin-top:2px; border-top:1px dashed #e0e4e8; }
+  .iter-note { font-size:11px; color:#1a7a5a; padding:3px 10px 3px 18px; background:#e8faf5; border-left:3px solid #1a8a6a; border-radius:0 4px 4px 0; margin:3px 0 0 0; font-style:italic; }
+  .iter-note::before { content:'↻ '; font-style:normal; }
+
+  .cc-sc    { border-left-color:#2a6cb8; }
+  .cc-scfde { border-left-color:#1a7a5a; }
+  .cc-dsss  { border-left-color:#2a8a4a; }
+  .cc-ofdm  { border-left-color:#8a2ab8; }
+  .cc-otfs  { border-left-color:#c0390a; }
+  .cc-fh    { border-left-color:#c89520; }
+  .cc-arr   { border-left-color:#4a2ab8; border-style:dashed; }
+  .cc-sc h3    { color:#2a6cb8; }
+  .cc-scfde h3 { color:#1a7a5a; }
+  .cc-dsss h3  { color:#2a8a4a; }
+  .cc-ofdm h3  { color:#8a2ab8; }
+  .cc-otfs h3  { color:#c0390a; }
+  .cc-fh h3    { color:#c89520; }
+  .cc-arr h3   { color:#4a2ab8; }
+
+  /* Table */
+  .pair-table { width:100%; border-collapse:collapse; margin-top:20px; font-size:12px; }
+  .pair-table th { background:#1a3a5c; color:#fff; padding:8px 8px; text-align:center; font-weight:500; font-size:12px; }
+  .pair-table th.th-new  { background:#1a5a3a; }
+  .pair-table th.th-new2 { background:#6a1a4a; }
+  .pair-table td { padding:7px 8px; border-bottom:1px solid #e0e4e8; text-align:center; vertical-align:middle; }
+  .pair-table tr:nth-child(even) td { background:#f6f8fa; }
+  .pair-table .mod-name { text-align:left; font-weight:500; }
+  .check     { color:#2a8a4a; font-weight:bold; }
+  .cross     { color:#ccc; }
+  .variant   { color:#c89520; font-weight:bold; font-size:11px; }
+  .check-new { color:#c0390a; font-weight:bold; font-size:11px; }
+  .check-mod { color:#2a6cb8; font-weight:bold; font-size:11px; }
+  .td-new  { background:#f0faf5 !important; }
+  .td-new2 { background:#fdf0f8 !important; }
+
+  /* Adjustment cards */
+  .adj-section { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:20px; }
+  .adj-card { background:#fff; border-radius:10px; padding:16px 18px; box-shadow:0 2px 8px rgba(0,0,0,0.06); border-top:4px solid; }
+  .adj-card.ac-add   { border-top-color:#2a8a4a; }
+  .adj-card.ac-mod   { border-top-color:#2a6cb8; }
+  .adj-card.ac-split { border-top-color:#8a2ab8; }
+  .adj-card.ac-warn  { border-top-color:#c89520; }
+  .adj-card h4 { font-size:13px; margin-bottom:9px; }
+  .adj-card.ac-add  h4 { color:#1a6a3a; }
+  .adj-card.ac-mod  h4 { color:#1a4a7a; }
+  .adj-card.ac-split h4 { color:#6a1a9a; }
+  .adj-card.ac-warn  h4 { color:#8a6000; }
+  .adj-card ul { padding-left:16px; font-size:12px; line-height:1.85; color:#445; }
+  .adj-card code { background:#f0f0f0; padding:1px 4px; border-radius:3px; font-size:11px; font-family:monospace; color:#1a3a5c; }
+</style>
+</head>
+<body>
+
+<h1>水声通信算法模块化框架</h1>
+<p class="subtitle">12个编号模块 — 覆盖 SC-TDE / SC-FDE / DSSS / OFDM / OTFS / FH-MFSK + 阵列接收</p>
+<div class="version-badge">
+  <span>v1.0 模块1~9</span>
+  <span class="new-tag">v2.0 新增：模块10(多普勒) · 模块11(阵列预处理) · 模块12(迭代处理)</span>
+</div>
+
+<!-- Adjustment Notice -->
+<div class="adjust-banner">
+  <h4>v2.0 框架变更一览（对原框架的必要调整）</h4>
+  <ul class="adjust-list">
+    <li class="adj-split">OTFS 从 OFDM 卡拆分独立：两者模块6/7/8均不同，接收端均衡器完全不同，不可共用同一配置流程</li>
+    <li class="adj-add">新增模块11（阵列接收预处理）：插入 8' 同步之后，模块10多普勒之前；空时变采样重建或 DAS 波束形成，对下游透明</li>
+    <li class="adj-mod">模块10多普勒算法细化：按体制分别标注推荐算法（CP自相关/复自相关幅相联合/CAF等），OTFS 中可弱化</li>
+    <li class="adj-add">新增模块12（迭代处理）：SC-FDE 用 Turbo 软干扰消除，OTFS 用 MP 消息传递均衡器，插入 7' 之后</li>
+    <li class="adj-add">新增 SC-FDE 独立配置卡：区别于 SC-TDE（时域均衡），SC-FDE 使用分块CP、频域均衡、前/后导码测速</li>
+    <li class="adj-mod">对照表新增列：SC-FDE（绿色）、OTFS（红色）、阵列增强（紫色），并增加模块11和12两行</li>
+    <li class="adj-mod">SC-TDE 配置卡与 SC-FDE 分开展示，明确接收端均衡路径差异</li>
+    <li class="adj-add">新增 "阵列波束形成叠加配置" 说明卡（虚线边框），描述其作为前处理叠加在任意体制上的两种模式</li>
+  </ul>
+</div>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-box lg-req"></div>必选模块（所有体制）</div>
+  <div class="legend-item"><div class="legend-box lg-opt"></div>可选模块（按体制）</div>
+  <div class="legend-item"><div class="legend-box lg-rxonly"></div>接收端特有处理</div>
+  <div class="legend-item"><div class="legend-box lg-arr"></div>v2新增 模块11 阵列预处理</div>
+  <div class="legend-item"><div class="legend-box lg-iter"></div>v2新增 模块12 迭代均衡</div>
+</div>
+
+<!-- Section 1 -->
+<div class="section-title">一、通用框架：发射端 → 信道 → 接收端</div>
+
+<div class="framework">
+  <!-- TX -->
+  <div class="chain">
+    <div class="chain-label tx-label">发 射 端</div>
+    <div class="module mod-req"><span class="num">1</span>信源编码<div class="detail">数据压缩</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req"><span class="num">2</span>信道编码<div class="detail">Turbo / LDPC / 卷积码</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req"><span class="num">3</span>交织<div class="detail">打散突发错误</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req"><span class="num">4</span>符号映射<div class="detail">BPSK / QPSK / M-QAM / MFSK</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-opt"><span class="num">5</span>扩频<div class="detail">DSSS直扩 / FH跳频 / CSK</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-opt"><span class="num">6</span>多载波 / 多域变换<span class="badge-mod">拆分</span><div class="detail">OFDM: IFFT+CP</div><div class="detail-new">OTFS: ISFFT+Heisenberg（独立体制）</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req"><span class="num">7</span>导频插入<div class="detail">训练序列 / 频域导频</div><div class="detail-new">OTFS: DD域嵌入单脉冲导频+保护区</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req"><span class="num">8</span>同步序列插入 + 帧组装<div class="detail">LFM/HFM前导 + 保护间隔</div><div class="detail-new">SC-FDE: 前/后导码（测速）| OTFS: 整帧CP</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req"><span class="num">9</span>脉冲成形 / 上变频<div class="detail">基带 → 通带，DA转换，功放发射</div></div>
+  </div>
+
+  <!-- Channel -->
+  <div class="channel-block">
+    <div class="channel-arrow">→</div>
+    <div class="channel-box">水声信道<div class="ch-detail">多径展宽<br>时变衰落<br>Doppler扩展<br>环境噪声<br>人为干扰</div></div>
+    <div class="channel-arrow">→</div>
+  </div>
+
+  <!-- RX -->
+  <div class="chain">
+    <div class="chain-label rx-label">接 收 端</div>
+    <div class="module mod-req-rx"><span class="num" style="background:#b85c2a">9'</span>匹配滤波 / 下变频<div class="detail">通带 → 基带，AD采样</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req-rx"><span class="num" style="background:#b85c2a">8'</span>同步检测 + 帧解析<div class="detail">帧同步 / 定时同步 / 帧结构拆解</div></div>
+    <div class="arrow-arr"></div>
+    <div class="module mod-new-arr"><span class="num">11</span>阵列接收预处理<span class="badge-new">NEW</span><div class="detail-new">时延标定 → 空时变采样重建 → 等效 M·fs 高速率信号</div><div class="detail">可选，需多阵元；对下游模块透明</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-rxonly"><span class="num">10</span>多普勒估计与补偿<span class="badge-mod">细化</span><div class="detail">CAF / CP自相关 / 复自相关幅相联合 / Zoom-FFT</div><div class="detail-new">两步补偿：宽带重采样 → 残余CFO旋转 | OTFS可弱化</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req-rx"><span class="num" style="background:#b85c2a">7'</span>导频提取 → 信道估计与均衡<div class="detail">LS/OMP/SBL估计 + FDE均衡</div><div class="detail-new">OTFS: DD域嵌入导频估计稀疏路径 {h_i,l_i,k_i}</div></div>
+    <div class="arrow-iter"></div>
+    <div class="module mod-new-iter"><span class="num">12</span>迭代处理<span class="badge-new">NEW</span><div class="detail-new">SC-FDE: Turbo软干扰消除（SISO均衡 ⇌ BCJR译码）</div><div class="detail-new">OTFS: MP消息传递均衡（变量节点 ⇌ 观测节点）</div><div class="detail">可选；跳过则直接硬判决</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-opt-rx"><span class="num">6'</span>逆变换<div class="detail">OFDM: 去CP+FFT &nbsp; OTFS: Wigner+SFFT</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-opt-rx"><span class="num">5'</span>解扩<div class="detail">相关解扩 / 解跳频 / DCD/DED检测</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req-rx"><span class="num" style="background:#b85c2a">4'</span>符号判决<div class="detail">硬判决 / 软判决（LLR）</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req-rx"><span class="num" style="background:#b85c2a">3'</span>解交织</div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req-rx"><span class="num" style="background:#b85c2a">2'</span>信道解码<div class="detail">Turbo / LDPC / Viterbi译码</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req-rx"><span class="num" style="background:#b85c2a">1'</span>信源解码<div class="detail">数据还原 → BER / FER评估</div></div>
+  </div>
+</div>
+
+<!-- Section 2 -->
+<div class="section-title">二、各通信体制的模块选用</div>
+<div class="configs">
+
+  <!-- SC-TDE -->
+  <div class="config-card cc-sc">
+    <h3>单载波时域均衡 (SC-TDE)</h3>
+    <p class="config-sub">跳过模块5、6；接收端时域自适应均衡（LMS/RLS/DFE），无分块FFT结构</p>
+    <div class="config-flow">
+      <span class="flow-label fl-tx">TX</span>
+      <span class="cf-block cf-on">1 信源编码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">2 信道编码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">3 交织</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">4 符号映射</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">5 扩频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">6 多载波</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">7 导频插入</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">8 同步+帧组装</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">9 成形/上变频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-channel">信道</span>
+    </div>
+    <div class="config-flow">
+      <span class="flow-label fl-rx">RX</span>
+      <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
+      <span class="cf-block cf-rxonly">* 多普勒补偿</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">7' 导频→时域均衡(LMS/DFE)</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">2' 信道解码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">1' 信源解码</span>
+    </div>
+  </div>
+
+  <!-- SC-FDE (NEW) -->
+  <div class="config-card cc-scfde">
+    <h3>单载波频域均衡 (SC-FDE)<span class="badge-new">NEW v2.0</span></h3>
+    <p class="config-sub">跳过模块5、6；发射端分块加CP，插入前/后导码（测速用）；接收端分块FFT→MMSE均衡→IFFT；多普勒：复自相关幅相联合（前后导码）；可选Turbo迭代（†模块）</p>
+    <div class="config-flow">
+      <span class="flow-label fl-tx">TX</span>
+      <span class="cf-block cf-on">1 信源编码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">2 卷积/Turbo编码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">3 交织</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">4 QPSK/QAM映射</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">5 扩频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">6 多载波</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special">7 分块+CP+前/后导码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">8 同步+帧组装</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">9 成形/上变频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-channel">信道</span>
+    </div>
+    <div class="config-flow">
+      <span class="flow-label fl-rx">RX</span>
+      <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
+      <span class="cf-block cf-rxonly">* 复自相关幅相联合→重采样</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special-rx">7' 前导估计信道→块FFT→MMSE→IFFT</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-iter">12 Turbo迭代(可选,3~6次)</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">4' LLR软判决</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">2' Viterbi/BCJR译码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">1' 信源解码</span>
+    </div>
+    <div class="iter-note">Turbo迭代：SISO-MMSE均衡器（输出 L_e_eq）⇌ SISO信道译码器（BCJR，输出 L_e_dec），软干扰消除</div>
+  </div>
+
+  <!-- DSSS -->
+  <div class="config-card cc-dsss">
+    <h3>直接序列扩频 (DSSS / DS-CDMA)</h3>
+    <p class="config-sub">启用模块5(DSSS直扩)，跳过模块6</p>
+    <div class="config-flow">
+      <span class="flow-label fl-tx">TX</span>
+      <span class="cf-block cf-on">1 信源编码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">2 信道编码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">3 交织</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">4 符号映射</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special">5 DSSS扩频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">6 多载波</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">7 导频插入</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">8 同步+帧组装</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">9 成形/上变频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-channel">信道</span>
+    </div>
+    <div class="config-flow">
+      <span class="flow-label fl-rx">RX</span>
+      <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
+      <span class="cf-block cf-rxonly">* 多普勒补偿</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">7' 导频提取→估计&amp;均衡</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special-rx">5' 相关解扩</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">2' 信道解码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">1' 信源解码</span>
+    </div>
+  </div>
+
+  <!-- OFDM -->
+  <div class="config-card cc-ofdm">
+    <h3>正交频分复用 (OFDM)</h3>
+    <p class="config-sub">启用模块6(IFFT/FFT+CP)，跳过模块5；多普勒用"CP自相关"或"复自相关"估计，两步补偿（重采样+残余CFO），高速场景可加ICI矩阵补偿</p>
+    <div class="config-flow">
+      <span class="flow-label fl-tx">TX</span>
+      <span class="cf-block cf-on">1 信源编码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">2 信道编码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">3 交织</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">4 QAM映射</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">5 扩频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special">6 IFFT+CP插入</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">7 频域导频插入</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">8 前导码+帧组装</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">9 成形/上变频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-channel">信道</span>
+    </div>
+    <div class="config-flow">
+      <span class="flow-label fl-rx">RX</span>
+      <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
+      <span class="cf-block cf-rxonly">* 重采样+残余CFO补偿</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special-rx">6' 去CP+FFT</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">7' 导频→LS信道估计→FDE均衡</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">2' 信道解码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">1' 信源解码</span>
+    </div>
+  </div>
+
+  <!-- OTFS (NEW) -->
+  <div class="config-card cc-otfs">
+    <h3>正交时频空调制 (OTFS)<span class="badge-new">NEW v2.0</span></h3>
+    <p class="config-sub">模块6变体：ISFFT+Heisenberg（发）/ Wigner+SFFT（收）；模块7：DD域嵌入单脉冲导频+保护区；模块†：MP消息传递均衡器（必选）；多普勒在DD域天然处理，*模块可弱化</p>
+    <div class="config-flow">
+      <span class="flow-label fl-tx">TX</span>
+      <span class="cf-block cf-on">1 信源编码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">2 信道编码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">3 交织</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">4 QAM映射</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">5 扩频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special">6 ISFFT+Heisenberg(N×M格点)</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special">7 DD域嵌入导频+保护区</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">8 整帧CP+帧组装</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">9 成形/上变频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-channel">信道</span>
+    </div>
+    <div class="config-flow">
+      <span class="flow-label fl-rx">RX</span>
+      <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">8' 去整帧CP+帧解析</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
+      <span class="cf-block cf-rxonly">* 多普勒(可弱化)</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special-rx">6' Wigner变换+SFFT→DD域</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special-rx">7' DD域嵌入导频→稀疏路径估计</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-iter">12 MP均衡器(BP迭代,10~30次)</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">4' LLR软判决</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">2' 信道解码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">1' 信源解码</span>
+    </div>
+    <div class="iter-note">MP均衡器：DD域稀疏因子图，高斯近似消息传递，复杂度 O(P·NM·|X|)，P为路径数（典型3~5）</div>
+  </div>
+
+  <!-- FH-MFSK -->
+  <div class="config-card cc-fh">
+    <h3>跳频多频移键控 (FH-MFSK)</h3>
+    <p class="config-sub">模块4变体(MFSK) + 模块5变体(跳频)，跳过模块6</p>
+    <div class="config-flow">
+      <span class="flow-label fl-tx">TX</span>
+      <span class="cf-block cf-on">1 信源编码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">2 信道编码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">3 交织</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special">4 MFSK映射</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special">5 FH跳频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">6 多载波</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">7 导频插入</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">8 同步+帧组装</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on">9 成形/上变频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-channel">信道</span>
+    </div>
+    <div class="config-flow">
+      <span class="flow-label fl-rx">RX</span>
+      <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
+      <span class="cf-block cf-rxonly">* 多普勒补偿</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">7' 导频提取→估计&amp;均衡</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special-rx">5' 解跳频</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special-rx">4' 能量检测</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">2' 信道解码</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">1' 信源解码</span>
+    </div>
+  </div>
+
+  <!-- Array BF overlay -->
+  <div class="config-card cc-arr">
+    <h3>阵列波束形成增强接收（叠加配置）<span class="badge-new">NEW v2.0</span></h3>
+    <p class="config-sub">不独立成体制，而是作为 模块11前处理叠加在上述任意体制之上；输出单路高质量复基带信号，下游流程无需改动</p>
+    <div class="config-flow">
+      <span class="flow-label fl-rx">模式A</span>
+      <span class="cf-block cf-arr">M路ADC采样 R[m,n]</span><span class="cf-arrow-arr">→</span>
+      <span class="cf-block cf-arr">时延标定 bf_delay_calibration</span><span class="cf-arrow-arr">→</span>
+      <span class="cf-block cf-arr">空时变采样排序+三次样条重建</span><span class="cf-arrow-arr">→</span>
+      <span class="cf-block cf-arr">等效采样率 ≈ M·fs</span><span class="cf-arrow-arr">→</span>
+      <span class="cf-block cf-rxonly">* 高精度多普勒估计（CRLB降低M²倍）</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">进入标准接收流程</span>
+    </div>
+    <div class="config-flow">
+      <span class="flow-label fl-rx">模式B</span>
+      <span class="cf-block cf-arr">M路ADC采样 R[m,n]</span><span class="cf-arrow-arr">→</span>
+      <span class="cf-block cf-arr">DAS波束形成（时延对齐+相位补偿）</span><span class="cf-arrow-arr">→</span>
+      <span class="cf-block cf-arr">SNR提升 ≈ 10·log₁₀(M) dB</span><span class="cf-arrow-arr">→</span>
+      <span class="cf-block cf-rxonly">* 标准多普勒估计（低SNR场景适用）</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-on-rx">进入标准接收流程</span>
+    </div>
+  </div>
+
+</div>
+
+<!-- Section 3: Table -->
+<div class="section-title">三、模块使用对照表</div>
+<table class="pair-table">
+  <thead>
+    <tr>
+      <th style="width:30px">#</th>
+      <th style="text-align:left">发射端模块</th>
+      <th style="text-align:left">接收端模块</th>
+      <th>SC-TDE</th>
+      <th class="th-new">SC-FDE</th>
+      <th>DSSS</th>
+      <th>OFDM</th>
+      <th class="th-new">OTFS</th>
+      <th>FH-MFSK</th>
+      <th class="th-new2">阵列增强</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td><td class="mod-name">信源编码</td><td class="mod-name">信源解码</td>
+      <td><span class="check">✓</span></td><td class="td-new"><span class="check">✓</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td class="td-new"><span class="check">✓</span></td><td><span class="check">✓</span></td><td class="td-new2">叠加</td>
+    </tr>
+    <tr>
+      <td>2</td><td class="mod-name">信道编码</td><td class="mod-name">信道解码</td>
+      <td><span class="check">✓</span></td><td class="td-new"><span class="check-new">Turbo/卷积</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td class="td-new"><span class="check">✓</span></td><td><span class="check">✓</span></td><td class="td-new2">叠加</td>
+    </tr>
+    <tr>
+      <td>3</td><td class="mod-name">交织</td><td class="mod-name">解交织</td>
+      <td><span class="check">✓</span></td><td class="td-new"><span class="check">✓</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td class="td-new"><span class="check">✓</span></td><td><span class="check">✓</span></td><td class="td-new2">叠加</td>
+    </tr>
+    <tr>
+      <td>4</td><td class="mod-name">符号映射</td><td class="mod-name">符号判决</td>
+      <td><span class="check">✓</span> PSK/QAM</td><td class="td-new"><span class="check">✓</span> QPSK/QAM</td><td><span class="check">✓</span> BPSK</td><td><span class="check">✓</span> QAM</td><td class="td-new"><span class="check">✓</span> QAM</td><td><span class="variant">MFSK</span></td><td class="td-new2">叠加</td>
+    </tr>
+    <tr>
+      <td>5</td><td class="mod-name">扩频</td><td class="mod-name">解扩</td>
+      <td><span class="cross">—</span></td><td class="td-new"><span class="cross">—</span></td><td><span class="check">✓</span> DSSS</td><td><span class="cross">—</span></td><td class="td-new"><span class="cross">—</span></td><td><span class="variant">FH跳频</span></td><td class="td-new2">—</td>
+    </tr>
+    <tr>
+      <td>6</td><td class="mod-name">多载波/多域变换</td><td class="mod-name">逆变换</td>
+      <td><span class="cross">—</span></td><td class="td-new"><span class="cross">—</span></td><td><span class="cross">—</span></td><td><span class="check">✓</span> IFFT/FFT</td><td class="td-new"><span class="check-new">ISFFT+Heis.<br>/Wigner+SFFT</span></td><td><span class="cross">—</span></td><td class="td-new2">—</td>
+    </tr>
+    <tr>
+      <td>7</td><td class="mod-name">导频插入</td><td class="mod-name">导频提取→信道估计均衡</td>
+      <td><span class="check">✓</span></td><td class="td-new"><span class="check-new">前导码块<br>LS+截断去噪</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span> LS+插值</td><td class="td-new"><span class="check-new">DD嵌入导频<br>稀疏路径估计</span></td><td><span class="check">✓</span></td><td class="td-new2">叠加</td>
+    </tr>
+    <tr>
+      <td>8</td><td class="mod-name">同步序列+帧组装</td><td class="mod-name">同步检测+帧解析</td>
+      <td><span class="check">✓</span></td><td class="td-new"><span class="check-new">前+后导码<br>分块CP结构</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td class="td-new"><span class="check-new">整帧CP<br>(覆盖所有时延)</span></td><td><span class="check">✓</span></td><td class="td-new2">叠加</td>
+    </tr>
+    <tr>
+      <td>9</td><td class="mod-name">脉冲成形/上变频</td><td class="mod-name">匹配滤波/下变频</td>
+      <td><span class="check">✓</span></td><td class="td-new"><span class="check">✓</span></td><td><span class="check">✓</span></td><td><span class="check">✓</span></td><td class="td-new"><span class="check">✓</span></td><td><span class="check">✓</span></td><td class="td-new2">叠加</td>
+    </tr>
+    <tr>
+      <td>10</td>
+      <td class="mod-name" style="color:#2a8a4a">（无发端对应）</td>
+      <td class="mod-name" style="color:#2a8a4a">多普勒估计与补偿</td>
+      <td><span class="check">✓</span><br>xcorr</td>
+      <td class="td-new"><span class="check-new">复自相关<br>幅相联合</span></td>
+      <td><span class="check">✓</span></td>
+      <td><span class="check">✓</span><br>CP自相关<br>+两步补偿</td>
+      <td class="td-new"><span class="check-new">可弱化<br>(DD天然)</span></td>
+      <td><span class="check">✓</span></td>
+      <td class="td-new2">精度提升<br>M²倍</td>
+    </tr>
+    <tr>
+      <td>11</td>
+      <td class="mod-name" style="color:#7a2ab8">（无，RX专有）</td>
+      <td class="mod-name" style="color:#7a2ab8">阵列接收预处理 <span class="badge-new">NEW</span></td>
+      <td><span class="cross">—</span></td>
+      <td class="td-new"><span class="check-new">可叠加</span></td>
+      <td><span class="cross">—</span></td>
+      <td><span class="check-mod">可叠加</span></td>
+      <td class="td-new"><span class="check-new">可叠加</span></td>
+      <td><span class="cross">—</span></td>
+      <td class="td-new2"><span class="check-new">✓ 核心</span></td>
+    </tr>
+    <tr>
+      <td>12</td>
+      <td class="mod-name" style="color:#1a8a6a">（无，RX专有）</td>
+      <td class="mod-name" style="color:#1a8a6a">迭代处理 <span class="badge-new">NEW</span></td>
+      <td><span class="cross">—</span></td>
+      <td class="td-new"><span class="check-new">Turbo均衡<br>可选</span></td>
+      <td><span class="cross">—</span></td>
+      <td><span class="cross">—</span></td>
+      <td class="td-new"><span class="check-new">MP均衡器<br>必选</span></td>
+      <td><span class="cross">—</span></td>
+      <td class="td-new2">体制相关</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- Section 4: Adjustment Notes -->
+<div class="section-title">四、框架适配说明与关键调整点</div>
+<div class="adj-section">
+
+  <div class="adj-card ac-split">
+    <h4>⑂ OTFS 必须从 OFDM 拆分的原因</h4>
+    <ul>
+      <li>模块6完全不同：OFDM 用 IFFT/FFT，OTFS 用 ISFFT+Heisenberg（发）/ Wigner+SFFT（收）</li>
+      <li>模块7完全不同：OFDM 频域子载波导频 vs OTFS DD域嵌入单脉冲导频+保护区</li>
+      <li>模块8有差异：OTFS 用整帧 CP（长度≥τ_max·fs），而非每符号 CP</li>
+      <li>均衡器完全不同：OTFS 估计稀疏路径 {h_i, l_i, k_i}，使用 MP 均衡器（模块12）</li>
+      <li>多普勒处理方式根本不同：OTFS 在 DD 域直接分辨路径多普勒，模块10可弱化</li>
+      <li>对应 MATLAB 文件：<code>gen_otfs_signal.m</code>、<code>ch_est_otfs.m</code>、<code>mp_detector.m</code></li>
+    </ul>
+  </div>
+
+  <div class="adj-card ac-add">
+    <h4>+ 新模块 ** 阵列预处理的定位与约束</h4>
+    <ul>
+      <li>插入位置：8'（同步）之后，*（多普勒）之前；对下游完全透明</li>
+      <li>模式A（精度优先）：空时变采样重建，等效采样率提升至 M·fs，CRLB 降低 M² 倍</li>
+      <li>模式B（SNR优先）：DAS波束形成，SNR 提升约 10log₁₀(M) dB</li>
+      <li>精度要求：阵元时延标定误差须 &lt; Ts/(2M)，否则等效采样率提升失效</li>
+      <li>MATLAB：<code>bf_delay_calibration.m</code>、<code>bf_nonuniform_resample.m</code>、<code>bf_conventional.m</code></li>
+    </ul>
+  </div>
+
+  <div class="adj-card ac-add">
+    <h4>+ 新模块 † 迭代处理的两种形态</h4>
+    <ul>
+      <li><b>SC-FDE Turbo</b>：SISO-MMSE均衡器 ⇌ SISO信道译码器（BCJR），外信息交换，迭代3~6次</li>
+      <li><b>OTFS MP</b>：稀疏因子图上置信传播（BP），每路径仅连接 P 个节点，迭代10~30次</li>
+      <li>Turbo 均衡须配合系统码（Turbo或卷积），不适用于无编码或非系统码场景</li>
+      <li>MP 均衡器对 OTFS 是必选；分数多普勒时需加窗或虚拟格点扩展</li>
+      <li>MATLAB：<code>turbo_equalizer.m</code>、<code>mp_detector.m</code></li>
+    </ul>
+  </div>
+
+  <div class="adj-card ac-mod">
+    <h4>✎ 多普勒模块（*）的体制专用算法</h4>
+    <ul>
+      <li><b>SC-TDE / SC-FDE</b>：复自相关幅相联合（前后导码），两步：幅度粗估→相位精估+解模糊</li>
+      <li><b>OFDM</b>：CP自相关（低开销）+ 两步补偿（重采样→残余CFO旋转）；高速加ICI矩阵</li>
+      <li><b>OTFS</b>：* 可弱化；粗对齐用前导码CAF；精细多普勒由DD域路径估计自动完成</li>
+      <li><b>阵列增强后</b>：任意体制的 * 模块精度提升 M² 倍（CRLB意义）</li>
+      <li>原框架描述"HFM+ARD/PLL"仅适用于SC-TDE，需按上述各体制分别配置</li>
+    </ul>
+  </div>
+
+  <div class="adj-card ac-warn">
+    <h4>⚠ SC-TDE 与 SC-FDE 的关键区别</h4>
+    <ul>
+      <li>发射端完全相同，区别仅在接收端均衡器结构</li>
+      <li>SC-TDE：7' 为时域 LMS/RLS/DFE，无 FFT，适合短延时信道</li>
+      <li>SC-FDE：7' 为分块FFT→MMSE→IFFT，PAPR 低（~3 dB），适合长延时信道</li>
+      <li>SC-FDE 的多普勒估计专用前/后导码占用帧开销，SC-TDE 无此需求</li>
+      <li>参数文件应分开：<code>sys_params_sctde.m</code> vs <code>sys_params_scfde.m</code></li>
+    </ul>
+  </div>
+
+  <div class="adj-card ac-warn">
+    <h4>⚠ OTFS 特殊实现约束</h4>
+    <ul>
+      <li>CP 必须是整帧 CP，须覆盖所有时延 + 保护</li>
+      <li>保护区尺寸：guard_l ≥ ⌈τ_max·M·Δf⌉，guard_k ≥ ⌈|α|_max·fc·N·T_sym⌉+2</li>
+      <li>分数多普勒（k_i 非整数）时需加发射端窗函数或扩展虚拟格点</li>
+      <li>MP 均衡器复杂度 O(P·NM·|X|)，需评估实时性；可用带阻尼的迭代版本提升稳定性</li>
+      <li><code>get_data_indices.m</code> 须自行实现（返回去掉导频+保护区的数据格点索引）</li>
+    </ul>
+  </div>
+
+</div>
+
+<p style="text-align:center; margin-top:40px; font-size:12px; color:#99a;">
+  UWAcomm — 水声通信算法仿真项目 — 模块化框架 v2.0 — v2.0 — 12个编号模块 — 新增 SC-FDE · OTFS · 阵列波束形成
+</p>
+
+</body>
+</html>
