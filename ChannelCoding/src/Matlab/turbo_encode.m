@@ -50,11 +50,8 @@ if N < 2
     error('信息比特长度至少为2！');
 end
 
-%% ========== 3. 生成交织器 ========== %%
-rng_state = rng;                       % 保存当前随机状态
-rng(interleaver_seed);
-interleaver = randperm(N);
-rng(rng_state);                        % 恢复随机状态
+%% ========== 3. 生成交织器（调用交织模块） ========== %%
+[interleaved_msg, interleaver] = random_interleave(message, interleaver_seed);
 
 deinterleaver = zeros(1, N);
 deinterleaver(interleaver) = 1:N;      % 逆映射
@@ -63,7 +60,6 @@ deinterleaver(interleaver) = 1:N;      % 逆映射
 parity1 = rsc_encode_local(message, fb_poly, ff_poly, K);
 
 %% ========== 5. RSC编码器2 — 编码交织后信息 ========== %%
-interleaved_msg = message(interleaver);
 parity2 = rsc_encode_local(interleaved_msg, fb_poly, ff_poly, K);
 
 %% ========== 6. 组装输出 ========== %%
