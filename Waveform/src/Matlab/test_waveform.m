@@ -353,7 +353,7 @@ try
     [symbols, ~, ~] = qam_modulate(bits_in, 16, 'gray');
     [shaped, ~, ~] = pulse_shape(symbols, sps, 'rrc', rolloff, span);
 
-    % RX: 匹配 → 软判决
+    % RX: 匹配 → AGC归一化 → 判决
     [filtered, ~] = match_filter(shaped, sps, 'rrc', rolloff, span);
 
     best_ber = 1;
@@ -361,6 +361,8 @@ try
         idx = d+1 : sps : length(filtered);
         n = min(length(idx), 200);
         rx_sym = filtered(idx(1:n));
+        % AGC: 归一化到与发端星座相同的单位平均功率
+        rx_sym = rx_sym / sqrt(mean(abs(rx_sym).^2));
         [bits_hard, ~] = qam_demodulate(rx_sym, 16, 'gray');
         b = sum(bits_hard ~= bits_in(1:length(bits_hard))) / length(bits_hard);
         if b < best_ber, best_ber = b; end
