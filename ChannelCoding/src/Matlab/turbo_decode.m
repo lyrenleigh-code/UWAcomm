@@ -107,7 +107,7 @@ alpha(1, 1) = 0;                       % 初始状态0的概率为1
 
 % 后向度量 beta: (num_states x N+1)
 beta = -INF_VAL * ones(num_states, N+1);
-beta(1, N+1) = 0;                     % 终止状态0（假设尾比特归零或近似）
+beta(:, N+1) = 0;                     % 无尾比特，终止状态未知，所有状态等概率
 
 % --- 计算分支度量 gamma 并前向递推 alpha ---
 % gamma(state, input, t) 存储为两个矩阵
