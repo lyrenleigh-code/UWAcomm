@@ -205,7 +205,7 @@ try
     [data_idx, guard, num_data] = otfs_get_data_indices(N, M, config);
 
     data = randn(1, num_data) + 1j*randn(1, num_data);
-    [dd_frame, pilot_pos, ~, ~] = otfs_pilot_embed(data, N, M, config);
+    [dd_frame, pilot_info, ~, ~] = otfs_pilot_embed(data, N, M, config);
 
     % 导频位置值正确
     assert(abs(dd_frame(4,16) - sqrt(N*M)) < 1e-10, '导频值不正确');
@@ -215,8 +215,9 @@ try
     guard_no_pilot = guard; guard_no_pilot(4,16) = false;
     assert(all(abs(dd_frame(guard_no_pilot)) < 1e-10), '保护区应为零');
 
+    pp = pilot_info.positions;
     fprintf('[通过] 3.4 DD域导频 | 导频@(%d,%d), 保护区(%dx%d), 数据格点=%d\n', ...
-            pilot_pos(1), pilot_pos(2), 2*config.guard_k+1, 2*config.guard_l+1, num_data);
+            pp(1), pp(2), 2*config.guard_k+1, 2*config.guard_l+1, num_data);
     pass_count = pass_count + 1;
 catch e
     fprintf('[失败] 3.4 DD域导频 | %s\n', e.message);
@@ -393,8 +394,8 @@ try
     config = struct('pilot_k',4, 'pilot_l',16, 'guard_k',2, 'guard_l',3);
     [data_idx, ~, num_data] = otfs_get_data_indices(N, M, config);
     data = (2*randi([0 1],1,num_data)-1) + 1j*(2*randi([0 1],1,num_data)-1); % QPSK
-    [dd_frame, pp, ~, ~] = otfs_pilot_embed(data, N, M, config);
-    plot_otfs_dd_grid(dd_frame, 'OTFS DD Grid (8x32)', pp);
+    [dd_frame, pinfo, ~, ~] = otfs_pilot_embed(data, N, M, config);
+    plot_otfs_dd_grid(dd_frame, 'OTFS DD Grid (8x32)', pinfo.positions);
 
     fprintf('[通过] 5.2 OTFS DD域格点可视化\n');
     pass_count = pass_count + 1;
