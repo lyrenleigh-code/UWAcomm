@@ -387,20 +387,92 @@ catch e
     fail_count = fail_count + 1;
 end
 
-%% 5.2 OTFS DD域格点图
+%% 5.2 OTFS 5种导频模式对比可视化
 try
     rng(51);
-    N = 8; M = 32;
-    config = struct('pilot_k',4, 'pilot_l',16, 'guard_k',2, 'guard_l',3);
-    [data_idx, ~, num_data] = otfs_get_data_indices(N, M, config);
-    data = (2*randi([0 1],1,num_data)-1) + 1j*(2*randi([0 1],1,num_data)-1); % QPSK
-    [dd_frame, pinfo, ~, ~] = otfs_pilot_embed(data, N, M, config);
-    plot_otfs_dd_grid(dd_frame, 'OTFS DD Grid (8x32)', pinfo.positions);
+    N = 16; M = 32;
 
-    fprintf('[通过] 5.2 OTFS DD域格点可视化\n');
+    modes = {'impulse', 'multi_pulse', 'superimposed', 'sequence', 'adaptive'};
+    mode_names = {'单脉冲', '多脉冲', '叠加导频', 'ZC序列', '自适应保护区'};
+
+    figure('Name', 'OTFS 5种导频模式对比', 'NumberTitle', 'off', ...
+           'Position', [50, 50, 1400, 800]);
+
+    for mi = 1:5
+        cfg = struct('mode', modes{mi}, 'pilot_k', ceil(N/2), 'pilot_l', ceil(M/2), ...
+                     'guard_k', 2, 'guard_l', 3, 'pilot_value', 3);
+
+        % 各模式特有参数
+        if strcmp(modes{mi}, 'multi_pulse')
+            cfg.pilot_positions = [4,8; 4,24; 12,8; 12,24];
+        elseif strcmp(modes{mi}, 'superimposed')
+            cfg.pilot_power = 0.3;
+        elseif strcmp(modes{mi}, 'sequence')
+            cfg.seq_type = 'zc'; cfg.seq_root = 1;
+        elseif strcmp(modes{mi}, 'adaptive')
+            cfg.max_delay_spread = 4; cfg.max_doppler_spread = 3;
+        end
+
+        [~, ~, ndata] = otfs_get_data_indices(N, M, cfg);
+        data = (2*randi([0 1],1,max(ndata,N*M))-1) + 1j*(2*randi([0 1],1,max(ndata,N*M))-1);
+        data = data(1:max(ndata, N*M));
+        if ndata == 0, ndata = N*M; end
+        [dd_frame, pinfo, gmask, ~] = otfs_pilot_embed(data(1:ndata), N, M, cfg);
+
+        subplot(2, 3, mi);
+        imagesc(1:M, 1:N, abs(dd_frame));
+        colorbar; colormap('hot');
+        xlabel('时延 l'); ylabel('多普勒 k');
+        title(sprintf('%s (数据%d/%d格点)', mode_names{mi}, ndata, N*M));
+        set(gca, 'YDir', 'normal', 'FontSize', 9);
+
+        % 标注导频位置
+        if ~isempty(pinfo.positions)
+            hold on;
+            plot(pinfo.positions(:,2), pinfo.positions(:,1), 'cs', ...
+                 'MarkerSize', 8, 'MarkerFaceColor', 'c', 'LineWidth', 1.5);
+            hold off;
+        end
+
+        % 标注保护区边界
+        if any(gmask(:)) && ~strcmp(modes{mi}, 'superimposed')
+            hold on;
+            [gk_vis, gl_vis] = find(gmask);
+            plot(gl_vis, gk_vis, 'w.', 'MarkerSize', 3);
+            hold off;
+        end
+    end
+
+    % 第6格：效率对比柱状图
+    subplot(2, 3, 6);
+    efficiencies = zeros(1, 5);
+    for mi = 1:5
+        cfg_tmp = struct('mode', modes{mi}, 'pilot_k', ceil(N/2), 'pilot_l', ceil(M/2), ...
+                         'guard_k', 2, 'guard_l', 3);
+        if strcmp(modes{mi}, 'multi_pulse')
+            cfg_tmp.pilot_positions = [4,8; 4,24; 12,8; 12,24];
+        elseif strcmp(modes{mi}, 'adaptive')
+            cfg_tmp.max_delay_spread = 4; cfg_tmp.max_doppler_spread = 3;
+        end
+        [~, ~, nd] = otfs_get_data_indices(N, M, cfg_tmp);
+        efficiencies(mi) = nd / (N*M) * 100;
+    end
+    bar(efficiencies, 'FaceColor', [0.3, 0.6, 0.9]);
+    set(gca, 'XTickLabel', mode_names, 'FontSize', 9);
+    ylabel('频谱效率 (%)');
+    title('数据格点占比');
+    ylim([0, 110]);
+    for mi = 1:5
+        text(mi, efficiencies(mi)+2, sprintf('%.0f%%', efficiencies(mi)), ...
+             'HorizontalAlignment', 'center', 'FontSize', 9, 'FontWeight', 'bold');
+    end
+
+    sgtitle(sprintf('OTFS 5种导频模式对比 (N=%d, M=%d, 总格点=%d)', N, M, N*M));
+
+    fprintf('[通过] 5.2 OTFS 5种导频模式对比可视化\n');
     pass_count = pass_count + 1;
 catch e
-    fprintf('[失败] 5.2 OTFS DD域 | %s\n', e.message);
+    fprintf('[失败] 5.2 OTFS导频可视化 | %s\n', e.message);
     fail_count = fail_count + 1;
 end
 
