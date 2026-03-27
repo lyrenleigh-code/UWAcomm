@@ -183,7 +183,7 @@
   <div class="legend-item"><div class="legend-box lg-opt"></div>可选模块（按体制）</div>
   <div class="legend-item"><div class="legend-box lg-rxonly"></div>接收端特有处理</div>
   <div class="legend-item"><div class="legend-box lg-arr"></div>v2新增 模块11 阵列预处理</div>
-  <div class="legend-item"><div class="legend-box lg-iter"></div>v2新增 模块12 迭代均衡</div>
+  <div class="legend-item"><div class="legend-box lg-iter"></div>迭代回环 ↻ (7'⇌10-2⇌2')</div>
 </div>
 
 <!-- Section 1 -->
@@ -235,8 +235,8 @@
     <div class="module mod-req-rx"><span class="num" style="background:#b85c2a">7'</span>导频提取 → 信道估计与均衡<div class="detail">LS/OMP/SBL估计 + FDE均衡</div><div class="detail-new">OTFS: DD域嵌入导频估计稀疏路径 {h_i,l_i,k_i}</div></div>
     <div class="arrow-down"></div>
     <div class="module mod-rxonly"><span class="num">10-2</span>残余多普勒补偿<div class="detail">残余CFO相位旋转校正 / PLL载波相位跟踪</div><div class="detail-new">基于信道估计结果精修 | SC-TDE: 嵌入均衡器PLL</div></div>
-    <div class="arrow-iter"></div>
-    <div class="module mod-new-iter"><span class="num">12</span>迭代处理<span class="badge-new">NEW</span><div class="detail-new">SC-FDE: Turbo软干扰消除（SISO均衡 ⇌ BCJR译码）</div><div class="detail-new">OTFS: MP消息传递均衡（变量节点 ⇌ 观测节点）</div><div class="detail">可选；跳过则直接硬判决</div></div>
+    <div class="arrow-down"></div>
+    <div class="module mod-new-iter" style="border-style:dotted;background:#fff8f0"><span class="num" style="background:#c85a20">↻</span>迭代回环（可选）<div class="detail-new">SC-FDE: 7'(MMSE均衡) ⇌ 10-2 ⇌ 2'(BCJR译码) 交换软信息</div><div class="detail-new">OTFS: 7'(MP均衡)内部迭代 或 ⇌ 2'(译码)外层迭代</div><div class="detail">非独立模块，由7'/10-2/2'组合实现；跳过则单次直通</div></div>
     <div class="arrow-down"></div>
     <div class="module mod-opt-rx"><span class="num">5'</span>解扩<div class="detail">相关解扩 / 解跳频 / DCD/DED检测</div></div>
     <div class="arrow-down"></div>
@@ -280,7 +280,6 @@
       <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">7' 导频→时域均衡(LMS/DFE)</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-rxonly">10-2 残余相位(PLL嵌入)</span><span class="cf-arrow">→</span>
-      <span class="cf-block cf-off">12 迭代处理</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
@@ -315,14 +314,13 @@
       <span class="cf-block cf-special-rx">6' 去CP+分块FFT</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">7' 前导估计→MMSE均衡→IFFT</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-rxonly">10-2 残余CFO校正</span><span class="cf-arrow">→</span>
-      <span class="cf-block cf-iter">12 Turbo迭代(可选,3~6次)</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">4' LLR软判决</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">2' Viterbi/BCJR译码</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">1' 信源解码</span>
     </div>
-    <div class="iter-note">Turbo迭代：SISO-MMSE均衡器（输出 L_e_eq）⇌ SISO信道译码器（BCJR，输出 L_e_dec），软干扰消除</div>
+    <div class="iter-note">↻ Turbo迭代(可选)：7'(MMSE均衡) ⇌ 10-2(CFO校正) ⇌ 2'(BCJR译码)，交换软信息L_e，3~6次</div>
   </div>
 
   <!-- DSSS -->
@@ -351,7 +349,6 @@
       <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">7' 导频提取→估计&amp;均衡</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-rxonly">10-2 残余相位校正</span><span class="cf-arrow">→</span>
-      <span class="cf-block cf-off">12 迭代处理</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">5' 相关解扩</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
@@ -386,7 +383,6 @@
       <span class="cf-block cf-special-rx">6' 去CP+FFT</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">7' 导频→LS估计→FDE均衡</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-rxonly">10-2 残余CFO旋转校正</span><span class="cf-arrow">→</span>
-      <span class="cf-block cf-off">12 迭代处理</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
@@ -421,14 +417,13 @@
       <span class="cf-block cf-special-rx">6' Wigner+SFFT→DD域</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">7' DD域导频→稀疏路径估计</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-off">10-2 DD域天然处理</span><span class="cf-arrow">→</span>
-      <span class="cf-block cf-iter">12 MP均衡器(BP,10~30次)</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">4' LLR软判决</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">2' 信道解码</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">1' 信源解码</span>
     </div>
-    <div class="iter-note">MP均衡器：DD域稀疏因子图，高斯近似消息传递，复杂度 O(P·NM·|X|)，P为路径数（典型3~5）</div>
+    <div class="iter-note">↻ MP迭代(必选)：7'(DD域MP均衡,BP 10~30次) ⇌ 2'(译码)，稀疏因子图，O(P·NM·|X|)</div>
   </div>
 
   <!-- FH-MFSK -->
@@ -457,7 +452,6 @@
       <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">7' 导频提取→估计&amp;均衡</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-rxonly">10-2 残余相位校正</span><span class="cf-arrow">→</span>
-      <span class="cf-block cf-off">12 迭代处理</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">5' 解跳频</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">4' 能量检测</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
@@ -582,14 +576,14 @@
       <td class="td-new2"><span class="check-new">✓ 核心</span></td>
     </tr>
     <tr>
-      <td>12</td>
-      <td class="mod-name" style="color:#1a8a6a">（无，RX专有）</td>
-      <td class="mod-name" style="color:#1a8a6a">迭代处理 <span class="badge-new">NEW</span></td>
+      <td>↻</td>
+      <td class="mod-name" style="color:#1a8a6a">（非独立模块）</td>
+      <td class="mod-name" style="color:#1a8a6a">迭代回环：7' ⇌ 10-2 ⇌ 2'</td>
       <td><span class="cross">—</span></td>
-      <td class="td-new"><span class="check-new">Turbo均衡<br>可选</span></td>
+      <td class="td-new"><span class="check-new">Turbo均衡<br>7'⇌2' 可选</span></td>
       <td><span class="cross">—</span></td>
       <td><span class="cross">—</span></td>
-      <td class="td-new"><span class="check-new">MP均衡器<br>必选</span></td>
+      <td class="td-new"><span class="check-new">MP均衡<br>7'内部迭代</span></td>
       <td><span class="cross">—</span></td>
       <td class="td-new2">体制相关</td>
     </tr>
