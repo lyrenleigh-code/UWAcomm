@@ -76,6 +76,33 @@ catch e
     fail_count = fail_count + 1;
 end
 
+%% 1.4 离散导频(scattered)插入/提取回环
+try
+    rng(13);
+    N = 64;
+    data = randn(1, 200) + 1j*randn(1, 200);
+
+    [with_pilot, p_idx, d_idx] = ofdm_pilot_insert(data, N, 'scattered_4', 1);
+    [data_rx, pilot_rx, ~, ~] = ofdm_pilot_extract(with_pilot, N, 'scattered_4');
+
+    % 导频值均为1
+    assert(all(abs(pilot_rx(:) - 1) < 1e-10), '离散导频值不一致');
+    % 数据回环
+    min_len = min(length(data_rx), length(data));
+    assert(max(abs(data_rx(1:min_len) - data(1:min_len))) < 1e-10, '离散导频数据不一致');
+
+    % 验证不同符号导频位置不同
+    sym1_pilots = find(abs(with_pilot(1:N) - 1) < 1e-10);
+    sym2_pilots = find(abs(with_pilot(N+1:2*N) - 1) < 1e-10);
+    assert(~isequal(sym1_pilots, sym2_pilots), '离散导频各符号位置应不同');
+
+    fprintf('[通过] 1.4 离散导频回环 | scattered_4, 各符号导频位置交错\n');
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 1.4 离散导频 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
 %% ==================== 二、SC-FDE ==================== %%
 fprintf('\n--- 2. SC-FDE分块CP ---\n\n');
 
