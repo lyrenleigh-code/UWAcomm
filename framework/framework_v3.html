@@ -152,47 +152,37 @@
   .iter-loop-wrapper { position:relative; padding:6px 0; }
   .iter-loop-flow { display:flex; flex-wrap:nowrap; align-items:center; gap:4px; font-size:12px; padding:6px 0; overflow-x:auto; }
   .iter-loop-flow .cf-block { padding:5px 9px; border-radius:5px; font-weight:500; white-space:nowrap; font-size:11.5px; }
-  .iter-return-arrow {
-    display:flex; align-items:center;
-    margin: 6px 0 2px 40px;
-    font-size:11px; color:#c85a20; font-weight:bold;
-    padding-right:10px;
-  }
-  .iter-return-arrow .arrow-line {
-    flex:1;
-    border-bottom:2px dashed #c85a20;
-    height:0;
+  /* 迭代模块组：U形回环括号 */
+  .iter-module-group {
+    display:inline-flex; align-items:center; gap:4px;
     position:relative;
-    margin: 0 8px;
-    min-width:30px;
+    padding-bottom:28px;
   }
-  .iter-return-arrow .arrow-line::before {
+  .iter-module-group::after {
     content:'';
     position:absolute;
-    left:-1px;
-    top:-4px;
+    bottom:0; left:8px; right:8px; height:16px;
+    border-left:2px dashed #c85a20;
+    border-bottom:2px dashed #c85a20;
+    border-right:2px dashed #c85a20;
+    border-radius:0 0 8px 8px;
+  }
+  .iter-module-group .iter-arrow-left {
+    position:absolute;
+    bottom:10px; left:0px;
     border-top:5px solid transparent;
     border-bottom:5px solid transparent;
     border-right:7px solid #c85a20;
   }
-  .iter-return-arrow .arrow-start {
-    font-size:10px; color:#c85a20; white-space:nowrap; font-weight:bold;
-    background:#fff8f0; border:1px solid #e8c0a0; border-radius:3px; padding:1px 5px;
-  }
-  .iter-return-arrow .arrow-end {
-    font-size:10px; color:#c85a20; white-space:nowrap; font-weight:bold;
-    background:#fff8f0; border:1px solid #e8c0a0; border-radius:3px; padding:1px 5px;
-  }
-  .iter-return-arrow .iter-label {
-    white-space:nowrap;
+  .iter-loop-label {
+    display:block;
+    text-align:center;
     font-size:10px;
-    background:#fff8f0;
-    border:1px solid #e8c0a0;
-    border-radius:4px;
-    padding:3px 10px;
     color:#c85a20;
+    font-weight:600;
     font-style:italic;
-    font-weight:500;
+    margin-top:-2px;
+    margin-bottom:2px;
   }
 
   .cc-sc    { border-left-color:#2a6cb8; }
@@ -372,23 +362,21 @@
       <span class="flow-label fl-rx">RX</span>
       <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">&rarr;</span>
       <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">&rarr;</span>
-      <span class="cf-block cf-rxonly">10-1 粗多普勒补偿</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-arr">11 阵列(可选)</span><span class="cf-arrow-arr">&rarr;</span>
+      <span class="cf-block cf-rxonly">10-1 粗多普勒</span><span class="cf-arrow">&rarr;</span>
       <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-iter">7' PTR+DFE时域均衡</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-iter">10-2 PLL相位跟踪</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-iter">2' 信道解码</span><span class="cf-arrow">&rarr;</span>
+      <span class="iter-module-group">
+        <span class="cf-block cf-iter">7' PTR+DFE均衡</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-iter">10-2 PLL</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-off">5'</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-on-rx">4' 判决</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-iter">2' 译码</span>
+        <span class="iter-arrow-left"></span>
+      </span><span class="cf-arrow">&rarr;</span>
       <span class="cf-block cf-on-rx">1' 信源解码</span>
     </div>
-    <div class="iter-return-arrow">
-      <span class="arrow-start">&larr; 7'</span>
-      <span class="arrow-line"></span>
-      <span class="iter-label">&darr;&#8635; Turbo迭代（可选）：7'(PTR+DFE) &hArr; 10-2(PLL) &hArr; 2'(译码) 交换L_e，3~6次</span>
-      <span class="arrow-end">2' &rarr;</span>
-    </div>
+    <div class="iter-loop-label">↻ Turbo迭代（可选3~6次）：7'(PTR+DFE) ⇌ 10-2(PLL) ⇌ 2'(译码) 交换软信息L_e</div>
   </div>
 
   <!-- SC-FDE -->
@@ -412,23 +400,21 @@
       <span class="flow-label fl-rx">RX</span>
       <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">&rarr;</span>
       <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">&rarr;</span>
-      <span class="cf-block cf-rxonly">10-1 复自相关&rarr;重采样</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-arr">11 阵列(可选)</span><span class="cf-arrow-arr">&rarr;</span>
+      <span class="cf-block cf-rxonly">10-1 复自相关→重采样</span><span class="cf-arrow">&rarr;</span>
       <span class="cf-block cf-special-rx">6' 去CP+分块FFT</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-iter">7' MMSE均衡&rarr;IFFT</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-iter">10-2 残余CFO校正</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-on-rx">4' LLR软判决</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-iter">2' BCJR译码</span><span class="cf-arrow">&rarr;</span>
+      <span class="iter-module-group">
+        <span class="cf-block cf-iter">7' MMSE均衡→IFFT</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-iter">10-2 CFO校正</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-off">5'</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-on-rx">4' LLR</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-iter">2' BCJR译码</span>
+        <span class="iter-arrow-left"></span>
+      </span><span class="cf-arrow">&rarr;</span>
       <span class="cf-block cf-on-rx">1' 信源解码</span>
     </div>
-    <div class="iter-return-arrow">
-      <span class="arrow-start">← 7'</span>
-      <span class="arrow-line"></span>
-      <span class="iter-label">↻ Turbo迭代 3~6次：7'(MMSE) ⇌ 10-2(CFO) ⇌ 2'(BCJR) 交换L_e（可选）</span>
-      <span class="arrow-end">2' →</span>
-    </div>
+    <div class="iter-loop-label">↻ Turbo迭代（可选3~6次）：7'(MMSE) ⇌ 10-2(CFO) ⇌ 2'(BCJR) 交换软信息L_e</div>
   </div>
 
   <!-- DSSS -->
@@ -520,23 +506,21 @@
       <span class="flow-label fl-rx">RX</span>
       <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">&rarr;</span>
       <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">&rarr;</span>
+      <span class="cf-block cf-arr">11 阵列(可选)</span><span class="cf-arrow-arr">&rarr;</span>
       <span class="cf-block cf-rxonly">10-1 粗对齐(可弱化)</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-special-rx">6' Wigner+SFFT&rarr;DD域</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-iter">7' DD域MP均衡(BP)</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-off">10-2 DD域天然</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-on-rx">4' LLR软判决</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-iter">2' 信道解码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-special-rx">6' Wigner+SFFT→DD域</span><span class="cf-arrow">&rarr;</span>
+      <span class="iter-module-group">
+        <span class="cf-block cf-iter">7' MP均衡(BP)</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-off">10-2</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-off">5'</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-on-rx">4' LLR</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">&rarr;</span>
+        <span class="cf-block cf-iter">2' 译码</span>
+        <span class="iter-arrow-left"></span>
+      </span><span class="cf-arrow">&rarr;</span>
       <span class="cf-block cf-on-rx">1' 信源解码</span>
     </div>
-    <div class="iter-return-arrow">
-      <span class="arrow-start">← 7'</span>
-      <span class="arrow-line"></span>
-      <span class="iter-label">↻ MP迭代（必选）：7'(DD域BP均衡, 10~30次) ⇌ 2'(译码)，稀疏因子图</span>
-      <span class="arrow-end">2' →</span>
-    </div>
+    <div class="iter-loop-label">↻ MP迭代（必选10~30次）：7'(DD域BP均衡) ⇌ 2'(译码)，稀疏因子图</div>
   </div>
 
   <!-- FH-MFSK -->
