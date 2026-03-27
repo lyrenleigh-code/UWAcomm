@@ -1,11 +1,15 @@
-function [h_est, H_est, support] = ch_est_omp(y, Phi, N, K_sparse)
+function [h_est, H_est, support] = ch_est_omp(y, Phi, N, K_sparse, noise_var)
 % 功能：OMP（正交匹配追踪）稀疏信道估计
-% 版本：V1.0.0
+% 版本：V1.1.0
 % 输入：
-%   y        - 观测向量 (Mx1 或 1xM)
-%   Phi      - 测量矩阵 (MxN)，如部分DFT矩阵
-%   N        - 信道长度
-%   K_sparse - 稀疏度（非零抽头数，默认 ceil(N/10)）
+%   y         - 观测向量 (Mx1 或 1xM)
+%   Phi       - 测量矩阵 (MxN)，如部分DFT矩阵
+%   N         - 信道长度
+%   K_sparse  - 稀疏度上限（非零抽头数，默认 ceil(N/10)）
+%               设为0或[]时使用自适应停止准则
+%   noise_var - 噪声方差（可选，用于自适应残差停止准则）
+%               提供时：当 ||residual||^2 < M*noise_var*threshold_factor 停止
+%               不提供时：使用固定K_sparse次迭代
 % 输出：
 %   h_est   - 时域信道估计 (Nx1)
 %   H_est   - 频域信道估计 (1xN)
@@ -17,9 +21,22 @@ function [h_est, H_est, support] = ch_est_omp(y, Phi, N, K_sparse)
 %   - 稀疏度K未知时可用残差能量阈值替代
 
 %% ========== 入参解析 ========== %%
-if nargin < 4 || isempty(K_sparse), K_sparse = ceil(N/10); end
+if nargin < 5, noise_var = []; end
+if nargin < 4 || isempty(K_sparse) || K_sparse == 0
+    K_sparse = ceil(N/10);             % 默认上限
+    adaptive_stop = true;
+else
+    adaptive_stop = ~isempty(noise_var);
+end
 y = y(:);
 [M, ~] = size(Phi);
+
+% 自适应停止阈值
+if ~isempty(noise_var)
+    residual_threshold = M * noise_var * 1.2;  % 1.2倍余量
+else
+    residual_threshold = 0;
+end
 
 %% ========== 参数校验 ========== %%
 if isempty(y), error('观测向量不能为空！'); end
@@ -46,9 +63,18 @@ for iter = 1:K_sparse
     % 更新残差
     residual = y - Phi_s * h_s;
 
-    % 残差足够小时提前终止
-    if norm(residual) / norm(y) < 1e-6
-        break;
+    % 停止准则
+    res_energy = norm(residual)^2;
+    if adaptive_stop && residual_threshold > 0
+        % 自适应：残差能量降到噪声水平时停止
+        if res_energy < residual_threshold
+            break;
+        end
+    else
+        % 固定：残差相对能量极小时停止
+        if res_energy / norm(y)^2 < 1e-10
+            break;
+        end
     end
 end
 
