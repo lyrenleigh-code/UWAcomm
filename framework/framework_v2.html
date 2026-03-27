@@ -230,11 +230,11 @@
     <div class="arrow-down"></div>
     <div class="module mod-rxonly"><span class="num">10</span>多普勒估计与补偿<span class="badge-mod">细化</span><div class="detail">CAF / CP自相关 / 复自相关幅相联合 / Zoom-FFT</div><div class="detail-new">两步补偿：宽带重采样 → 残余CFO旋转 | OTFS可弱化</div></div>
     <div class="arrow-down"></div>
+    <div class="module mod-opt-rx"><span class="num">6'</span>去CP + 逆变换<div class="detail">OFDM: 去CP+FFT | SC-FDE: 去CP+分块FFT</div><div class="detail-new">OTFS: 去整帧CP+Wigner+SFFT</div></div>
+    <div class="arrow-down"></div>
     <div class="module mod-req-rx"><span class="num" style="background:#b85c2a">7'</span>导频提取 → 信道估计与均衡<div class="detail">LS/OMP/SBL估计 + FDE均衡</div><div class="detail-new">OTFS: DD域嵌入导频估计稀疏路径 {h_i,l_i,k_i}</div></div>
     <div class="arrow-iter"></div>
     <div class="module mod-new-iter"><span class="num">12</span>迭代处理<span class="badge-new">NEW</span><div class="detail-new">SC-FDE: Turbo软干扰消除（SISO均衡 ⇌ BCJR译码）</div><div class="detail-new">OTFS: MP消息传递均衡（变量节点 ⇌ 观测节点）</div><div class="detail">可选；跳过则直接硬判决</div></div>
-    <div class="arrow-down"></div>
-    <div class="module mod-opt-rx"><span class="num">6'</span>去CP + 逆变换<div class="detail">OFDM: 去CP+FFT | SC-FDE: 去CP+分块FFT</div><div class="detail-new">OTFS: 去整帧CP+Wigner+SFFT</div></div>
     <div class="arrow-down"></div>
     <div class="module mod-opt-rx"><span class="num">5'</span>解扩<div class="detail">相关解扩 / 解跳频 / DCD/DED检测</div></div>
     <div class="arrow-down"></div>
@@ -275,9 +275,9 @@
       <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
       <span class="cf-block cf-rxonly">10 多普勒补偿</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">7' 导频→时域均衡(LMS/DFE)</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-off">12 迭代处理</span><span class="cf-arrow">→</span>
-      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
@@ -309,9 +309,9 @@
       <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
       <span class="cf-block cf-rxonly">10 复自相关幅相联合→重采样</span><span class="cf-arrow">→</span>
-      <span class="cf-block cf-special-rx">7' 前导估计信道→块FFT→MMSE→IFFT</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special-rx">6' 去CP+分块FFT</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-special-rx">7' 前导估计→MMSE均衡→IFFT</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-iter">12 Turbo迭代(可选,3~6次)</span><span class="cf-arrow">→</span>
-      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">4' LLR软判决</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
@@ -344,9 +344,9 @@
       <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
       <span class="cf-block cf-rxonly">10 多普勒补偿</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">7' 导频提取→估计&amp;均衡</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-off">12 迭代处理</span><span class="cf-arrow">→</span>
-      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">5' 相关解扩</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
@@ -447,9 +447,9 @@
       <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">→</span>
       <span class="cf-block cf-rxonly">10 多普勒补偿</span><span class="cf-arrow">→</span>
+      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">7' 导频提取→估计&amp;均衡</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-off">12 迭代处理</span><span class="cf-arrow">→</span>
-      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">5' 解跳频</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-special-rx">4' 能量检测</span><span class="cf-arrow">→</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">→</span>
