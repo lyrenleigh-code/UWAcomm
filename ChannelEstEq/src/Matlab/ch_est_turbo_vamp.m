@@ -21,8 +21,8 @@ y = y(:);
 [M, ~] = size(Phi);
 
 %% ========== 预计算 ========== %%
-lambda = K_sparse / N;                 % 先验稀疏率
-var_x = 1;                            % 非零抽头先验方差
+lambda = K_sparse / N;                 % 先验稀疏率（匹配真实稀疏度）
+var_x = max((norm(y)^2/M - noise_var) / (lambda + 1e-10), 0.1);  % 从观测能量估计
 
 PhiTPhi = Phi' * Phi;
 PhiTy = Phi' * y;

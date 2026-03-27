@@ -1,12 +1,13 @@
-function [h_est, H_est, mse_history] = ch_est_vamp(y, Phi, N, max_iter, noise_var)
+function [h_est, H_est, mse_history] = ch_est_vamp(y, Phi, N, max_iter, noise_var, K_sparse)
 % 功能：VAMP（变分近似消息传递）信道估计
-% 版本：V1.1.0
+% 版本：V1.2.0
 % 输入：
 %   y         - 观测向量 (Mx1)
 %   Phi       - 测量矩阵 (MxN)
 %   N         - 信道长度
 %   max_iter  - 最大迭代次数 (默认 100)
 %   noise_var - 噪声方差
+%   K_sparse  - 稀疏度估计（可选，用于初始化λ和var_x；不提供则自适应EM估计）
 % 输出：
 %   h_est       - 时域信道估计 (Nx1)
 %   H_est       - 频域信道估计 (1xN)
@@ -18,6 +19,7 @@ function [h_est, H_est, mse_history] = ch_est_vamp(y, Phi, N, max_iter, noise_va
 %   - 使用伯努利-高斯去噪器实现稀疏先验
 
 %% ========== 入参解析 ========== %%
+if nargin < 6, K_sparse = []; end
 if nargin < 5 || isempty(noise_var), noise_var = norm(y)^2 / (10*length(y)); end
 if nargin < 4 || isempty(max_iter), max_iter = 100; end
 y = y(:);
@@ -27,13 +29,20 @@ y = y(:);
 PhiTPhi = Phi' * Phi;
 PhiTy = Phi' * y;
 
-% 稀疏先验参数
-lambda = 0.1;                          % 先验稀疏率
-var_x = 1;                            % 非零抽头先验方差
+% 稀疏先验参数：有K_sparse时精确初始化，否则保守估计+EM自适应
+if ~isempty(K_sparse) && K_sparse > 0
+    lambda = K_sparse / N;             % 匹配真实稀疏率
+    % var_x从观测能量估计：E[||y||^2] ≈ M*(lambda*var_x + noise_var)
+    var_x = max((norm(y)^2/M - noise_var) / (lambda + 1e-10), 0.1);
+else
+    lambda = 0.05;                     % 保守初始稀疏率
+    var_x = norm(y)^2 / (M * 0.05);   % 粗估计
+end
+em_update = true;                      % 每次迭代EM更新lambda和var_x
 
 %% ========== 初始化 ========== %%
-r1 = zeros(N, 1);                     % 模块1→模块2的外信息均值
-gamma1 = 1e-2;                        % 模块1→模块2的外信息精度
+r1 = zeros(N, 1);
+gamma1 = 1 / var_x;                   % 用先验方差初始化（而非硬编码）
 
 mse_history = zeros(max_iter, 1);
 
@@ -71,6 +80,15 @@ for t = 1:max_iter
 
     % 发散度 alpha2 = (1/N) * sum(d x2 / d r2)
     alpha2 = mean(pi_post .* gamma2 .* var_post);
+
+    % EM自适应更新先验参数（每5次迭代更新一次，避免震荡）
+    if em_update && mod(t, 5) == 0
+        lambda = max(min(mean(pi_post), 0.5), 1e-3);
+        active_idx = pi_post > 0.5;
+        if sum(active_idx) > 0
+            var_x = max(mean(abs(mean_post(active_idx)).^2 + var_post(active_idx)), 0.01);
+        end
+    end
 
     % 外信息传递：模块2 → 模块1
     eta2 = gamma2 / (1 - alpha2 + 1e-10);

@@ -112,7 +112,7 @@ end
 
 %% 2.5 VAMP
 try
-    [h_vamp, ~] = ch_est_vamp(y, Phi, N, 50, noise_var);
+    [h_vamp, ~] = ch_est_vamp(y, Phi, N, 50, noise_var, K);
     nmse_vamp = 10*log10(norm(h_vamp - h_true.')^2 / norm(h_true)^2);
 
     fprintf('[通过] 2.5 VAMP | NMSE=%.1fdB\n', nmse_vamp);

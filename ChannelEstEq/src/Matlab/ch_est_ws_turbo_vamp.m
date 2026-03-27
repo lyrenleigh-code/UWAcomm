@@ -34,7 +34,7 @@ rho_prev = rho_prev(:);
 
 %% ========== 初始化 ========== %%
 lambda = K_sparse / N;
-var_x = 1;
+var_x = max((norm(y)^2/M - noise_var) / (lambda + 1e-10), 0.1);
 
 % 热启动先验LLR修正
 LLR_base = log(lambda / (1 - lambda + 1e-10));
