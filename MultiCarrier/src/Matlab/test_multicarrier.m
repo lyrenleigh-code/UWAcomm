@@ -223,6 +223,106 @@ catch e
     fail_count = fail_count + 1;
 end
 
+%% 3.5 多脉冲导频
+try
+    rng(34);
+    N = 8; M = 32;
+    positions = [2,8; 2,24; 6,8; 6,24];
+    cfg = struct('mode','multi_pulse','pilot_positions',positions,'guard_k',1,'guard_l',2,'pilot_value',2);
+    [didx, ~, ndata] = otfs_get_data_indices(N, M, cfg);
+
+    data = randn(1, ndata) + 1j*randn(1, ndata);
+    [dd, info, ~, ~] = otfs_pilot_embed(data, N, M, cfg);
+
+    % 4个导频位置值正确
+    for p = 1:4
+        assert(abs(dd(positions(p,1), positions(p,2)) - 2) < 1e-10, '多脉冲导频值不正确');
+    end
+    assert(strcmp(info.mode, 'multi_pulse'), '模式应为multi_pulse');
+
+    fprintf('[通过] 3.5 多脉冲导频 | 4个脉冲, 数据格点=%d\n', ndata);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.5 多脉冲导频 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 3.6 叠加导频
+try
+    rng(35);
+    N = 8; M = 32;
+    cfg = struct('mode','superimposed','pilot_power',0.2);
+
+    data = randn(1, N*M) + 1j*randn(1, N*M);
+    [dd, info, gmask, ~] = otfs_pilot_embed(data, N, M, cfg);
+
+    % 叠加模式无保护区
+    assert(~any(gmask(:)), '叠加模式不应有保护区');
+    % 帧 = 数据 + 导频图案
+    data_mat = reshape(data, N, M);
+    pilot_recovered = dd - data_mat;
+    assert(max(abs(pilot_recovered(:) - info.pilot_pattern(:))) < 1e-10, '导频图案不一致');
+    assert(strcmp(info.mode, 'superimposed'), '模式应为superimposed');
+
+    fprintf('[通过] 3.6 叠加导频 | 功率比=%.1f, 全格点利用\n', cfg.pilot_power);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.6 叠加导频 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 3.7 序列导频(ZC)
+try
+    rng(36);
+    N = 8; M = 32;
+    cfg = struct('mode','sequence','seq_type','zc','seq_root',1,...
+                 'pilot_k',4,'pilot_l',16,'guard_k',2,'guard_l',3,'pilot_value',2);
+    [didx, ~, ndata] = otfs_get_data_indices(N, M, cfg);
+
+    data = randn(1, ndata) + 1j*randn(1, ndata);
+    [dd, info, ~, ~] = otfs_pilot_embed(data, N, M, cfg);
+
+    % 导频行有序列值（非零）
+    pilot_row_vals = dd(4, info.positions(:,2));
+    assert(all(abs(pilot_row_vals) > 0.1), '序列导频值不应为零');
+    assert(strcmp(info.mode, 'sequence'), '模式应为sequence');
+    assert(length(info.values) == size(info.positions,1), '序列长度与位置数不匹配');
+
+    fprintf('[通过] 3.7 序列导频(ZC) | 序列长度=%d\n', length(info.values));
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.7 序列导频 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 3.8 自适应保护区导频
+try
+    rng(37);
+    N = 8; M = 32;
+    % 小扩展信道
+    cfg_small = struct('mode','adaptive','pilot_k',4,'pilot_l',16,...
+                       'max_delay_spread',1,'max_doppler_spread',1,'pilot_value',3);
+    [~, ~, ndata_small] = otfs_get_data_indices(N, M, cfg_small);
+
+    % 大扩展信道
+    cfg_large = struct('mode','adaptive','pilot_k',4,'pilot_l',16,...
+                       'max_delay_spread',4,'max_doppler_spread',3,'pilot_value',3);
+    [~, ~, ndata_large] = otfs_get_data_indices(N, M, cfg_large);
+
+    % 大扩展信道保护区更大 → 数据格点更少
+    assert(ndata_small > ndata_large, '大扩展信道数据格点应更少');
+
+    data_s = randn(1, ndata_small) + 1j*randn(1, ndata_small);
+    [dd_s, info_s, ~, ~] = otfs_pilot_embed(data_s, N, M, cfg_small);
+    assert(abs(dd_s(4,16) - 3) < 1e-10, '导频值不正确');
+
+    fprintf('[通过] 3.8 自适应保护区 | 小扩展:%d格点, 大扩展:%d格点\n', ndata_small, ndata_large);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.8 自适应保护区 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
 %% ==================== 四、PAPR ==================== %%
 fprintf('\n--- 4. PAPR计算与抑制 ---\n\n');
 
