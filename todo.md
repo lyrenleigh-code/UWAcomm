@@ -1,136 +1,131 @@
-# UWAcomm 水声通信算法开发进度（v2.0框架）
+# UWAcomm 水声通信算法开发进度（v3.0框架）
 
-> 框架参考：`framework/framework_v2.html`
+> 框架参考：`framework/framework_v3.html`
+> 规范参考：`DopplerProc/UWA_Doppler_MATLAB_Spec.md`
 > 覆盖6种通信体制：SC-TDE / SC-FDE / DSSS / OFDM / OTFS / FH-MFSK + 阵列增强
 
 ## 已完成模块
 
-### 模块1. SourceCoding — 信源编解码
-- [x] huffman_encode.m / huffman_decode.m（Huffman无损编码）
-- [x] uniform_quantize.m / uniform_dequantize.m（均匀量化/反量化）
-- [x] test_source_coding.m（14项测试）
-- [x] README.md
-
-### 模块2. ChannelCoding — 信道编解码
-- [x] hamming_encode.m / hamming_decode.m（Hamming分组码）
-- [x] conv_encode.m / viterbi_decode.m（卷积码 + Viterbi译码，硬/软判决）
-- [x] turbo_encode.m / turbo_decode.m（Turbo码，Max-Log-MAP迭代）
-- [x] ldpc_encode.m / ldpc_decode.m（LDPC码，Min-Sum BP）
-- [x] test_channel_coding.m（22项测试）
-- [x] README.md
-
-### 模块3. Interleaving — 交织/解交织
-- [x] block_interleave.m / block_deinterleave.m（块交织）
-- [x] random_interleave.m / random_deinterleave.m（随机交织）
-- [x] conv_interleave.m / conv_deinterleave.m（卷积交织）
-- [x] turbo_encode.m 已更新调用 random_interleave
-- [x] test_interleaving.m（19项测试，含Turbo集成验证）
-- [x] README.md
-
-### 模块4. Modulation — 符号映射/判决
-- [x] qam_modulate.m / qam_demodulate.m（BPSK/QPSK/8QAM/16QAM/64QAM，Gray/自然映射，硬/软判决LLR）
-- [x] mfsk_modulate.m / mfsk_demodulate.m（M-FSK比特↔频率索引）
-- [x] plot_constellation.m（星座图绘制）
-- [x] test_modulation.m（25项测试）
-- [x] README.md
-
-### 模块5. SpreadSpectrum — 扩频/解扩
-- [x] gen_msequence.m / gen_gold_code.m / gen_walsh_hadamard.m / gen_kasami_code.m（4种扩频码）
-- [x] dsss_spread.m / dsss_despread.m（DSSS直扩）
-- [x] csk_spread.m / csk_despread.m（CSK循环移位键控）
-- [x] mary_spread.m / mary_despread.m（M-ary组合扩频）
-- [x] gen_hop_pattern.m / fh_spread.m / fh_despread.m（FH跳频）
-- [x] det_dcd.m / det_ded.m（差分相关/能量检测器）
-- [x] test_spread_spectrum.m（19项测试）
-- [x] README.md
-
-### 模块8. Sync — 同步+帧组装
-- [x] gen_lfm.m / gen_hfm.m / gen_zc_seq.m / gen_barker.m（4种同步序列）
-- [x] sync_detect.m（粗同步，滑动窗归一化互相关）
-- [x] cfo_estimate.m（CFO粗估计，互相关法/Schmidl-Cox/CP法）
-- [x] timing_fine.m（细定时，Gardner/Mueller-Muller/超前滞后门TED）
-- [x] frame_assemble/parse_sctde.m（SC-TDE帧：前导+训练+数据+保护）
-- [x] frame_assemble/parse_scfde.m（SC-FDE帧：前导+数据+后导）
-- [x] frame_assemble/parse_ofdm.m（OFDM帧：ZC双重复前导+数据）
-- [x] frame_assemble/parse_otfs.m（OTFS帧：HFM前导+数据）
-- [x] test_sync.m（16项测试）
-- [x] README.md
-
-### 模块9. Waveform — 脉冲成形/上下变频
-- [x] pulse_shape.m（RC/RRC/矩形/高斯四种脉冲成形）
-- [x] match_filter.m（匹配滤波）
-- [x] upconvert.m / downconvert.m（数字上下变频）
-- [x] gen_fsk_waveform.m（FSK波形生成，CPFSK）
-- [x] da_convert.m / ad_convert.m（DA/AD转换仿真）
-- [x] test_waveform.m（20项测试，含Modulation联合测试和全链路验证）
-- [x] README.md
+### 模块1. SourceCoding — 信源编解码 (5个函数, 14项测试)
+### 模块2. ChannelCoding — 信道编解码 (10个函数, 22项测试)
+### 模块3. Interleaving — 交织/解交织 (7个函数, 19项测试)
+### 模块4. Modulation — 符号映射/判决 (6个函数, 25项测试)
+### 模块5. SpreadSpectrum — 扩频/解扩 (15个函数, 19项测试)
+### 模块8. Sync — 同步+帧组装 (16个函数, 16项测试)
+### 模块9. Waveform — 脉冲成形/上下变频 (8个函数, 20项测试)
 
 ## 待开发模块
 
-### 阶段一（续）：打通单载波端到端链路
-
-#### 模块7. ChannelEstEq — 导频 + 信道估计与均衡
-- [ ] 导频插入/提取
-  - 频域梳状/块状导频（OFDM）
-  - DD域嵌入单脉冲导频+保护区（OTFS）
-  - （时域训练序列已在模块8 SC-TDE帧中实现）
-- [ ] 信道估计算法
-  - LS 最小二乘
-  - OMP 正交匹配追踪（稀疏信道）
-  - SBL 稀疏贝叶斯学习
-- [ ] 均衡算法
-  - SC-TDE：DFE判决反馈 + LMS/RLS自适应
-  - SC-FDE：MMSE频域均衡（接收去CP后的频域数据）
-  - OFDM：频域单抽头均衡
-  - OTFS：DD域稀疏路径估计
-- [ ] 测试 + README
-
-### 阶段二：多载波支持
+### 阶段一（续）：多载波支持 + 信道估计均衡
 
 #### 模块6. MultiCarrier — 多载波/多域变换 + CP
-- [ ] OFDM调制：IFFT + CP插入
-- [ ] OFDM解调：去CP + FFT
-- [ ] SC-FDE：分块CP插入/去除
-- [ ] OTFS调制：ISFFT + Heisenberg变换 + 整帧CP
-- [ ] OTFS解调：去整帧CP + Wigner变换 + SFFT
+- [ ] **OFDM**
+  - [ ] ofdm_modulate.m — IFFT + CP插入
+  - [ ] ofdm_demodulate.m — 去CP + FFT
+  - [ ] ofdm_pilot_insert.m — 频域梳状/块状导频插入
+  - [ ] ofdm_pilot_extract.m — 导频提取
+- [ ] **SC-FDE**
+  - [ ] scfde_add_cp.m — 分块CP/ZP插入
+  - [ ] scfde_remove_cp.m — 去CP + 分块FFT
+- [ ] **OTFS**
+  - [ ] otfs_modulate.m — ISFFT + Heisenberg变换 + 整帧CP
+  - [ ] otfs_demodulate.m — 去整帧CP + Wigner变换 + SFFT
+  - [ ] otfs_pilot_embed.m — DD域嵌入单脉冲导频+保护区
+  - [ ] otfs_get_data_indices.m — DD域数据格点索引提取
 - [ ] 测试 + README
 
-### 阶段三：接收端增强
-
-#### 模块10. DopplerProc — 多普勒估计与补偿
-- [ ] SC-TDE/SC-FDE：复自相关幅相联合，两步补偿
-- [ ] OFDM：CP自相关 + 两步补偿（重采样→残余CFO旋转）
-- [ ] OTFS：可弱化（DD域天然分辨）
-- [ ] 通用：HFM粗估计 + ARD/FFCI精跟踪 + PLL
-- [ ] 压缩/扩展法宽带多普勒补偿
+#### 模块7. ChannelEstEq — 信道估计与均衡
+- [ ] **信道估计算法（共用）**
+  - [ ] ch_est_ls.m — LS最小二乘估计
+  - [ ] ch_est_omp.m — OMP正交匹配追踪（稀疏信道）
+  - [ ] ch_est_sbl.m — 稀疏贝叶斯学习（SBL）
+  - [ ] ch_est_vamp.m — VAMP变分近似消息传递
+  - [ ] ch_est_turbo_vamp.m — Turbo-VAMP（支持热启动WS-Turbo-VAMP）
+- [ ] **SC-TDE均衡**
+  - [ ] eq_dfe.m — 判决反馈均衡器（前馈+反馈+PLL）
+  - [ ] eq_lms.m — LMS自适应均衡
+  - [ ] eq_rls.m — RLS自适应均衡
+- [ ] **SC-FDE均衡**
+  - [ ] eq_mmse_fde.m — MMSE频域均衡（H→MMSE权→IFFT）
+  - [ ] turbo_equalizer.m — Turbo迭代软均衡（SISO-MMSE ⇌ BCJR）
+- [ ] **OFDM均衡**
+  - [ ] eq_ofdm_fde.m — 频域单抽头MMSE/ZF均衡
+  - [ ] comp_ici_matrix.m — ICI矩阵补偿（高速场景）
+- [ ] **OTFS均衡**
+  - [ ] ch_est_otfs.m — DD域嵌入导频稀疏路径估计 {h_i, l_i, k_i}
+  - [ ] mp_detector.m — 消息传递检测器（高斯近似BP, 10~30次迭代）
 - [ ] 测试 + README
+
+### 阶段二：多普勒处理
+
+#### 模块10. DopplerProc — 多普勒估计与补偿（10-1粗 + 10-2残余）
+> 参考：`DopplerProc/UWA_Doppler_MATLAB_Spec.md` 完整规范
+- [ ] **10-1 粗多普勒估计（6'之前）**
+  - [ ] est_doppler_caf.m — 二维CAF搜索法（通用，高精度，离线）
+  - [ ] est_doppler_cp.m — CP自相关法（OFDM专用，低开销）
+  - [ ] est_doppler_xcorr.m — 复自相关幅相联合法（SC-FDE推荐，前后导码）
+  - [ ] est_doppler_zoomfft.m — Zoom-FFT频谱细化法
+- [ ] **10-1 粗多普勒补偿**
+  - [ ] comp_resample.m — 宽带重采样补偿（三次样条/Farrow滤波器）
+- [ ] **10-2 残余多普勒补偿（7'之后）**
+  - [ ] comp_cfo.m — 残余CFO相位旋转校正
+  - [ ] comp_ici_matrix.m — ICI矩阵补偿（OFDM高速场景）
+- [ ] 测试 + README
+
+### 阶段三：阵列接收
 
 #### 模块11. ArrayProc — 阵列接收预处理
-- [ ] 阵元时延标定
-- [ ] 模式A：空时变采样重建（等效M·fs）
-- [ ] 模式B：DAS波束形成（SNR提升10log10(M) dB）
-- [ ] 矢量水听器处理（声压+振速联合）
-- [ ] 测试 + README
-
-#### 模块12. IterativeProc — 迭代处理
-- [ ] SC-FDE Turbo均衡：SISO-MMSE ⇌ BCJR
-- [ ] OTFS MP均衡器：DD域稀疏因子图BP
+> 参考：Spec文档模块七
+- [ ] gen_uwa_channel_array.m — 阵列信道仿真（M阵元，精确空间时延）
+- [ ] bf_delay_calibration.m — 阵元时延标定
+- [ ] bf_nonuniform_resample.m — 空时联合非均匀变采样重建（等效M·fs）
+- [ ] bf_conventional.m — 常规DAS波束形成（时延对齐+相位补偿）
+- [ ] est_doppler_beamforming.m — 基于波束域信号的高精度多普勒估计
 - [ ] 测试 + README
 
 ### 阶段四：集成
 
 #### 模块13. SourceCode — 端到端仿真
-- [ ] 水声信道仿真器
-- [ ] 端到端链路仿真脚本
-- [ ] BER/FER性能评估
-- [ ] 6种体制场景配置 + 阵列增强
-- [ ] 测试 + README
+- [ ] **水声信道仿真器**
+  - [ ] gen_uwa_channel.m — 单路信道（多径+宽带Doppler伸缩+AWGN）
+  - [ ] gen_uwa_channel_array.m — 阵列信道
+- [ ] **参数配置**
+  - [ ] sys_params_ofdm.m / sys_params_scfde.m / sys_params_otfs.m
+- [ ] **端到端链路**
+  - [ ] main_sim.m — 统一仿真入口（体制切换）
+  - [ ] tx_chain.m / rx_chain.m — 收发链路
+- [ ] **性能评估**
+  - [ ] BER/FER vs SNR曲线
+  - [ ] 多普勒估计RMSE vs SNR
+  - [ ] 信道估计NMSE收敛曲线
+- [ ] 6种体制 + 阵列增强场景测试
+
+## 补充：稀疏信道估计算法族（来自Turbo_VAMP_TVC.m）
+
+以下算法可集成到模块7的信道估计部分：
+
+| 算法 | 函数名 | 特点 |
+|------|--------|------|
+| ISTA | ch_est_ista.m | 基础稀疏估计，收敛慢 |
+| AMP | ch_est_amp.m | 近似消息传递，快速但需高斯测量矩阵 |
+| GAMP | ch_est_gamp.m | 广义AMP，支持非高斯 |
+| VAMP | ch_est_vamp.m | 变分AMP，对测量矩阵条件更鲁棒 |
+| Turbo-AMP | ch_est_turbo_amp.m | 结合稀疏先验的Turbo框架 |
+| Turbo-VAMP | ch_est_turbo_vamp.m | VAMP+Turbo，当前最优 |
+| **WS-Turbo-VAMP** | ch_est_ws_turbo_vamp.m | **热启动**：利用前帧后验概率修正先验LLR，慢时变信道加速收敛 |
+| LAMP | ch_est_lamp.m | 学习型AMP，离线训练参数 |
+
+WS-Turbo-VAMP创新点：
+```
+LLR_prior,i^(t) = log(λ/(1-λ)) + β · log(ρ_i^(t-1) / (1-ρ_i^(t-1)))
+```
+- β为时间相关系数（0~1），自适应估计
+- 慢时变：β大，利用前帧信息加速收敛
+- 快时变：β→0，退化为标准Turbo-VAMP
 
 ## 其他待办
 
-- [x] framework_v2.html 模块编号更新
-- [x] 配置卡RX流程与通用框架对齐
-- [x] CP归属调整（从模块8移到模块6）
+- [x] framework_v3.html 完成（含10-1/10-2拆分、迭代回环、6'位置调整）
 - [ ] CLAUDE.md 更新
 - [ ] 跨模块路径管理统一方案（startup.m）
 - [ ] 全模块集成测试
@@ -139,28 +134,27 @@
 
 | 指标 | 数值 |
 |------|------|
-| 已完成模块 | 7 / 13 |
-| 待开发模块 | 6 |
+| 已完成模块 | 7 / 12（模块12改为迭代回环） |
+| 待开发模块 | 5 + 集成 |
 | 已完成 .m 文件 | 67 个 |
 | 已完成测试项 | 135 项 |
 | 总代码行数 | ~7200 行 |
-| 总提交数 | 32 次 |
-| 覆盖通信体制 | 6种 + 阵列增强 |
+| 总提交数 | 40 次 |
 
 ## 模块与文件夹对照
 
-| 编号 | 模块名 | 文件夹 | 状态 | .m文件数 |
-|------|--------|--------|------|----------|
-| 1 | 信源编解码 | `SourceCoding/` | 已完成 | 5 |
-| 2 | 信道编解码 | `ChannelCoding/` | 已完成 | 10 |
-| 3 | 交织/解交织 | `Interleaving/` | 已完成 | 7 |
-| 4 | 符号映射/判决 | `Modulation/` | 已完成 | 6 |
-| 5 | 扩频/解扩 | `SpreadSpectrum/` | 已完成 | 15 |
-| 6 | 多载波变换+CP | `MultiCarrier/` | 待开发 | 0 |
-| 7 | 信道估计与均衡 | `ChannelEstEq/` | **下一个** | 0 |
-| 8 | 同步+帧组装 | `Sync/` | 已完成 | 16 |
-| 9 | 脉冲成形/变频 | `Waveform/` | 已完成 | 8 |
-| 10 | 多普勒处理 | `DopplerProc/` | 待开发 | 0 |
-| 11 | 阵列预处理 | `ArrayProc/` | 待开发 | 0 |
-| 12 | 迭代处理 | `IterativeProc/` | 待开发 | 0 |
-| 13 | 端到端仿真 | `SourceCode/` | 待开发 | 0 |
+| 编号 | 模块名 | 文件夹 | 状态 |
+|------|--------|--------|------|
+| 1 | 信源编解码 | `SourceCoding/` | 已完成 |
+| 2 | 信道编解码 | `ChannelCoding/` | 已完成 |
+| 3 | 交织/解交织 | `Interleaving/` | 已完成 |
+| 4 | 符号映射/判决 | `Modulation/` | 已完成 |
+| 5 | 扩频/解扩 | `SpreadSpectrum/` | 已完成 |
+| 6 | 多载波变换+CP | `MultiCarrier/` | **下一个** |
+| 7 | 信道估计与均衡 | `ChannelEstEq/` | 待开发 |
+| 8 | 同步+帧组装 | `Sync/` | 已完成 |
+| 9 | 脉冲成形/变频 | `Waveform/` | 已完成 |
+| 10 | 多普勒处理(10-1/10-2) | `DopplerProc/` | 待开发 |
+| 11 | 阵列预处理 | `ArrayProc/` | 待开发 |
+| ↻ | 迭代回环(7'⇌10-2⇌2') | 非独立模块 | 融入模块7 |
+| 13 | 端到端仿真 | `SourceCode/` | 待开发 |
