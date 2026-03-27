@@ -112,8 +112,10 @@ end
 
 %% 2.5 VAMP
 try
-    [h_vamp, ~] = ch_est_vamp(y, Phi, N, 50, noise_var, K);
+    [h_vamp, ~] = ch_est_vamp(y, Phi, N, 100, noise_var, K);
     nmse_vamp = 10*log10(norm(h_vamp - h_true.')^2 / norm(h_true)^2);
+
+    assert(nmse_vamp < 0, sprintf('VAMP NMSE=%.1fdB，应为负(dB)', nmse_vamp));
 
     fprintf('[通过] 2.5 VAMP | NMSE=%.1fdB\n', nmse_vamp);
     pass_count = pass_count + 1;
