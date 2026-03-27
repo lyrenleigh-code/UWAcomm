@@ -24,26 +24,36 @@ else
     signal_no_cp = [signal_no_cp, zeros(1, N*M - length(signal_no_cp))];
 end
 
-%% ========== 3. Wigner变换（Heisenberg逆变换） ========== %%
-Y_tf = zeros(N, M);
-for n = 1:N
-    if (n-1)*M+M <= length(signal_no_cp)
-        r_n = signal_no_cp((n-1)*M+1 : n*M);
-    else
-        r_n = zeros(1, M);
-    end
-    Y_tf(n, :) = fft(r_n) / sqrt(M);
-end
-
-%% ========== 4. SFFT（沿多普勒维度做FFT） ========== %%
+%% ========== 3. Wigner + SFFT ========== %%
 switch method
     case 'dft'
+        % 分步实现：Wigner(行FFT) → SFFT(列FFT)
+        Y_tf = zeros(N, M);
+        for n = 1:N
+            if (n-1)*M+M <= length(signal_no_cp)
+                r_n = signal_no_cp((n-1)*M+1 : n*M);
+            else
+                r_n = zeros(1, M);
+            end
+            Y_tf(n, :) = fft(r_n) / sqrt(M);   % Wigner：行FFT
+        end
+        % SFFT：列FFT
         dd_symbols = zeros(N, M);
         for m = 1:M
             dd_symbols(:, m) = fft(Y_tf(:, m)) / sqrt(N);
         end
+
     case 'zak'
-        dd_symbols = fft2(Y_tf) / sqrt(N * M);
+        % 二维FFT一步完成 Wigner+SFFT
+        r_matrix = reshape(signal_no_cp(1:N*M), M, N).';  % NxM矩阵
+        dd_symbols = fft2(r_matrix) / sqrt(N * M);
+        % 提取中间时频域结果供输出
+        Y_tf = zeros(N, M);
+        for n = 1:N
+            r_n = signal_no_cp((n-1)*M+1 : n*M);
+            Y_tf(n, :) = fft(r_n) / sqrt(M);
+        end
+
     otherwise
         error('不支持的方法: %s', method);
 end

@@ -81,14 +81,19 @@ end
 
 % --------------- 辅助函数2：Zak域方法 --------------- %
 function [s, X_tf] = otfs_mod_zak(x_dd, N, M)
-% Zak变换实现：直接通过二维IFFT
-% X_tf[n,m] = (1/sqrt(NM)) * sum_k sum_l x_dd[k,l] * exp(j2π(nk/N - ml/M))
-X_tf = ifft2(x_dd) * sqrt(N * M);
+% Zak变换实现：二维IFFT = ISFFT(列方向) + Heisenberg(行方向) 一步完成
+% ifft2 = IFFT_col(Doppler维) + IFFT_row(时延维)
+% 结果直接是时域信号矩阵，无需再做Heisenberg IFFT
 
-% Heisenberg变换（与DFT方法相同）
-s = zeros(1, N * M);
-for n = 1:N
-    s_n = ifft(X_tf(n, :)) * sqrt(M);
-    s((n-1)*M+1 : n*M) = s_n;
+% 二维IFFT：同时完成ISFFT和Heisenberg
+s_matrix = ifft2(x_dd) * sqrt(N * M);
+
+% 拼接各时隙为时域信号
+s = reshape(s_matrix.', 1, []);
+
+% 提取中间的时频域结果（仅列方向IFFT = ISFFT），供输出
+X_tf = zeros(N, M);
+for m = 1:M
+    X_tf(:, m) = ifft(x_dd(:, m)) * sqrt(N);
 end
 end
