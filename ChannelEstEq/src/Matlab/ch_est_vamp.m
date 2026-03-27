@@ -84,9 +84,10 @@ for t = 1:max_iter
     % EM自适应更新先验参数（每5次迭代更新一次，避免震荡）
     if em_update && mod(t, 5) == 0
         lambda = max(min(mean(pi_post), 0.5), 1e-3);
-        active_idx = pi_post > 0.5;
-        if sum(active_idx) > 0
-            var_x = max(mean(abs(mean_post(active_idx)).^2 + var_post(active_idx)), 0.01);
+        % var_x：活跃抽头的平均二阶矩
+        active_second_moment = pi_post .* (abs(mean_post).^2 + var_post);
+        if sum(pi_post) > 0.1
+            var_x = max(sum(active_second_moment) / (sum(pi_post) + 1e-10), 0.01);
         end
     end
 
