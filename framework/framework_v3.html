@@ -330,7 +330,7 @@
     </div>
 
     <div class="arrow-down"></div>
-    <div class="iter-annotation"><span class="iter-sym">↻</span>迭代回环（可选）：7'(均衡) ⇌ 10-2(残余补偿) ⇌ 2'(信道解码)<br>SC-FDE: Turbo 3~6次 | OTFS: MP 10~30次 | 其余: 单次直通</div>
+    <div class="iter-annotation"><span class="iter-sym">↻</span>迭代回环（可选）：7'(均衡) ⇌ 10-2(残余补偿) ⇌ 2'(信道解码)<br>SC-TDE: Turbo 3~6次(可选) | SC-FDE: Turbo 3~6次(可选) | OTFS: MP 10~30次(必选) | 其余: 单次直通</div>
     <div class="arrow-down"></div>
     <div class="module mod-opt-rx"><span class="num">5'</span>解扩<div class="detail">相关解扩 / 解跳频 / DCD/DED检测</div></div>
     <div class="arrow-down"></div>
@@ -351,7 +351,7 @@
   <!-- SC-TDE -->
   <div class="config-card cc-sc">
     <h3>单载波时域均衡 (SC-TDE)</h3>
-    <p class="config-sub">跳过模块5、6；接收端时域自适应均衡（LMS/RLS/DFE），无分块FFT结构；10-2的PLL嵌入均衡器中；无迭代，单次直通</p>
+    <p class="config-sub">跳过模块5、6；接收端时域自适应均衡（PTR+DFE），10-2的PLL嵌入均衡器中；可选Turbo迭代</p>
     <div class="config-flow">
       <span class="flow-label fl-tx">TX</span>
       <span class="cf-block cf-on">1 信源编码</span><span class="cf-arrow">&rarr;</span>
@@ -372,13 +372,19 @@
       <span class="cf-block cf-arr">11 阵列预处理(可选)</span><span class="cf-arrow-arr">&rarr;</span>
       <span class="cf-block cf-rxonly">10-1 粗多普勒补偿</span><span class="cf-arrow">&rarr;</span>
       <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-on-rx">7' 导频&rarr;时域均衡(LMS/DFE)</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-rxonly">10-2 残余相位(PLL嵌入)</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-iter">7' PTR+DFE时域均衡</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-iter">10-2 PLL相位跟踪</span><span class="cf-arrow">&rarr;</span>
       <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">&rarr;</span>
       <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">&rarr;</span>
       <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">&rarr;</span>
-      <span class="cf-block cf-on-rx">2' 信道解码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-iter">2' 信道解码</span><span class="cf-arrow">&rarr;</span>
       <span class="cf-block cf-on-rx">1' 信源解码</span>
+    </div>
+    <div class="iter-return-arrow">
+      <span class="arrow-start">&larr; 7'</span>
+      <span class="arrow-line"></span>
+      <span class="iter-label">&darr;&#8635; Turbo迭代（可选）：7'(PTR+DFE) &hArr; 10-2(PLL) &hArr; 2'(译码) 交换L_e，3~6次</span>
+      <span class="arrow-end">2' &rarr;</span>
     </div>
   </div>
 
@@ -683,7 +689,7 @@
       <td>↻</td>
       <td class="mod-name" style="color:#c85a20">（非独立模块）</td>
       <td class="mod-name" style="color:#c85a20">迭代回环：7' ⇌ 10-2 ⇌ 2'</td>
-      <td><span class="cross">&mdash;</span></td>
+      <td><span class="check-new">Turbo均衡<br>7'⇌10-2⇌2'<br>可选 3~6次</span></td>
       <td class="td-new"><span class="check-new">Turbo均衡<br>7'⇌10-2⇌2'<br>可选 3~6次</span></td>
       <td><span class="cross">&mdash;</span></td>
       <td><span class="cross">&mdash;</span></td>
@@ -725,9 +731,10 @@
     <h4>&#9998; 迭代回环不是独立模块，而是7'⇌10-2⇌2'的组合回路</h4>
     <ul>
       <li>v3明确：原v2的"模块12"不再作为独立编号模块，而是由7'(均衡)、10-2(残余多普勒补偿)和2'(信道解码)之间的信息交互构成</li>
+      <li><b>SC-TDE Turbo</b>：PTR+DFE均衡器(7') ⇌ PLL相位跟踪(10-2) ⇌ 信道译码器(2')，交换外信息L_e，可选迭代3~6次</li>
       <li><b>SC-FDE Turbo</b>：SISO-MMSE均衡器(7') ⇌ CFO校正(10-2) ⇌ SISO信道译码器BCJR(2')，交换外信息L_e，可选迭代3~6次</li>
       <li><b>OTFS MP</b>：DD域MP均衡器(7')内部BP迭代10~30次 ⇌ 信道译码(2')外层迭代，稀疏因子图，必选</li>
-      <li><b>SC-TDE / DSSS / OFDM / FH-MFSK</b>：无迭代，7' → 10-2 → ... → 2' 单次直通</li>
+      <li><b>DSSS / OFDM / FH-MFSK</b>：无迭代，7' → 10-2 → ... → 2' 单次直通</li>
       <li>Turbo均衡须配合系统码（Turbo或卷积），不适用于无编码或非系统码场景</li>
       <li>MATLAB：<code>turbo_equalizer.m</code>、<code>mp_detector.m</code></li>
     </ul>
