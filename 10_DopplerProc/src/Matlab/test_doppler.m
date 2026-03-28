@@ -107,33 +107,43 @@ end
 %% ==================== 三、重采样补偿 ==================== %%
 fprintf('\n--- 3. 重采样补偿 ---\n\n');
 
-% 生成简单测试信号做精度和速度对比
+% 生成测试信号做精度和速度对比（多种数据长度）
 rng(30);
-N_test = 50000;
-s_test = randn(1, N_test) + 1j*randn(1, N_test);
-alpha_test = 0.001;
+alpha_test = 1 / c_sound;             % 1m/s对应α
 
-%% 3.1 两种重采样方法精度对比（vs MATLAB resample基准）
+%% 3.1 重采样精度+速度对比（多数据长度）
 try
-    tic; y_spline = comp_resample_spline(s_test, alpha_test, fs); t_spline = toc;
-    tic; y_farrow = comp_resample_farrow(s_test, alpha_test, fs); t_farrow = toc;
+    test_lengths = [10000, 50000, 200000, 500000];
+    fprintf('[通过] 3.1 重采样精度+速度对比 (α=%.4f, v=%.1fm/s):\n', alpha_test, alpha_test*c_sound);
+    fprintf('    %-10s | %-12s %-12s %-12s | %-12s %-12s %-12s\n', ...
+            '数据长度', 'Spline(ms)', 'Farrow(ms)', 'resample(ms)', ...
+            'Spline相关', 'Farrow相关', '速度比');
 
-    % MATLAB自带resample做参考基准
-    tic;
-    [P, Q] = rat(1/(1+alpha_test), 1e-6);
-    y_ref = resample(s_test, P, Q);
-    y_ref = y_ref(1:min(N_test, length(y_ref)));
-    if length(y_ref) < N_test, y_ref = [y_ref, zeros(1, N_test-length(y_ref))]; end
-    t_ref = toc;
+    for li = 1:length(test_lengths)
+        N_test = test_lengths(li);
+        s_test = randn(1, N_test) + 1j*randn(1, N_test);
 
-    % 精度对比（与resample结果的相关性）
-    corr_spline = abs(sum(y_spline .* conj(y_ref))) / (norm(y_spline)*norm(y_ref));
-    corr_farrow = abs(sum(y_farrow .* conj(y_ref))) / (norm(y_farrow)*norm(y_ref));
+        % 三种方法计时
+        tic; y_spline = comp_resample_spline(s_test, alpha_test, fs); t_spline = toc;
+        tic; y_farrow = comp_resample_farrow(s_test, alpha_test, fs); t_farrow = toc;
 
-    fprintf('[通过] 3.1 重采样精度对比:\n');
-    fprintf('    Spline:   相关=%.6f, 耗时=%.1fms\n', corr_spline, t_spline*1000);
-    fprintf('    Farrow:   相关=%.6f, 耗时=%.1fms\n', corr_farrow, t_farrow*1000);
-    fprintf('    resample: 参考基准,   耗时=%.1fms\n', t_ref*1000);
+        tic;
+        [P, Q] = rat(1/(1+alpha_test), 1e-6);
+        y_ref = resample(s_test, P, Q);
+        y_ref = y_ref(1:min(N_test, length(y_ref)));
+        if length(y_ref) < N_test, y_ref = [y_ref, zeros(1, N_test-length(y_ref))]; end
+        t_ref = toc;
+
+        % 精度（相关性）
+        corr_sp = abs(sum(y_spline .* conj(y_ref))) / (norm(y_spline)*norm(y_ref)+1e-30);
+        corr_fa = abs(sum(y_farrow .* conj(y_ref))) / (norm(y_farrow)*norm(y_ref)+1e-30);
+
+        % Farrow vs resample速度比
+        speed_ratio = t_farrow / (t_ref + 1e-10);
+
+        fprintf('    %-10d | %-12.1f %-12.1f %-12.1f | %-12.6f %-12.6f %-12.1fx\n', ...
+                N_test, t_spline*1000, t_farrow*1000, t_ref*1000, corr_sp, corr_fa, speed_ratio);
+    end
     pass_count = pass_count + 1;
 catch e
     fprintf('[失败] 3.1 重采样 | %s\n', e.message);
@@ -142,6 +152,10 @@ end
 
 %% 3.2 重采样后信号长度保持
 try
+    N_test = 50000;
+    s_test = randn(1, N_test) + 1j*randn(1, N_test);
+    y_spline = comp_resample_spline(s_test, alpha_test, fs);
+    y_farrow = comp_resample_farrow(s_test, alpha_test, fs);
     assert(length(y_spline) == N_test, 'Spline输出长度应与输入一致');
     assert(length(y_farrow) == N_test, 'Farrow输出长度应与输入一致');
 
