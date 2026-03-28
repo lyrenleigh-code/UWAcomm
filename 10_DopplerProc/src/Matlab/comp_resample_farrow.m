@@ -1,49 +1,50 @@
 function y_resampled = comp_resample_farrow(y, alpha_est, fs)
 % 功能：Farrow滤波器重采样——向量化三阶Lagrange插值
-% 版本：V2.0.0
+% 版本：V3.0.0
 % 输入：
-%   y, alpha_est, fs（同comp_resample_spline）
+%   y         - 接收信号 (1xN，实数或复数)
+%   alpha_est - 估计的多普勒因子
+%   fs        - 采样率 (Hz)
 % 输出：
 %   y_resampled - 重采样后信号 (1xN)
 %
 % 备注：
-%   - 全向量化实现，无for循环，长数据性能与MATLAB resample相当
-%   - 三阶Lagrange插值：4点邻域，每样本等效4乘3加
-%   - 边界处理：两端补零3个样本
+%   - 三阶Lagrange插值：4点邻域，通过4个点的精确多项式
+%   - 全向量化：一次性计算所有N个输出样本
+%   - 精度略低于Catmull-Rom（C0连续 vs C1连续）
+%   - 不调用任何MATLAB系统插值函数
 
 %% ========== 参数校验 ========== %%
 if isempty(y), error('输入信号不能为空！'); end
 y = y(:).';
 N = length(y);
 
-%% ========== 向量化Farrow重采样 ========== %%
-ratio = 1 + alpha_est;
+%% ========== 新采样位置 ========== %%
+pos = (1:N) * (1 + alpha_est);
 
-% 所有目标采样位置（浮点）
-pos = (1:N) * ratio;
+%% ========== 向量化Lagrange插值 ========== %%
+pad = 2;
+y_pad = [zeros(1, pad), y, zeros(1, pad)];
+
 int_pos = floor(pos);
 frac = pos - int_pos;
 
-% 补零（两端各3个，防止边界越界）
-pad = 3;
-y_pad = [zeros(1, pad), y, zeros(1, pad)];
+idx = int_pos + pad;
+idx = max(2, min(idx, length(y_pad) - 2));
 
-% 四个邻域样本的索引（向量化取值）
-idx = int_pos + pad;                   % 中心索引（在补零数组中）
-idx = max(2, min(idx, length(y_pad) - 2));  % 钳位防越界
-
+% 四邻域
 x0 = y_pad(idx - 1);
 x1 = y_pad(idx);
 x2 = y_pad(idx + 1);
 x3 = y_pad(idx + 2);
 
-% 三阶Lagrange多项式系数（向量化）
-c0 = x1;
-c1 = -x0/3 - x1/2 + x2 - x3/6;
-c2 = x0/2 - x1 + x2/2;
-c3 = -x0/6 + x1/2 - x2/2 + x3/6;
-
-% Horner求值（向量化）
-y_resampled = ((c3 .* frac + c2) .* frac + c1) .* frac + c0;
+% Lagrange三阶系数 + Horner求值（合并写减少临时变量）
+%   c0 = x1
+%   c1 = -x0/3 - x1/2 + x2 - x3/6
+%   c2 = (x0 - 2*x1 + x2) / 2
+%   c3 = (-x0 + 3*x1 - 3*x2 + x3) / 6
+y_resampled = x1 + frac .* ((-x0/3 - x1/2 + x2 - x3/6) + ...
+              frac .* ((x0 - 2*x1 + x2)/2 + ...
+              frac .* (-x0 + 3*x1 - 3*x2 + x3)/6));
 
 end
