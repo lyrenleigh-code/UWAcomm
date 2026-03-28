@@ -293,6 +293,21 @@ catch e
     fail_count = fail_count + 1;
 end
 
+%% 3.8 均衡器收敛曲线对比
+try
+    % LMS/RLS用BPSK参考，DFE用QPSK参考，分开画
+    % DFE收敛曲线
+    n_dfe_all = min(length(x_dfe), train_len + data_len);
+    plot_eq_convergence({x_dfe(1:n_dfe_all)}, tx(1:n_dfe_all), {'RLS-DFE(+PLL)'}, 30, ...
+        'RLS-DFE收敛曲线 (QPSK, SNR=20dB, 训练100+数据300)');
+
+    fprintf('[通过] 3.8 均衡器收敛曲线\n');
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.8 收敛曲线 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
 %% ==================== 四、SC-FDE/OFDM频域均衡 ==================== %%
 fprintf('\n--- 4. 频域均衡 ---\n\n');
 
