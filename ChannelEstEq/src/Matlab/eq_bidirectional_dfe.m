@@ -57,46 +57,37 @@ x_hat(x_hat == 0) = 1;
 
 end
 
-% --------------- 辅助函数：单方向DFE --------------- %
+% --------------- 辅助函数：单方向DFE（频域MMSE设计） --------------- %
 function [decisions, soft_output] = single_direction_dfe(y, h_est, num_ff, num_fb, noise_var)
 % SINGLE_DIRECTION_DFE 单方向DFE均衡，输出硬判决和软值
 
-L = length(h_est);
+L_full = length(h_est);
 N = length(y);
 
-% MMSE前馈滤波器设计
-H_col = [h_est(:); zeros(num_ff-1, 1)];
-H_row = [h_est(1); zeros(num_ff-1, 1)];
-H_mat = toeplitz(H_col, H_row);
-H_ff = H_mat(1:min(num_ff+L-1, size(H_mat,1)), 1:min(num_ff, size(H_mat,2)));
+% 频域MMSE前馈滤波器
+Nfft = max(2^nextpow2(num_ff + L_full), 64);
+H = fft(h_est, Nfft);
+W_ff_freq = conj(H) ./ (abs(H).^2 + noise_var);
+w_ff = ifft(W_ff_freq);
+w_ff = w_ff(1:num_ff);
 
-nrows = size(H_ff, 1);
-Ryy = H_ff * H_ff' + noise_var * eye(nrows);
+% 级联响应（用于反馈）
+c = conv(w_ff, h_est);
 
-delay = floor(num_ff/2);
-col_idx = min(delay+1, size(H_ff, 2));
-p = H_ff(:, col_idx);
-w_ff = Ryy \ p;
+% 前馈滤波
+y_filtered = conv(y, w_ff, 'same');
 
 % 逐符号DFE
 soft_output = zeros(1, N);
 decisions = zeros(1, N);
-pad_len = num_ff + L;
-y_padded = [zeros(1, pad_len), y, zeros(1, pad_len)];
 
 for n = 1:N
-    % 前馈
-    y_seg = y_padded(n : n+nrows-1);
-    if length(y_seg) < nrows
-        y_seg = [y_seg, zeros(1, nrows - length(y_seg))]; %#ok<AGROW>
-    end
-    ff_out = w_ff' * y_seg(1:nrows).';
+    ff_out = y_filtered(n);
 
-    % 反馈
     fb_out = 0;
     for k = 1:min(num_fb, n-1)
-        if k < L
-            fb_out = fb_out + h_est(k+1) * decisions(n-k);
+        if k+1 <= length(c)
+            fb_out = fb_out + c(k+1) * decisions(n-k);
         end
     end
 

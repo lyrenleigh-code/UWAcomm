@@ -222,8 +222,9 @@ try
     n_compare2 = min(length(dec_bidfe), data_len);
     ber_bidfe = sum(dec_bidfe(1:n_compare2) ~= data(1:n_compare2)) / n_compare2;
 
-    % 双向DFE应不差于单向DFE
-    assert(ber_bidfe <= ber_dfe + 0.05, '双向DFE应不差于单向DFE');
+    % 双向DFE BER应合理，且不差于单向DFE
+    assert(ber_bidfe < 0.2, sprintf('双向DFE BER=%.1f%%过高', ber_bidfe*100));
+    assert(ber_bidfe <= ber_dfe + 0.02, '双向DFE应不差于单向DFE');
 
     fprintf('[通过] 3.4 双向DFE | BER=%.1f%% (单向DFE=%.1f%%)\n', ber_bidfe*100, ber_dfe*100);
     pass_count = pass_count + 1;
