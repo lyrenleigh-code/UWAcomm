@@ -199,7 +199,7 @@ try
     fprintf('[通过] 5.1 估计结果可视化\n');
     pass_count = pass_count + 1;
 catch e
-    fprintf('[失败] 5.1 可视化 | %s\n', e.message);
+    fprintf('[失败] 5.1 可视化 | %s (行%d)\n', e.message, e.stack(1).line);
     fail_count = fail_count + 1;
 end
 
