@@ -283,8 +283,9 @@ end
 try
     n_vis = min(length(x_dfe) - train_len, data_len);
     dfe_data = x_dfe(train_len+1 : train_len+n_vis);
-    plot_equalizer_output(data_qpsk(1:n_vis), {dfe_data}, {'RLS-DFE(+PLL)'}, ...
-        'SC-TDE DFE均衡 (QPSK, SNR=20dB)');
+    rx_before = rx(train_len+1 : train_len+n_vis);  % 均衡前的接收信号
+    plot_equalizer_output(data_qpsk(1:n_vis), rx_before, {dfe_data}, {'RLS-DFE(+PLL)'}, ...
+        'SC-TDE DFE均衡前后对比 (QPSK, SNR=15dB)');
 
     fprintf('[通过] 3.7 DFE均衡可视化\n');
     pass_count = pass_count + 1;
@@ -348,7 +349,9 @@ end
 
 %% 4.3 均衡结果可视化
 try
-    plot_equalizer_output(x, {x_fde}, {'MMSE-FDE'}, 'SC-FDE均衡结果 (QPSK, SNR=20dB)');
+    % Y是频域接收（含信道畸变），x是原始时域符号
+    x_rx_freq = ifft(Y);               % 均衡前的时域信号
+    plot_equalizer_output(x, x_rx_freq, {x_fde}, {'MMSE-FDE'}, 'SC-FDE均衡前后对比 (QPSK, SNR=20dB)');
 
     fprintf('[通过] 4.3 均衡可视化\n');
     pass_count = pass_count + 1;
