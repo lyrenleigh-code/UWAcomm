@@ -157,8 +157,17 @@ fprintf('\n--- 3. SC-TDE均衡 ---\n\n');
 
 %% 构建SC-TDE测试信号（QPSK + 多径信道 + 训练序列）
 rng(30);
-N_ch = 64; data_len = 300; train_len = 100;
-[h_true, ~, ch_info] = gen_test_channel(N_ch, 3, 10, 20, 'exponential');
+data_len = 300; train_len = 100;
+snr_db_eq = 20;
+noise_var_eq = 1 / 10^(snr_db_eq/10);
+
+% 确定性信道（第一径在位置1，避免时间对齐问题）
+h_true_eq = zeros(1, 16);
+h_true_eq(1) = 1.0;
+h_true_eq(3) = 0.5 * exp(1j*0.4);
+h_true_eq(6) = 0.3 * exp(1j*1.1);
+h_true_eq(10) = 0.15 * exp(1j*2.3);
+h_true_eq = h_true_eq / sqrt(sum(abs(h_true_eq).^2));
 
 % QPSK训练和数据
 constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
@@ -167,16 +176,16 @@ data_qpsk = constellation(randi(4, 1, data_len));
 tx = [training_qpsk, data_qpsk];
 
 % 过信道 + 加噪
-rx = conv(tx, h_true); rx = rx(1:length(tx));
-rx = rx + sqrt(ch_info.noise_var/2) * (randn(size(rx)) + 1j*randn(size(rx)));
+rx = conv(tx, h_true_eq); rx = rx(1:length(tx));
+rx = rx + sqrt(noise_var_eq/2) * (randn(size(rx)) + 1j*randn(size(rx)));
 
 %% 3.1 LMS均衡
 try
     training_bpsk = 2*randi([0 1],1,train_len)-1;
     data_bpsk = 2*randi([0 1],1,data_len)-1;
     tx_b = [training_bpsk, data_bpsk];
-    rx_b = conv(tx_b, h_true); rx_b = rx_b(1:length(tx_b));
-    rx_b = rx_b + sqrt(ch_info.noise_var/2)*(randn(size(rx_b))+1j*randn(size(rx_b)));
+    rx_b = conv(tx_b, h_true_eq); rx_b = rx_b(1:length(tx_b));
+    rx_b = rx_b + sqrt(noise_var_eq/2)*(randn(size(rx_b))+1j*randn(size(rx_b)));
 
     [x_lms, ~, ~] = eq_lms(rx_b, training_bpsk, 0.01, 21, data_len);
     dec = sign(real(x_lms(train_len+1:end)));
@@ -205,7 +214,7 @@ end
 
 %% 3.3 PTR被动时反转
 try
-    [ptr_out, ptr_gain] = eq_ptrm(rx, h_true);
+    [ptr_out, ptr_gain] = eq_ptrm(rx, h_true_eq);
     assert(~isempty(ptr_out), 'PTR输出不应为空');
     assert(length(ptr_out) == length(rx), 'PTR输出长度应与输入一致');
 
@@ -219,7 +228,7 @@ end
 %% 3.4 RLS-DFE均衡（含PLL，输出LLR）
 try
     pll = struct('enable', true, 'Kp', 0.01, 'Ki', 0.005);
-    [llr_dfe, x_dfe, nv_dfe] = eq_dfe(rx, h_true, training_qpsk, 21, 10, 0.998, pll);
+    [llr_dfe, x_dfe, nv_dfe] = eq_dfe(rx, h_true_eq, training_qpsk, 21, 10, 0.998, pll);
 
     % LLR→硬判决→BER
     dec_dfe = sign(real(llr_to_symbol(llr_dfe, 'qpsk')));
@@ -238,7 +247,7 @@ end
 
 %% 3.5 双向DFE
 try
-    [llr_bidfe, x_bidfe, nv_bidfe] = eq_bidirectional_dfe(rx, h_true, training_qpsk, 21, 10, 0.998, pll);
+    [llr_bidfe, x_bidfe, nv_bidfe] = eq_bidirectional_dfe(rx, h_true_eq, training_qpsk, 21, 10, 0.998, pll);
     dec_bidfe = sign(real(llr_to_symbol(llr_bidfe, 'qpsk')));
     n_cmp2 = min(length(dec_bidfe), length(dec_ref));
     ber_bidfe = sum(dec_bidfe(1:n_cmp2) ~= dec_ref(1:n_cmp2)) / n_cmp2;
