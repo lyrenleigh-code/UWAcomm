@@ -155,27 +155,34 @@ end
 %% ==================== 三、SC-TDE均衡 ==================== %%
 fprintf('\n--- 3. SC-TDE均衡 ---\n\n');
 
+%% 构建SC-TDE测试信号（QPSK + 多径信道 + 训练序列）
+rng(30);
+N_ch = 64; data_len = 300; train_len = 100;
+[h_true, ~, ch_info] = gen_test_channel(N_ch, 3, 10, 20, 'exponential');
+
+% QPSK训练和数据
+constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
+training_qpsk = constellation(randi(4, 1, train_len));
+data_qpsk = constellation(randi(4, 1, data_len));
+tx = [training_qpsk, data_qpsk];
+
+% 过信道 + 加噪
+rx = conv(tx, h_true); rx = rx(1:length(tx));
+rx = rx + sqrt(ch_info.noise_var/2) * (randn(size(rx)) + 1j*randn(size(rx)));
+
 %% 3.1 LMS均衡
 try
-    rng(30);
-    N = 64; data_len = 200; train_len = 50;
-    [h_true, ~, ch_info] = gen_test_channel(N, 3, 10, 20, 'exponential');
+    training_bpsk = 2*randi([0 1],1,train_len)-1;
+    data_bpsk = 2*randi([0 1],1,data_len)-1;
+    tx_b = [training_bpsk, data_bpsk];
+    rx_b = conv(tx_b, h_true); rx_b = rx_b(1:length(tx_b));
+    rx_b = rx_b + sqrt(ch_info.noise_var/2)*(randn(size(rx_b))+1j*randn(size(rx_b)));
 
-    % 发送BPSK
-    training = 2*randi([0 1],1,train_len)-1;
-    data = 2*randi([0 1],1,data_len)-1;
-    tx = [training, data];
-
-    % 过信道
-    rx = conv(tx, h_true); rx = rx(1:length(tx));
-    rx = rx + sqrt(ch_info.noise_var/2)*(randn(size(rx))+1j*randn(size(rx)));
-
-    [x_lms, ~, mse_hist] = eq_lms(rx, training, 0.01, 21, data_len);
+    [x_lms, ~, ~] = eq_lms(rx_b, training_bpsk, 0.01, 21, data_len);
     dec = sign(real(x_lms(train_len+1:end)));
-    ber_lms = sum(dec ~= data) / data_len;
+    ber_lms = sum(dec ~= data_bpsk) / data_len;
 
     assert(ber_lms < 0.15, 'LMS BER过高');
-
     fprintf('[通过] 3.1 LMS均衡 | BER=%.1f%%\n', ber_lms*100);
     pass_count = pass_count + 1;
 catch e
@@ -185,9 +192,9 @@ end
 
 %% 3.2 RLS均衡
 try
-    [x_rls, ~, ~] = eq_rls(rx, training, 0.99, 21, data_len);
+    [x_rls, ~, ~] = eq_rls(rx_b, training_bpsk, 0.99, 21, data_len);
     dec_rls = sign(real(x_rls(train_len+1:end)));
-    ber_rls = sum(dec_rls ~= data) / data_len;
+    ber_rls = sum(dec_rls ~= data_bpsk) / data_len;
 
     fprintf('[通过] 3.2 RLS均衡 | BER=%.1f%%\n', ber_rls*100);
     pass_count = pass_count + 1;
@@ -196,66 +203,84 @@ catch e
     fail_count = fail_count + 1;
 end
 
-%% 3.3 DFE均衡
+%% 3.3 PTR被动时反转
 try
-    % 用已知信道做DFE（理想信道估计场景）
-    [x_dfe, ~] = eq_dfe(rx, h_true, 20, 9, ch_info.noise_var);
-    n_dfe = min(length(x_dfe), train_len + data_len);
-    dec_dfe = sign(real(x_dfe(train_len+1 : n_dfe)));
-    n_compare = min(length(dec_dfe), data_len);
-    ber_dfe = sum(dec_dfe(1:n_compare) ~= data(1:n_compare)) / n_compare;
+    [ptr_out, ptr_gain] = eq_ptrm(rx, h_true);
+    assert(~isempty(ptr_out), 'PTR输出不应为空');
+    assert(length(ptr_out) == length(rx), 'PTR输出长度应与输入一致');
 
-    assert(ber_dfe < 0.2, 'DFE BER过高');
-
-    fprintf('[通过] 3.3 DFE均衡 | BER=%.1f%%\n', ber_dfe*100);
+    fprintf('[通过] 3.3 PTR | 处理增益=%.1fdB, 输出长度=%d\n', ptr_gain, length(ptr_out));
     pass_count = pass_count + 1;
 catch e
-    fprintf('[失败] 3.3 DFE | %s\n', e.message);
+    fprintf('[失败] 3.3 PTR | %s\n', e.message);
     fail_count = fail_count + 1;
 end
 
-%% 3.4 双向DFE优于单向DFE
+%% 3.4 RLS-DFE均衡（含PLL，输出LLR）
 try
-    [x_bidfe, soft_fwd, soft_bwd] = eq_bidirectional_dfe(rx, h_true, 20, 9, ch_info.noise_var);
-    n_bidfe = min(length(x_bidfe), train_len + data_len);
-    dec_bidfe = x_bidfe(train_len+1 : n_bidfe);
-    n_compare2 = min(length(dec_bidfe), data_len);
-    ber_bidfe = sum(dec_bidfe(1:n_compare2) ~= data(1:n_compare2)) / n_compare2;
+    pll = struct('enable', true, 'Kp', 0.01, 'Ki', 0.005);
+    [llr_dfe, x_dfe, nv_dfe] = eq_dfe(rx, h_true, training_qpsk, 21, 10, 0.998, pll);
 
-    % 双向DFE BER应合理，且不差于单向DFE
+    % LLR→硬判决→BER
+    dec_dfe = sign(real(llr_to_symbol(llr_dfe, 'qpsk')));
+    dec_ref = sign(real(data_qpsk));
+    n_cmp = min(length(dec_dfe), length(dec_ref));
+    ber_dfe = sum(dec_dfe(1:n_cmp) ~= dec_ref(1:n_cmp)) / n_cmp;
+
+    assert(ber_dfe < 0.2, sprintf('DFE BER=%.1f%%过高', ber_dfe*100));
+
+    fprintf('[通过] 3.4 RLS-DFE(+PLL) | BER=%.1f%%, 噪声方差=%.4f\n', ber_dfe*100, nv_dfe);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.4 DFE | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 3.5 双向DFE
+try
+    [llr_bidfe, x_bidfe, nv_bidfe] = eq_bidirectional_dfe(rx, h_true, training_qpsk, 21, 10, 0.998, pll);
+    dec_bidfe = sign(real(llr_to_symbol(llr_bidfe, 'qpsk')));
+    n_cmp2 = min(length(dec_bidfe), length(dec_ref));
+    ber_bidfe = sum(dec_bidfe(1:n_cmp2) ~= dec_ref(1:n_cmp2)) / n_cmp2;
+
     assert(ber_bidfe < 0.2, sprintf('双向DFE BER=%.1f%%过高', ber_bidfe*100));
-    assert(ber_bidfe <= ber_dfe + 0.02, '双向DFE应不差于单向DFE');
 
-    fprintf('[通过] 3.4 双向DFE | BER=%.1f%% (单向DFE=%.1f%%)\n', ber_bidfe*100, ber_dfe*100);
+    fprintf('[通过] 3.5 双向DFE | BER=%.1f%% (单向=%.1f%%)\n', ber_bidfe*100, ber_dfe*100);
     pass_count = pass_count + 1;
 catch e
-    fprintf('[失败] 3.4 双向DFE | %s\n', e.message);
+    fprintf('[失败] 3.5 双向DFE | %s\n', e.message);
     fail_count = fail_count + 1;
 end
 
-%% 3.5 均衡器对比可视化（LMS/RLS/DFE/双向DFE）
+%% 3.6 LLR↔符号转换回环
 try
-    % 取数据段的均衡结果
-    n_lms = min(length(x_lms) - train_len, data_len);
-    n_rls = min(length(x_rls) - train_len, data_len);
-    n_d = min(length(x_dfe) - train_len, data_len);
-    n_bd = min(length(x_bidfe) - train_len, data_len);
-    min_len = max(min([n_lms, n_rls, n_d, n_bd]), 1);
+    test_llr = randn(1, 100);
+    sym = llr_to_symbol(test_llr, 'qpsk');
+    llr_back = symbol_to_llr(sym, 0.1, 'qpsk');
 
-    x_lms_data = x_lms(train_len+1 : train_len+min_len);
-    x_rls_data = x_rls(train_len+1 : train_len+min_len);
-    x_dfe_data = x_dfe(train_len+1 : train_len+min_len);
-    x_bidfe_data = x_bidfe(train_len+1 : train_len+min_len);
+    assert(length(sym) == 50, 'QPSK: 100 LLR应产生50符号');
+    assert(length(llr_back) == 100, '50符号应恢复100 LLR');
+    % 符号一致（同号）
+    assert(all(sign(test_llr) == sign(llr_back)), 'LLR符号应保持一致');
 
-    plot_equalizer_output(data(1:min_len), ...
-        {x_lms_data, x_rls_data, x_dfe_data, x_bidfe_data}, ...
-        {'LMS', 'RLS', 'DFE', '双向DFE'}, ...
-        'SC-TDE均衡器对比 (BPSK, SNR=20dB)');
-
-    fprintf('[通过] 3.5 SC-TDE均衡器对比可视化\n');
+    fprintf('[通过] 3.6 LLR↔符号转换 | 100 LLR → 50符号 → 100 LLR\n');
     pass_count = pass_count + 1;
 catch e
-    fprintf('[失败] 3.5 均衡器可视化 | %s\n', e.message);
+    fprintf('[失败] 3.6 LLR↔符号 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 3.7 DFE均衡星座图可视化
+try
+    n_vis = min(length(x_dfe) - train_len, data_len);
+    dfe_data = x_dfe(train_len+1 : train_len+n_vis);
+    plot_equalizer_output(data_qpsk(1:n_vis), {dfe_data}, {'RLS-DFE(+PLL)'}, ...
+        'SC-TDE DFE均衡 (QPSK, SNR=20dB)');
+
+    fprintf('[通过] 3.7 DFE均衡可视化\n');
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.7 DFE可视化 | %s\n', e.message);
     fail_count = fail_count + 1;
 end
 

@@ -1,99 +1,48 @@
-function [x_hat, ber_fwd, ber_bwd] = eq_bidirectional_dfe(y, h_est, num_ff, num_fb, noise_var)
+function [LLR_out, x_hat, noise_var_est] = eq_bidirectional_dfe(y, h_est, training, num_ff, num_fb, lambda_rls, pll_params)
 % 功能：双向DFE——前向+后向DFE联合判决，抑制错误传播
-% 版本：V1.0.0
-% 输入：
-%   y         - 接收信号 (1xN)
-%   h_est     - 时域信道估计 (1xL)
-%   num_ff    - 前馈滤波器阶数 (默认 2*L)
-%   num_fb    - 反馈滤波器阶数 (默认 L-1)
-%   noise_var - 噪声方差 (默认 0.01)
+% 版本：V3.0.0 — 基于RLS自适应DFE v3.0
+% 输入：（同eq_dfe）
 % 输出：
-%   x_hat   - 双向联合判决后的符号估计 (1xN)
-%   ber_fwd - 前向DFE的软可靠度 (1xN，绝对值越大越可靠)
-%   ber_bwd - 后向DFE的软可靠度 (1xN)
+%   LLR_out       - 联合判决后的LLR软信息
+%   x_hat         - 联合判决后的软符号
+%   noise_var_est - 估计噪声方差
 %
 % 备注：
-%   - 前向DFE：从左到右逐符号均衡（标准DFE）
-%   - 后向DFE：将信号和信道时间反转后从右到左均衡
-%   - 联合判决：取两个方向中可靠度更高的结果
-%   - 优势：单向DFE的错误传播被另一方向纠正，BER降低0.4~1.8dB
+%   - 前向DFE：标准方向均衡
+%   - 后向DFE：信号和训练序列反转后均衡
+%   - 联合：取LLR绝对值更大方向的结果
 
-%% ========== 入参解析 ========== %%
-y = y(:).'; h_est = h_est(:).';
-L = length(h_est);
-N = length(y);
-if nargin < 5 || isempty(noise_var), noise_var = 0.01; end
-if nargin < 4 || isempty(num_fb), num_fb = L - 1; end
-if nargin < 3 || isempty(num_ff), num_ff = 2 * L; end
+%% ========== 入参 ========== %%
+if nargin < 7, pll_params = struct('enable',true,'Kp',0.01,'Ki',0.005); end
+if nargin < 6 || isempty(lambda_rls), lambda_rls = 0.998; end
+if nargin < 5 || isempty(num_fb), num_fb = 10; end
+if nargin < 4 || isempty(num_ff), num_ff = 21; end
 
-%% ========== 前向DFE（从左到右） ========== %%
-[x_fwd, soft_fwd] = single_direction_dfe(y, h_est, num_ff, num_fb, noise_var);
+%% ========== 前向DFE ========== %%
+[llr_fwd, x_fwd, nv_fwd] = eq_dfe(y, h_est, training, num_ff, num_fb, lambda_rls, pll_params);
 
-%% ========== 后向DFE（信号和信道时间反转后均衡） ========== %%
+%% ========== 后向DFE ========== %%
 y_rev = fliplr(y);
-h_rev = fliplr(h_est);
-[x_bwd_rev, soft_bwd_rev] = single_direction_dfe(y_rev, h_rev, num_ff, num_fb, noise_var);
+training_rev = fliplr(training);
+h_rev = [];
+if ~isempty(h_est), h_rev = fliplr(h_est); end
 
-% 翻转回原始顺序
-x_bwd = fliplr(x_bwd_rev);
-soft_bwd = fliplr(soft_bwd_rev);
+[llr_bwd_rev, ~, nv_bwd] = eq_dfe(y_rev, h_rev, training_rev, num_ff, num_fb, lambda_rls, pll_params);
+llr_bwd = fliplr(llr_bwd_rev);
 
 %% ========== 联合判决 ========== %%
-% 取可靠度（软值绝对值）更大的方向的判决
-x_hat = zeros(1, N);
-ber_fwd = soft_fwd;
-ber_bwd = soft_bwd;
+min_len = min(length(llr_fwd), length(llr_bwd));
+LLR_out = zeros(1, min_len);
 
-for n = 1:N
-    if abs(soft_fwd(n)) >= abs(soft_bwd(n))
-        x_hat(n) = sign(real(soft_fwd(n)));
+for k = 1:min_len
+    if abs(llr_fwd(k)) >= abs(llr_bwd(k))
+        LLR_out(k) = llr_fwd(k);
     else
-        x_hat(n) = sign(real(soft_bwd(n)));
+        LLR_out(k) = llr_bwd(k);
     end
 end
 
-% 处理零值
-x_hat(x_hat == 0) = 1;
-
-end
-
-% --------------- 辅助函数：单方向DFE（频域MMSE设计） --------------- %
-function [decisions, soft_output] = single_direction_dfe(y, h_est, num_ff, num_fb, noise_var)
-% SINGLE_DIRECTION_DFE 单方向DFE均衡，输出硬判决和软值
-
-L_full = length(h_est);
-N = length(y);
-
-% 频域MMSE前馈滤波器
-Nfft = max(2^nextpow2(num_ff + L_full), 64);
-H = fft(h_est, Nfft);
-W_ff_freq = conj(H) ./ (abs(H).^2 + noise_var);
-w_ff = ifft(W_ff_freq);
-w_ff = w_ff(1:num_ff);
-
-% 级联响应（用于反馈）
-c = conv(w_ff, h_est);
-
-% 前馈滤波
-y_filtered = conv(y, w_ff, 'same');
-
-% 逐符号DFE
-soft_output = zeros(1, N);
-decisions = zeros(1, N);
-
-for n = 1:N
-    ff_out = y_filtered(n);
-
-    fb_out = 0;
-    for k = 1:min(num_fb, n-1)
-        if k+1 <= length(c)
-            fb_out = fb_out + c(k+1) * decisions(n-k);
-        end
-    end
-
-    soft_output(n) = ff_out - fb_out;
-    decisions(n) = sign(real(soft_output(n)));
-    if decisions(n) == 0, decisions(n) = 1; end
-end
+x_hat = llr_to_symbol(LLR_out, 'qpsk');
+noise_var_est = min(nv_fwd, nv_bwd);
 
 end
