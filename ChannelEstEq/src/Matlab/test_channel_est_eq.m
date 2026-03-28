@@ -158,7 +158,7 @@ fprintf('\n--- 3. SC-TDE均衡 ---\n\n');
 %% 构建SC-TDE测试信号（QPSK + 多径信道 + 训练序列）
 rng(30);
 data_len = 300; train_len = 100;
-snr_db_eq = 20;
+snr_db_eq = 15;
 noise_var_eq = 1 / 10^(snr_db_eq/10);
 
 % 确定性信道（第一径在位置1，避免时间对齐问题）
