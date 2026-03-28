@@ -81,7 +81,8 @@ w_ff = Ryy \ p;
 % 逐符号DFE
 soft_output = zeros(1, N);
 decisions = zeros(1, N);
-y_padded = [zeros(1, num_ff), y, zeros(1, num_ff)];
+pad_len = num_ff + L;
+y_padded = [zeros(1, pad_len), y, zeros(1, pad_len)];
 
 for n = 1:N
     % 前馈
