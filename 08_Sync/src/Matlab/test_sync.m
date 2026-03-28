@@ -11,6 +11,10 @@ fprintf('========================================\n\n');
 pass_count = 0;
 fail_count = 0;
 
+% 添加依赖模块路径
+proj_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+addpath(fullfile(proj_root, '10_DopplerProc', 'src', 'Matlab'));
+
 %% ==================== 一、同步序列生成 ==================== %%
 fprintf('--- 1. 同步序列生成 ---\n\n');
 
