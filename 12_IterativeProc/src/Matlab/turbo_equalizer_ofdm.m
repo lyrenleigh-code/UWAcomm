@@ -52,8 +52,8 @@ for iter = 1:num_iter
             X_soft = fft([soft_sym(1:n_sym), zeros(1, max(0, N-n_sym))]);
             X_prev = fft([x_hat_prev(1:min(length(x_hat_prev),N)), zeros(1, max(0, N-length(x_hat_prev)))]);
 
-            % 残余信号 = 接收 - 软估计 + 当前估计
-            Y_clean = Y_freq(:).' - H_est .* X_soft + H_est .* X_prev;
+            % 频域软IC：减去增量（软估计与上次估计的差）
+            Y_clean = Y_freq(:).' - H_est .* (X_soft - X_prev);
             [x_hat, ~] = eq_mmse_fde(Y_clean, H_est, noise_var);
         else
             [x_hat, ~] = eq_mmse_fde(Y_freq, H_est, noise_var);

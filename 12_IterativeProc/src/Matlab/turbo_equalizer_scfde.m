@@ -42,10 +42,17 @@ for iter = 1:num_iter
         % 第2+次：软干扰消除 → MMSE-FDE
         soft_symbols = llr_to_symbol(LLR_decode_inter, 'qpsk');
 
-        % 频域软干扰消除
+        % 频域软ISI消除：Y_clean = Y - H*(X_soft - X_hat_prev)
+        % 等价于从残余ISI中减去已知部分，保留期望信号
         if isvector(Y_freq)
-            X_soft = fft(soft_symbols(1:N));
-            Y_clean = Y_freq(:).' - H_est .* X_soft + H_est .* fft(x_hat_prev);
+            n_soft = min(length(soft_symbols), N);
+            x_soft_padded = [soft_symbols(1:n_soft), zeros(1, max(0, N-n_soft))];
+            X_soft = fft(x_soft_padded);
+
+            % 残余 = 接收 - H*(软估计 - 上次估计) = 接收 - H*Δ
+            x_prev_padded = [x_hat_prev(1:min(length(x_hat_prev),N)), zeros(1, max(0, N-length(x_hat_prev)))];
+            X_prev = fft(x_prev_padded);
+            Y_clean = Y_freq(:).' - H_est .* (X_soft - X_prev);
             [x_hat, ~] = eq_mmse_fde(Y_clean, H_est, noise_var);
         else
             [x_hat, ~] = eq_mmse_fde(Y_freq, H_est, noise_var);

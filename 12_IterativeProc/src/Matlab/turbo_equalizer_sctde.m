@@ -56,12 +56,22 @@ for iter = 1:num_iter
         % 核心：tanh(LLR/2) 产生软符号（参考LLRtoSymbol.m）
         soft_sym = llr_to_symbol(LLR_feedback, 'qpsk');
 
-        % 干扰消除
-        rx_ic = interference_cancel(rx_ptr, soft_sym, h_ptr);
+        % 软ISI消除（只消除其他符号的ISI，保留期望信号分量）
+        % y_clean(n) = y(n) - ISI(n) = y(n) - [conv(soft,h)(n) - h(1)*soft(n)]
+        isi_full = conv(soft_sym, h_ptr);
+        isi_full = isi_full(1:min(length(rx_ptr), length(isi_full)));
+        if length(isi_full) < length(rx_ptr)
+            isi_full = [isi_full, zeros(1, length(rx_ptr) - length(isi_full))];
+        end
+        % 加回期望分量 h(1)*soft(n)
+        self_signal = zeros(1, length(rx_ptr));
+        n_soft = min(length(soft_sym), length(rx_ptr));
+        self_signal(1:n_soft) = h_ptr(1) * soft_sym(1:n_soft);
+        rx_ic = rx_ptr - isi_full + self_signal;
 
-        % DFE均衡
-        [LLR_eq, x_hat, nv] = eq_dfe(rx_ic, h_ptr, training, ...
-            eq_params.num_ff, eq_params.num_fb, eq_params.lambda, eq_params.pll);
+        % 线性RLS均衡（ISI已消除，无需DFE反馈）
+        [LLR_eq, x_hat, nv] = eq_linear_rls(rx_ic, training, ...
+            eq_params.num_ff, eq_params.lambda, eq_params.pll);
     end
 
     %% 译码
