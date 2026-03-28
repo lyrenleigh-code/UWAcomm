@@ -196,6 +196,59 @@ catch e
     fail_count = fail_count + 1;
 end
 
+%% 3.3 DFE均衡
+try
+    % 用已知信道做DFE（理想信道估计场景）
+    [x_dfe, ~] = eq_dfe(rx, h_true, 20, 9, ch_info.noise_var);
+    dec_dfe = sign(real(x_dfe(1:length(tx))));
+    ber_dfe = sum(dec_dfe(train_len+1:end) ~= data) / data_len;
+
+    assert(ber_dfe < 0.2, 'DFE BER过高');
+
+    fprintf('[通过] 3.3 DFE均衡 | BER=%.1f%%\n', ber_dfe*100);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.3 DFE | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 3.4 双向DFE优于单向DFE
+try
+    [x_bidfe, soft_fwd, soft_bwd] = eq_bidirectional_dfe(rx, h_true, 20, 9, ch_info.noise_var);
+    dec_bidfe = x_bidfe(train_len+1:min(end, train_len+data_len));
+    ber_bidfe = sum(dec_bidfe ~= data(1:length(dec_bidfe))) / length(dec_bidfe);
+
+    % 双向DFE应不差于单向DFE
+    assert(ber_bidfe <= ber_dfe + 0.05, '双向DFE应不差于单向DFE');
+
+    fprintf('[通过] 3.4 双向DFE | BER=%.1f%% (单向DFE=%.1f%%)\n', ber_bidfe*100, ber_dfe*100);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.4 双向DFE | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 3.5 均衡器对比可视化（LMS/RLS/DFE/双向DFE）
+try
+    % 取数据段的均衡结果
+    x_lms_data = x_lms(train_len+1:end);
+    x_rls_data = x_rls(train_len+1:end);
+    x_dfe_data = x_dfe(train_len+1:min(end, train_len+data_len));
+    x_bidfe_data = x_bidfe(train_len+1:min(end, train_len+data_len));
+
+    min_len = min([length(x_lms_data), length(x_rls_data), length(x_dfe_data), length(x_bidfe_data), data_len]);
+    plot_equalizer_output(data(1:min_len), ...
+        {x_lms_data(1:min_len), x_rls_data(1:min_len), x_dfe_data(1:min_len), x_bidfe_data(1:min_len)}, ...
+        {'LMS', 'RLS', 'DFE', '双向DFE'}, ...
+        'SC-TDE均衡器对比 (BPSK, SNR=20dB)');
+
+    fprintf('[通过] 3.5 SC-TDE均衡器对比可视化\n');
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.5 均衡器可视化 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
 %% ==================== 四、SC-FDE/OFDM频域均衡 ==================== %%
 fprintf('\n--- 4. 频域均衡 ---\n\n');
 
