@@ -75,7 +75,10 @@ end
 % 补偿效果（如果有）
 subplot(2,2,4);
 if ~isempty(comp_results) && isfield(comp_results, 'y_comp')
-    N_show = min(200, length(comp_results.y_comp));
+    lens = length(comp_results.y_comp);
+    if isfield(comp_results, 'y_ref'), lens = min(lens, length(comp_results.y_ref)); end
+    if isfield(comp_results, 'y_orig'), lens = min(lens, length(comp_results.y_orig)); end
+    N_show = min(200, lens);
     hold on;
     if isfield(comp_results, 'y_ref')
         plot(real(comp_results.y_ref(1:N_show)), 'k', 'LineWidth', 1.5, 'DisplayName', '参考（无Doppler）');

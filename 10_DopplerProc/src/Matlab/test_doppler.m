@@ -185,6 +185,11 @@ end
 fprintf('\n--- 5. 可视化 ---\n\n');
 
 try
+    % 确保变量存在（前面的测试可能失败）
+    if ~exist('a_caf','var'), a_caf = 0; end
+    if ~exist('a_xcorr','var'), a_xcorr = 0; end
+    if ~exist('y_coarse','var'), y_coarse = rx_sig; end
+
     n_show = min([200, length(rx_sig), length(y_coarse), length(tx_sig)]);
     comp_vis = struct('y_orig', real(rx_sig(1:n_show)), 'y_comp', real(y_coarse(1:n_show)), ...
                       'y_ref', real(tx_sig(1:n_show)));
