@@ -80,7 +80,7 @@ try
     rx2 = conv(tx2, h_strong); rx2 = rx2(1:length(tx2));
     rx2 = rx2 + sqrt(noise_power/2)*(randn(size(rx2))+1j*randn(size(rx2)));
 
-    max_turbo_iter = 6;
+    max_turbo_iter = 10;
     [~, info_6] = turbo_equalizer_sctde(rx2, h_strong, training2, max_turbo_iter);
 
     % 计算每次迭代的BER和MSE
