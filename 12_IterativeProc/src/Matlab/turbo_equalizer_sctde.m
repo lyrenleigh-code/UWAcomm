@@ -1,32 +1,66 @@
-function [bits_out, iter_info] = turbo_equalizer_sctde(rx, h_est, training, num_iter, eq_params, codec_params)
-% 功能：SC-TDE Turbo均衡——参考Turbo Equalization工程实现
-% 版本：V3.0.0
+function [bits_out, iter_info] = turbo_equalizer_sctde(rx, h_est, training, num_iter, snr_or_nv, eq_params, codec_params)
+% 功能：SC-TDE Turbo均衡——RLS+软ISI消除 ⇌ BCJR(SISO) 外信息迭代
+% 版本：V7.0.0
 % 输入：
-%   rx, h_est, training, num_iter, eq_params, codec_params
+%   rx           - 接收信号 (1×N 或 MxN多通道)
+%   h_est        - 时域信道估计 (1×L 或 MxL多通道)
+%   training     - 训练序列已知符号 (1×T 复数)
+%   num_iter     - Turbo迭代次数 (默认 5)
+%   snr_or_nv    - 信噪比(dB)或噪声方差：
+%                  >0 且 ≤100 视为 SNR(dB)，自动转换 noise_var = 10^(-SNR/10)
+%                  ≤0 或 >100 视为噪声方差 σ²_w
+%                  （默认 10 dB）
+%   eq_params    - 均衡器参数结构体
+%       .num_ff  : 前馈滤波器阶数 (默认 21)
+%       .num_fb  : 反馈滤波器阶数 (默认 10)
+%       .lambda  : RLS遗忘因子 (默认 0.998)
+%       .pll     : PLL参数 (默认 enable=true, Kp=0.01, Ki=0.005)
+%   codec_params - 编解码参数结构体
+%       .gen_polys      : 生成多项式 (默认 [7,5])
+%       .constraint_len : 约束长度 (默认 3)
+%       .interleave_seed: 交织种子 (默认 7)
 % 输出：
-%   bits_out  - 最终硬判决比特
-%   iter_info - 迭代详细信息
+%   bits_out  - 最终硬判决信息比特 (1×N_info)
+%   iter_info - 迭代详情结构体
+%       .x_hat_per_iter : cell(1×num_iter)，每次均衡输出（含训练+数据）
+%       .llr_per_iter   : cell(1×num_iter)，每次数据段LLR
+%       .num_iter       : 实际迭代次数
 %
 % 备注：
-%   信息流（参考Turbo Equalization工程）：
-%   第1次: 线性RLS(+PLL) → LLR → 解交织 → Viterbi → 硬比特
-%   第2+次: tanh(LLR_decode/2)→软符号→交织→干扰消除→DFE(+PLL)→LLR→解交织→Viterbi
-%   关键：软符号用tanh(LLR/2)而非硬判决，提供可靠度梯度
+%   V7改进（对齐SC-FDE的P0+P1架构）：
+%   1. SISO(BCJR)译码器替代Viterbi
+%   2. soft_mapper生成软符号（含QPSK符号反转修复）
+%   3. 交织/解交织纳入迭代环路
+%   4. LLR符号修正：取负（我们的QPSK: bit=1→Re<0）
+%   5. IC-only模式（La_eq=0），Turbo增益来自软ISI消除
 
 %% ========== 入参 ========== %%
-if nargin < 6 || isempty(codec_params)
-    codec_params = struct('gen_polys',[7,5], 'constraint_len',3);
-end
-if nargin < 5 || isempty(eq_params)
+if nargin < 7 || isempty(codec_params), codec_params = struct(); end
+if ~isfield(codec_params, 'gen_polys'),      codec_params.gen_polys = [7,5]; end
+if ~isfield(codec_params, 'constraint_len'),  codec_params.constraint_len = 3; end
+if ~isfield(codec_params, 'interleave_seed'), codec_params.interleave_seed = 7; end
+if ~isfield(codec_params, 'decode_mode'),     codec_params.decode_mode = 'max-log'; end
+if nargin < 6 || isempty(eq_params)
     eq_params = struct('num_ff',21, 'num_fb',10, 'lambda',0.998, ...
                        'pll', struct('enable',true,'Kp',0.01,'Ki',0.005));
 end
-if nargin < 4 || isempty(num_iter), num_iter = 3; end
+if nargin < 5 || isempty(snr_or_nv), snr_or_nv = 10; end
+if nargin < 4 || isempty(num_iter), num_iter = 5; end
+
+if snr_or_nv > 0 && snr_or_nv <= 100
+    noise_var = 10^(-snr_or_nv / 10);
+else
+    noise_var = abs(snr_or_nv);
+end
 
 proj_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
 addpath(fullfile(proj_root, '07_ChannelEstEq', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '02_ChannelCoding', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '03_Interleaving', 'src', 'Matlab'));
+
+gen_polys = codec_params.gen_polys;
+K = codec_params.constraint_len;
+seed = codec_params.interleave_seed;
 
 %% ========== PTR预处理 ========== %%
 if size(rx, 1) > 1
@@ -37,64 +71,94 @@ else
     h_ptr = h_est(:).';
 end
 
+T = length(training);
+N_data_sym = length(rx_ptr) - T;
+n_code = length(gen_polys);
+M_coded = 2 * N_data_sym;    % QPSK: 2 bits/symbol
+
+% 生成交织置换
+[~, perm] = random_interleave(zeros(1, M_coded), seed);
+
 %% ========== 初始化 ========== %%
-iter_info.ber_per_iter = [];
-iter_info.mse_per_iter = [];
 iter_info.x_hat_per_iter = {};
 iter_info.llr_per_iter = {};
-LLR_feedback = [];                     % 译码后LLR（用于生成软符号）
+nv_ref = [];
+x_bar_data = [];
+bits_decoded = [];
 
 %% ========== Turbo迭代 ========== %%
 for iter = 1:num_iter
-    %% 均衡
+    %% 1. 均衡
     if iter == 1
-        % 第1次：线性RLS（无先验反馈）
-        [LLR_eq, x_hat, nv] = eq_linear_rls(rx_ptr, training, ...
+        % 第1次：线性RLS（无ISI消除），保存h(0)用于后续单抽头ZF
+        [LLR_eq_raw, x_hat, nv_est] = eq_linear_rls(rx_ptr, training, ...
             eq_params.num_ff, eq_params.lambda, eq_params.pll);
+        LLR_eq = -LLR_eq_raw;  % 符号修正
+        h0 = h_ptr(1);         % 主径增益
+        nv_zf = nv_est;        % 基准噪声
     else
-        % 第2+次：用软符号做干扰消除后DFE
-        % 核心：tanh(LLR/2) 产生软符号（参考LLRtoSymbol.m）
-        soft_sym = llr_to_symbol(LLR_feedback, 'qpsk');
-
-        % 软ISI消除（只消除其他符号的ISI，保留期望信号分量）
-        % y_clean(n) = y(n) - ISI(n) = y(n) - [conv(soft,h)(n) - h(1)*soft(n)]
-        isi_full = conv(soft_sym, h_ptr);
-        isi_full = isi_full(1:min(length(rx_ptr), length(isi_full)));
-        if length(isi_full) < length(rx_ptr)
-            isi_full = [isi_full, zeros(1, length(rx_ptr) - length(isi_full))];
+        % 第2+次：软ISI消除 + 单抽头ZF（不重新训练RLS，避免错误传播）
+        full_est = zeros(1, length(rx_ptr));
+        full_est(1:T) = training;
+        n_fill = min(length(x_bar_data), N_data_sym);
+        if n_fill > 0
+            full_est(T+1:T+n_fill) = x_bar_data(1:n_fill);
         end
-        % 加回期望分量 h(1)*soft(n)
-        self_signal = zeros(1, length(rx_ptr));
-        n_soft = min(length(soft_sym), length(rx_ptr));
-        self_signal(1:n_soft) = h_ptr(1) * soft_sym(1:n_soft);
-        rx_ic = rx_ptr - isi_full + self_signal;
 
-        % 线性RLS均衡（ISI已消除，无需DFE反馈）
-        [LLR_eq, x_hat, nv] = eq_linear_rls(rx_ic, training, ...
-            eq_params.num_ff, eq_params.lambda, eq_params.pll);
+        % ISI消除（仅数据段）
+        isi_full = conv(full_est, h_ptr);
+        isi_full = isi_full(1:length(rx_ptr));
+        self_sig = h0 * full_est;
+        rx_ic = rx_ptr;
+        rx_ic(T+1:end) = rx_ptr(T+1:end) - isi_full(T+1:end) + self_sig(T+1:end);
+
+        % 单抽头ZF：IC后残余信道≈h(0)，直接除以h(0)
+        x_hat = zeros(size(rx_ptr));
+        x_hat(1:T) = training;  % 训练段保留
+        x_hat(T+1:end) = rx_ic(T+1:end) / h0;
+
+        % LLR计算（符号取负 + 用nv_zf/|h0|²作为等效噪声）
+        data_eq = x_hat(T+1:end);
+        nv_post = nv_zf / abs(h0)^2;
+        LLR_eq = zeros(1, 2*length(data_eq));
+        LLR_eq(1:2:end) = -2*sqrt(2) * real(data_eq) / nv_post;
+        LLR_eq(2:2:end) = -2*sqrt(2) * imag(data_eq) / nv_post;
     end
 
-    %% 译码
-    % 构建trellis
-    [~, trellis] = conv_encode(zeros(1, 10), codec_params.gen_polys, codec_params.constraint_len);
+    %% 2. 解交织 → SISO译码
+    LLR_eq_trunc = LLR_eq(1:min(length(LLR_eq), M_coded));
+    if length(LLR_eq_trunc) < M_coded
+        LLR_eq_trunc = [LLR_eq_trunc, zeros(1, M_coded - length(LLR_eq_trunc))];
+    end
+    Le_eq_deint = random_deinterleave(LLR_eq_trunc, perm);
+    Le_eq_deint = max(min(Le_eq_deint, 30), -30);
 
-    % Viterbi软判决译码
-    [bits_decoded, ~] = viterbi_decode(LLR_eq, trellis, 'soft');
+    if strcmpi(codec_params.decode_mode, 'sova')
+        [~, Lpost_info, Lpost_coded] = sova_decode_conv(Le_eq_deint, [], gen_polys, K);
+    else
+        [~, Lpost_info, Lpost_coded] = siso_decode_conv(Le_eq_deint, [], gen_polys, K, codec_params.decode_mode);
+    end
+    bits_decoded = double(Lpost_info > 0);
 
-    %% 为下一次迭代准备软反馈
+    %% 3. 反馈：后验 → 交织 → soft_mapper → 软符号（含置信度门控）
     if iter < num_iter
-        % 重编码硬比特 → 编码比特
-        coded_hard = conv_encode(bits_decoded, codec_params.gen_polys, codec_params.constraint_len);
-
-        % 用均衡LLR的可靠度加权编码比特 → 软LLR
-        % LLR_feedback = sign(coded) * |LLR_eq的平均可靠度|
-        % 更好的方式：直接用均衡器LLR（它已经是编码比特级别的）
-        LLR_feedback = LLR_eq;         % 均衡器输出LLR直接作为反馈
+        % 置信度门控：BCJR输出不可靠时跳过IC
+        avg_confidence = mean(abs(Lpost_info));
+        if avg_confidence > 1.0
+            Lpost_coded_inter = random_interleave(Lpost_coded, seed);
+            if length(Lpost_coded_inter) < M_coded
+                Lpost_coded_inter = [Lpost_coded_inter, zeros(1, M_coded-length(Lpost_coded_inter))];
+            else
+                Lpost_coded_inter = Lpost_coded_inter(1:M_coded);
+            end
+            [x_bar_data, ~] = soft_mapper(Lpost_coded_inter, 'qpsk');
+        end
+        % avg_confidence ≤ 1.0 时保留上一轮x_bar_data（或空=不IC）
     end
 
-    %% 记录
-    iter_info.llr_per_iter{iter} = LLR_eq;
+    %% 4. 记录
     iter_info.x_hat_per_iter{iter} = x_hat;
+    iter_info.llr_per_iter{iter} = LLR_eq;
 end
 
 bits_out = bits_decoded;

@@ -14,11 +14,14 @@
 | `turbo_decode.m` | Turbo译码器（Max-Log-MAP迭代） | 迭代码 |
 | `ldpc_encode.m` | LDPC编码器（Gallager正则构造） | 迭代码 |
 | `ldpc_decode.m` | LDPC译码器（Min-Sum BP迭代） | 迭代码 |
+| `siso_decode_conv.m` | BCJR(MAP) SISO卷积码译码器（Turbo均衡用） | 卷积码/SISO |
 | `test_channel_coding.m` | 单元测试（22项） | 测试 |
 
 ## 模块功能与接口概述
 
-模块2位于信源编码之后。输入为信源编码输出的二进制比特流，输出为添加冗余保护后的编码比特流。下游接模块3（交织）。接收端：输入为解交织后的软/硬比特，输出为纠错后的信息比特。在迭代回环（7'⇌10-2⇌2'）中，译码器输出软信息反馈给均衡器。
+模块2位于信源编码之后。输入为信源编码输出的二进制比特流，输出为添加冗余保护后的编码比特流。下游接模块3（交织）。接收端：输入为解交织后的软/硬比特，输出为纠错后的信息比特。
+
+**Turbo均衡模式**（v5框架）：在迭代回环 7'(SISO均衡)→3'→2'(SISO译码)→3→7' 中，`siso_decode_conv`（BCJR/MAP）替代Viterbi作为译码器，输出外信息 Le = Lpost - Lprior 反馈给均衡器。Viterbi仅用于最终硬判决。
 
 ## 各编码方案说明
 
@@ -184,6 +187,40 @@ rx = bpsk + sigma * randn(size(bpsk));
 |------|------|------|
 | decoded | 1xN 数组 | 译码后的信息比特序列，N = M/n - K + 1 |
 | min_metric | 标量 | 最优路径的累计度量值 |
+
+---
+
+### siso_decode_conv.m
+
+**功能**：BCJR (Max-Log-MAP) SISO卷积码译码器，输出外信息和编码比特后验，用于Turbo均衡迭代
+
+**输入参数**：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| LLR_ch | 1xM 实数数组 | 编码比特信道LLR（均衡器外信息），正值→bit 1 |
+| LLR_prior | 1xN_info 实数数组 | 信息比特先验LLR，首次迭代全0，默认全0 |
+| gen_polys | 1xn 数组 | 生成多项式（八进制），默认 [7, 5]（K=3, rate-1/2） |
+| constraint_len | 正整数 | 约束长度K，默认 3 |
+
+**输出参数**：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| LLR_ext | 1xN_info 实数数组 | 信息比特外信息 = LLR_post - LLR_prior |
+| LLR_post | 1xN_info 实数数组 | 信息比特后验LLR |
+| LLR_post_coded | 1xM 实数数组 | **编码比特后验LLR**（v2新增），供soft_mapper生成软符号。利用α/β/γ对每个时刻的每个编码输出比特计算后验 |
+
+**Turbo均衡中的角色**：
+- 接收均衡器外信息 Le_eq（解交织后）作为 LLR_ch
+- 输出 LLR_post_coded → 交织 → `soft_mapper` → 软符号 x̄ + 残余方差 σ²_x
+- 外信息原则：Le = Lpost - La，避免信息自我强化
+
+```matlab
+% Turbo均衡中的典型调用
+[Le_dec, Lpost_info, Lpost_coded] = siso_decode_conv(Le_eq_deint, La_info, [7,5], 3);
+bits_out = double(Lpost_info > 0);  % 硬判决
+```
 
 ---
 
