@@ -56,8 +56,13 @@ end
 fprintf('\n--- 2. 多普勒估计算法 ---\n\n');
 
 % 生成测试信号：LFM前导 + 数据
+% 水声场景：c=1500m/s, v=3m/s → α=v/c=0.002
 rng(20);
-fs = 48000; fc = 12000; alpha_true = 0.002;
+c_sound = 1500;                        % 声速 (m/s)
+v_platform = 3;                        % 平台速度 (m/s)
+fs = 48000; fc = 12000;
+alpha_true = v_platform / c_sound;     % α = 0.002
+
 [preamble, ~] = gen_lfm(fs, 0.02, 8000, 16000);  % 20ms LFM
 data = randn(1, 5000) + 1j*randn(1, 5000);
 tx_sig = [preamble, zeros(1,1000), data, zeros(1,1000), preamble];
@@ -66,14 +71,19 @@ paths = struct('delays', [0, 1e-3, 3e-3], 'gains', [1, 0.4*exp(1j*0.5), 0.15*exp
 tv_off = struct('enable', false);
 [rx_sig, ch_info2] = gen_doppler_channel(tx_sig, fs, alpha_true, paths, 25, tv_off);
 
+fprintf('测试参数：声速=%dm/s, 平台速度=%dm/s, α=%.4f\n\n', c_sound, v_platform, alpha_true);
+
 %% 2.1 CAF估计
 try
-    [a_caf, tau_caf, ~] = est_doppler_caf(rx_sig, preamble, fs, [-0.005, 0.005], 5e-4);
+    % 搜索范围±5m/s对应±3.33e-3, 步长0.1m/s对应6.67e-5
+    alpha_max = 5 / c_sound;
+    [a_caf, tau_caf, ~] = est_doppler_caf(rx_sig, preamble, fs, [-alpha_max, alpha_max], 1e-4);
     err_caf = abs(a_caf - alpha_true);
 
-    assert(err_caf < 1e-3, sprintf('CAF误差%.2e过大', err_caf));
+    assert(err_caf < 5e-4, sprintf('CAF误差%.2e过大(>0.75m/s)', err_caf));
 
-    fprintf('[通过] 2.1 CAF估计 | α_est=%.5f, 误差=%.2e\n', a_caf, err_caf);
+    fprintf('[通过] 2.1 CAF估计 | α_est=%.5f, 误差=%.2e (速度误差=%.2fm/s)\n', ...
+            a_caf, err_caf, err_caf*c_sound);
     pass_count = pass_count + 1;
 catch e
     fprintf('[失败] 2.1 CAF | %s\n', e.message);
@@ -86,7 +96,8 @@ try
     [a_xcorr, a_coarse, ~] = est_doppler_xcorr(rx_sig, preamble, T_v, fs, fc);
     err_xcorr = abs(a_xcorr - alpha_true);
 
-    fprintf('[通过] 2.2 复自相关 | α_est=%.5f, 粗估=%.5f, 误差=%.2e\n', a_xcorr, a_coarse, err_xcorr);
+    fprintf('[通过] 2.2 复自相关 | α_est=%.5f, 粗估=%.5f, 速度误差=%.2fm/s\n', ...
+            a_xcorr, a_coarse, err_xcorr*c_sound);
     pass_count = pass_count + 1;
 catch e
     fprintf('[失败] 2.2 复自相关 | %s\n', e.message);
@@ -152,7 +163,7 @@ fprintf('\n--- 4. 统一入口函数 ---\n\n');
 try
     [y_coarse, alpha_coarse, info_coarse] = doppler_coarse_compensate(...
         rx_sig, preamble, fs, 'est_method', 'caf', 'comp_method', 'spline', ...
-        'alpha_range', [-0.005, 0.005]);
+        'alpha_range', [-alpha_max, alpha_max]);
 
     assert(abs(alpha_coarse - alpha_true) < 1e-3, '粗估计误差过大');
     assert(length(y_coarse) == length(rx_sig), '补偿后长度应与输入一致');
@@ -194,7 +205,7 @@ try
     comp_vis = struct('y_orig', real(rx_sig(1:n_show)), 'y_comp', real(y_coarse(1:n_show)), ...
                       'y_ref', real(tx_sig(1:n_show)));
     plot_doppler_estimation(alpha_true, {a_caf, a_xcorr}, {'CAF', '复自相关'}, ...
-                           comp_vis, '多普勒估计与补偿 (α=0.002, SNR=25dB)');
+                           comp_vis, sprintf('多普勒估计与补偿 (v=%dm/s, α=%.4f, SNR=25dB)', v_platform, alpha_true));
 
     fprintf('[通过] 5.1 估计结果可视化\n');
     pass_count = pass_count + 1;
