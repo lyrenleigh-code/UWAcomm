@@ -23,7 +23,8 @@ subplot(2,2,1);
 errors = zeros(1, K);
 for k = 1:K
     a_k = alpha_est_list{k};
-    if ~isscalar(a_k), a_k = a_k(1); end  % 取第一个值（防止向量）
+    if isempty(a_k), a_k = 0; end
+    if ~isscalar(a_k), a_k = a_k(1); end
     if isscalar(alpha_true)
         errors(k) = abs(a_k - alpha_true);
     else
@@ -51,6 +52,7 @@ hold on;
 plot([0, K+1], [alpha_t, alpha_t]*1e3, 'k--', 'LineWidth', 1.5, 'DisplayName', '真实值');
 for k = 1:K
     a_k = alpha_est_list{k};
+    if isempty(a_k), a_k = 0; end
     if ~isscalar(a_k), a_k = a_k(1); end
     plot(k, a_k*1e3, 'o', 'MarkerSize', 10, 'MarkerFaceColor', 'auto', ...
          'DisplayName', est_names{k});
