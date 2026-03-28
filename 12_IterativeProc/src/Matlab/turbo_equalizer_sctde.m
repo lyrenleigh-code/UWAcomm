@@ -105,6 +105,8 @@ for iter = 1:num_iter
     end
 
     iter_info.llr_per_iter{iter} = LLR_eq;
+    iter_info.x_hat_per_iter{iter} = x_hat;
+    iter_info.noise_var_per_iter(iter) = nv;
 end
 
 %% ========== 输出 ========== %%

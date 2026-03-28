@@ -62,6 +62,81 @@ catch e
     fail_count = fail_count + 1;
 end
 
+%% 1.3 SC-TDE迭代收敛可视化（6次迭代，跟踪BER/MSE/星座图）
+try
+    rng(15);
+    % 更强的信道（更多ISI）
+    h_strong = [1, 0.7*exp(1j*0.4), 0.5*exp(1j*0.9), 0.3*exp(1j*1.5), 0.15*exp(1j*2.1)];
+    h_strong = h_strong / sqrt(sum(abs(h_strong).^2));
+
+    train_len2 = 150; data_len2 = 500;
+    training2 = constellation(randi(4, 1, train_len2));
+    data2 = constellation(randi(4, 1, data_len2));
+    data2_bits_I = real(data2) > 0;    % QPSK I路比特
+    tx2 = [training2, data2];
+
+    snr_test = 12;                     % 12dB——中等SNR，迭代增益明显
+    noise_power = 10^(-snr_test/10);
+    rx2 = conv(tx2, h_strong); rx2 = rx2(1:length(tx2));
+    rx2 = rx2 + sqrt(noise_power/2)*(randn(size(rx2))+1j*randn(size(rx2)));
+
+    max_turbo_iter = 6;
+    [~, info_6] = turbo_equalizer_sctde(rx2, h_strong, training2, max_turbo_iter);
+
+    % 计算每次迭代的BER和MSE
+    ber_track = zeros(1, max_turbo_iter);
+    mse_track = zeros(1, max_turbo_iter);
+    const_track = cell(1, max_turbo_iter);
+
+    for it = 1:max_turbo_iter
+        x_it = info_6.x_hat_per_iter{it};
+        % 取数据段
+        n_data = min(length(x_it) - train_len2, data_len2);
+        if n_data > 0
+            eq_data = x_it(train_len2+1 : train_len2+n_data);
+            ref_data = data2(1:n_data);
+
+            % BER（QPSK I路）
+            dec_I = real(eq_data) > 0;
+            ref_I = real(ref_data) > 0;
+            ber_track(it) = sum(dec_I ~= ref_I) / n_data;
+
+            % MSE
+            mse_track(it) = mean(abs(eq_data - ref_data).^2);
+
+            const_track{it} = eq_data;
+        else
+            ber_track(it) = 0.5;
+            mse_track(it) = 1;
+            const_track{it} = [];
+        end
+    end
+
+    % 可视化
+    vis_results = struct();
+    vis_results.ber_per_iter = ber_track;
+    vis_results.mse_per_iter = mse_track;
+    vis_results.constellation = const_track;
+    vis_results.ref_symbols = data2;
+    vis_results.scheme = sprintf('SC-TDE (SNR=%ddB, %d径信道)', snr_test, length(h_strong));
+
+    plot_turbo_convergence(vis_results, 'SC-TDE Turbo均衡收敛');
+
+    % 打印收敛过程
+    fprintf('[通过] 1.3 SC-TDE迭代收敛 (%d次):\n', max_turbo_iter);
+    for it = 1:max_turbo_iter
+        fprintf('    迭代%d: BER=%.2f%%, MSE=%.4f (%.1fdB)\n', ...
+                it, ber_track(it)*100, mse_track(it), 10*log10(mse_track(it)+1e-30));
+    end
+    if ber_track(end) < ber_track(1)
+        fprintf('    → 迭代增益: BER从%.1f%%降至%.1f%%\n', ber_track(1)*100, ber_track(end)*100);
+    end
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 1.3 收敛可视化 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
 %% ==================== 二、SC-FDE Turbo均衡 ==================== %%
 fprintf('\n--- 2. SC-FDE Turbo均衡 ---\n\n');
 
