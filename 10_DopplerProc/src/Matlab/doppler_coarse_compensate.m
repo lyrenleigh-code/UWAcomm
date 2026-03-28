@@ -69,10 +69,8 @@ switch opts.comp_method
         y_comp = comp_resample_spline(y, alpha_est, fs);
     case 'farrow'
         y_comp = comp_resample_farrow(y, alpha_est, fs);
-    case 'polyphase'
-        y_comp = comp_resample_polyphase(y, alpha_est, fs);
     otherwise
-        error('不支持的补偿方法: %s！支持 spline/farrow/polyphase', opts.comp_method);
+        error('不支持的补偿方法: %s！支持 spline/farrow', opts.comp_method);
 end
 
 end
