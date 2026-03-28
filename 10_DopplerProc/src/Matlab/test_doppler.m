@@ -185,8 +185,9 @@ end
 fprintf('\n--- 5. 可视化 ---\n\n');
 
 try
-    comp_vis = struct('y_orig', real(rx_sig(1:200)), 'y_comp', real(y_coarse(1:200)), ...
-                      'y_ref', real(tx_sig(1:200)));
+    n_show = min([200, length(rx_sig), length(y_coarse), length(tx_sig)]);
+    comp_vis = struct('y_orig', real(rx_sig(1:n_show)), 'y_comp', real(y_coarse(1:n_show)), ...
+                      'y_ref', real(tx_sig(1:n_show)));
     plot_doppler_estimation(alpha_true, {a_caf, a_xcorr}, {'CAF', '复自相关'}, ...
                            comp_vis, '多普勒估计与补偿 (α=0.002, SNR=25dB)');
 
