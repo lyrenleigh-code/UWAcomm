@@ -200,8 +200,10 @@ end
 try
     % 用已知信道做DFE（理想信道估计场景）
     [x_dfe, ~] = eq_dfe(rx, h_true, 20, 9, ch_info.noise_var);
-    dec_dfe = sign(real(x_dfe(1:length(tx))));
-    ber_dfe = sum(dec_dfe(train_len+1:end) ~= data) / data_len;
+    n_dfe = min(length(x_dfe), train_len + data_len);
+    dec_dfe = sign(real(x_dfe(train_len+1 : n_dfe)));
+    n_compare = min(length(dec_dfe), data_len);
+    ber_dfe = sum(dec_dfe(1:n_compare) ~= data(1:n_compare)) / n_compare;
 
     assert(ber_dfe < 0.2, 'DFE BER过高');
 
@@ -215,8 +217,10 @@ end
 %% 3.4 双向DFE优于单向DFE
 try
     [x_bidfe, soft_fwd, soft_bwd] = eq_bidirectional_dfe(rx, h_true, 20, 9, ch_info.noise_var);
-    dec_bidfe = x_bidfe(train_len+1:min(end, train_len+data_len));
-    ber_bidfe = sum(dec_bidfe ~= data(1:length(dec_bidfe))) / length(dec_bidfe);
+    n_bidfe = min(length(x_bidfe), train_len + data_len);
+    dec_bidfe = x_bidfe(train_len+1 : n_bidfe);
+    n_compare2 = min(length(dec_bidfe), data_len);
+    ber_bidfe = sum(dec_bidfe(1:n_compare2) ~= data(1:n_compare2)) / n_compare2;
 
     % 双向DFE应不差于单向DFE
     assert(ber_bidfe <= ber_dfe + 0.05, '双向DFE应不差于单向DFE');
@@ -231,14 +235,19 @@ end
 %% 3.5 均衡器对比可视化（LMS/RLS/DFE/双向DFE）
 try
     % 取数据段的均衡结果
-    x_lms_data = x_lms(train_len+1:end);
-    x_rls_data = x_rls(train_len+1:end);
-    x_dfe_data = x_dfe(train_len+1:min(end, train_len+data_len));
-    x_bidfe_data = x_bidfe(train_len+1:min(end, train_len+data_len));
+    n_lms = min(length(x_lms) - train_len, data_len);
+    n_rls = min(length(x_rls) - train_len, data_len);
+    n_d = min(length(x_dfe) - train_len, data_len);
+    n_bd = min(length(x_bidfe) - train_len, data_len);
+    min_len = max(min([n_lms, n_rls, n_d, n_bd]), 1);
 
-    min_len = min([length(x_lms_data), length(x_rls_data), length(x_dfe_data), length(x_bidfe_data), data_len]);
+    x_lms_data = x_lms(train_len+1 : train_len+min_len);
+    x_rls_data = x_rls(train_len+1 : train_len+min_len);
+    x_dfe_data = x_dfe(train_len+1 : train_len+min_len);
+    x_bidfe_data = x_bidfe(train_len+1 : train_len+min_len);
+
     plot_equalizer_output(data(1:min_len), ...
-        {x_lms_data(1:min_len), x_rls_data(1:min_len), x_dfe_data(1:min_len), x_bidfe_data(1:min_len)}, ...
+        {x_lms_data, x_rls_data, x_dfe_data, x_bidfe_data}, ...
         {'LMS', 'RLS', 'DFE', '双向DFE'}, ...
         'SC-TDE均衡器对比 (BPSK, SNR=20dB)');
 
