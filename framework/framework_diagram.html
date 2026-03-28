@@ -1,0 +1,704 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>水声通信算法模块化框架</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "SimHei", sans-serif;
+    background: #f0f4f8;
+    color: #1a2a3a;
+    padding: 32px;
+  }
+  h1 {
+    text-align: center;
+    font-size: 26px;
+    margin-bottom: 8px;
+    color: #0d2137;
+  }
+  .subtitle {
+    text-align: center;
+    font-size: 14px;
+    color: #667;
+    margin-bottom: 36px;
+  }
+
+  /* ===== Section 1: General Framework ===== */
+  .section-title {
+    font-size: 18px;
+    font-weight: bold;
+    margin: 32px 0 18px 0;
+    padding-left: 12px;
+    border-left: 4px solid #2a6cb8;
+    color: #1a3a5c;
+  }
+
+  .framework {
+    display: flex;
+    align-items: stretch;
+    justify-content: center;
+    gap: 24px;
+    margin-bottom: 40px;
+  }
+
+  .chain {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+    min-width: 280px;
+  }
+  .chain-label {
+    font-size: 16px;
+    font-weight: bold;
+    padding: 10px 36px;
+    border-radius: 8px;
+    margin-bottom: 12px;
+    letter-spacing: 2px;
+  }
+  .tx-label { background: #2a6cb8; color: #fff; }
+  .rx-label { background: #b85c2a; color: #fff; }
+
+  .module {
+    width: 260px;
+    padding: 11px 14px;
+    border-radius: 6px;
+    text-align: center;
+    font-size: 14px;
+    font-weight: 500;
+    border: 2px solid;
+    position: relative;
+    line-height: 1.4;
+  }
+  .module .num {
+    position: absolute;
+    left: -14px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+  }
+  .module .detail {
+    font-size: 11px;
+    color: #556;
+    font-weight: normal;
+    margin-top: 2px;
+  }
+
+  /* required modules */
+  .mod-req {
+    background: #e8f0fb;
+    border-color: #2a6cb8;
+  }
+  .mod-req .num { background: #2a6cb8; }
+
+  .mod-req-rx {
+    background: #fbeee8;
+    border-color: #b85c2a;
+  }
+  .mod-req-rx .num { background: #b85c2a; }
+
+  /* optional modules */
+  .mod-opt {
+    background: #fff8e1;
+    border-color: #c89520;
+    border-style: dashed;
+  }
+  .mod-opt .num { background: #c89520; }
+
+  .mod-opt-rx {
+    background: #fff8e1;
+    border-color: #c89520;
+    border-style: dashed;
+  }
+  .mod-opt-rx .num { background: #c89520; }
+
+  /* rx-only modules */
+  .mod-rxonly {
+    background: #e8f8ee;
+    border-color: #2a8a4a;
+    border-style: dotted;
+    border-width: 2px;
+  }
+  .mod-rxonly .num { background: #2a8a4a; }
+
+  /* arrows between modules */
+  .arrow-down {
+    width: 2px;
+    height: 18px;
+    background: #8899aa;
+    position: relative;
+  }
+  .arrow-down::after {
+    content: '';
+    position: absolute;
+    bottom: -5px;
+    left: -4px;
+    border-left: 5px solid transparent;
+    border-right: 5px solid transparent;
+    border-top: 6px solid #8899aa;
+  }
+
+  /* channel block */
+  .channel-block {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-width: 160px;
+  }
+  .channel-box {
+    width: 140px;
+    padding: 20px 12px;
+    background: linear-gradient(135deg, #1a4a7a, #2a6cb8);
+    color: #fff;
+    border-radius: 12px;
+    text-align: center;
+    font-size: 15px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    box-shadow: 0 4px 16px rgba(42,108,184,0.3);
+  }
+  .channel-box .ch-detail {
+    font-size: 11px;
+    font-weight: normal;
+    opacity: 0.85;
+    margin-top: 8px;
+    line-height: 1.5;
+  }
+  .channel-arrow {
+    font-size: 28px;
+    color: #2a6cb8;
+    margin: 8px 0;
+  }
+
+  /* legend */
+  .legend {
+    display: flex;
+    gap: 28px;
+    justify-content: center;
+    margin: 20px 0 32px 0;
+    flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+  }
+  .legend-box {
+    width: 36px;
+    height: 20px;
+    border-radius: 4px;
+    border: 2px solid;
+  }
+  .lg-req { background: #e8f0fb; border-color: #2a6cb8; }
+  .lg-opt { background: #fff8e1; border-color: #c89520; border-style: dashed; }
+  .lg-rxonly { background: #e8f8ee; border-color: #2a8a4a; border-style: dotted; }
+
+  /* ===== Section 2: System Configurations ===== */
+  .configs {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    margin-top: 20px;
+  }
+  .config-card {
+    background: #fff;
+    border-radius: 10px;
+    padding: 24px 28px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.07);
+    border-left: 5px solid;
+  }
+  .config-card h3 {
+    font-size: 17px;
+    margin-bottom: 4px;
+  }
+  .config-card .config-sub {
+    font-size: 12px;
+    color: #778;
+    margin-bottom: 16px;
+  }
+
+  .config-flow {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    padding: 8px 0;
+  }
+  .config-flow .cf-block {
+    padding: 7px 12px;
+    border-radius: 5px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .cf-on { background: #e0edfa; color: #1a4a7a; border: 1px solid #a0c4e8; }
+  .cf-on-rx { background: #fbe8e0; color: #7a2a1a; border: 1px solid #e8b0a0; }
+  .cf-rxonly { background: #e0f5e8; color: #1a6a3a; border: 1px solid #a0d8b8; font-style: italic; }
+  .cf-off { background: #f0f0f0; color: #aab; border: 1px solid #ddd; text-decoration: line-through; }
+  .cf-special { background: #fff3d0; color: #7a5a00; border: 1px solid #e0c870; }
+  .cf-special-rx { background: #fff3d0; color: #7a5a00; border: 1px solid #e0c870; }
+  .cf-arrow { color: #99a; font-size: 15px; }
+  .cf-channel { background: #1a4a7a; color: #fff; border-radius: 5px; padding: 7px 14px; font-weight: bold; }
+  .flow-label {
+    font-size: 12px;
+    font-weight: bold;
+    padding: 5px 12px;
+    border-radius: 4px;
+    margin-right: 6px;
+    white-space: nowrap;
+    min-width: 32px;
+    text-align: center;
+  }
+  .fl-tx { background: #2a6cb8; color: #fff; }
+  .fl-rx { background: #b85c2a; color: #fff; }
+  .config-flow + .config-flow { margin-top: 2px; border-top: 1px dashed #e0e4e8; }
+
+  .cc-sc { border-left-color: #2a6cb8; }
+  .cc-dsss { border-left-color: #2a8a4a; }
+  .cc-ofdm { border-left-color: #8a2ab8; }
+  .cc-fh { border-left-color: #c89520; }
+  .cc-sc h3 { color: #2a6cb8; }
+  .cc-dsss h3 { color: #2a8a4a; }
+  .cc-ofdm h3 { color: #8a2ab8; }
+  .cc-fh h3 { color: #c89520; }
+
+  .pair-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 20px;
+    font-size: 13px;
+  }
+  .pair-table th {
+    background: #1a3a5c;
+    color: #fff;
+    padding: 8px 12px;
+    text-align: center;
+    font-weight: 500;
+  }
+  .pair-table td {
+    padding: 7px 12px;
+    border-bottom: 1px solid #e0e4e8;
+    text-align: center;
+  }
+  .pair-table tr:nth-child(even) td { background: #f6f8fa; }
+  .pair-table .mod-name { text-align: left; font-weight: 500; }
+  .check { color: #2a8a4a; font-weight: bold; }
+  .cross { color: #ccc; }
+  .variant { color: #c89520; font-weight: bold; font-size: 11px; }
+</style>
+</head>
+<body>
+
+<h1>水声通信算法模块化框架</h1>
+<p class="subtitle">10个成对模块 &mdash; 组合覆盖单载波 / DSSS扩频 / OFDM / FH-MFSK 等通信体制</p>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-box lg-req"></div>必选模块（所有体制共用）</div>
+  <div class="legend-item"><div class="legend-box lg-opt"></div>可选模块（按体制选用）</div>
+  <div class="legend-item"><div class="legend-box lg-rxonly"></div>接收端特有处理</div>
+</div>
+
+<!-- Section 1: General Framework -->
+<div class="section-title">一、通用框架：发射端 &rarr; 信道 &rarr; 接收端</div>
+
+<div class="framework">
+  <!-- TX Chain -->
+  <div class="chain">
+    <div class="chain-label tx-label">发 射 端</div>
+
+    <div class="module mod-req">
+      <span class="num">1</span>
+      信源编码
+      <div class="detail">数据压缩</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req">
+      <span class="num">2</span>
+      信道编码
+      <div class="detail">Turbo / LDPC / 卷积码</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req">
+      <span class="num">3</span>
+      交织
+      <div class="detail">打散突发错误</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req">
+      <span class="num">4</span>
+      符号映射
+      <div class="detail">BPSK/QPSK/M-QAM/MFSK</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-opt">
+      <span class="num">5</span>
+      扩频
+      <div class="detail">DSSS直扩 / FH跳频 / CSK</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-opt">
+      <span class="num">6</span>
+      多载波/多域变换
+      <div class="detail">OFDM: IFFT+CP &ensp; OTFS: ISFFT</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req">
+      <span class="num">7</span>
+      导频插入
+      <div class="detail">训练序列 / 频域导频 / 叠加导频</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req">
+      <span class="num">8</span>
+      同步序列插入 + 帧组装
+      <div class="detail">LFM/HFM前导 + 保护间隔 + 帧结构</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req">
+      <span class="num">9</span>
+      脉冲成形 / 上变频
+      <div class="detail">基带 &rarr; 通带，DA转换，功放发射</div>
+    </div>
+  </div>
+
+  <!-- Channel -->
+  <div class="channel-block">
+    <div class="channel-arrow">&rarr;</div>
+    <div class="channel-box">
+      水声信道
+      <div class="ch-detail">
+        多径展宽<br>
+        时变衰落<br>
+        Doppler扩展<br>
+        环境噪声<br>
+        人为干扰
+      </div>
+    </div>
+    <div class="channel-arrow">&rarr;</div>
+  </div>
+
+  <!-- RX Chain -->
+  <div class="chain">
+    <div class="chain-label rx-label">接 收 端</div>
+
+    <div class="module mod-req-rx">
+      <span class="num" style="background:#b85c2a">9'</span>
+      匹配滤波 / 下变频
+      <div class="detail">通带 &rarr; 基带，AD采样</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req-rx">
+      <span class="num" style="background:#b85c2a">8'</span>
+      同步检测 + 帧解析
+      <div class="detail">帧同步 / 定时同步 / 帧结构拆解</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-rxonly">
+      <span class="num">*</span>
+      多普勒估计与补偿
+      <div class="detail">粗估计(HFM) + 精跟踪(ARD/PLL)</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req-rx">
+      <span class="num" style="background:#b85c2a">7'</span>
+      导频提取 &rarr; 信道估计与均衡
+      <div class="detail">LS/OMP/SBL估计 + PTR/DFE/Turbo均衡</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-opt-rx">
+      <span class="num">6'</span>
+      逆变换
+      <div class="detail">OFDM: 去CP+FFT &ensp; OTFS: SFFT</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-opt-rx">
+      <span class="num">5'</span>
+      解扩
+      <div class="detail">相关解扩 / 解跳频 / DCD/DED检测</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req-rx">
+      <span class="num" style="background:#b85c2a">4'</span>
+      符号判决
+      <div class="detail">硬判决 / 软判决(LLR)</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req-rx">
+      <span class="num" style="background:#b85c2a">3'</span>
+      解交织
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req-rx">
+      <span class="num" style="background:#b85c2a">2'</span>
+      信道解码
+      <div class="detail">Turbo/LDPC/Viterbi译码</div>
+    </div>
+    <div class="arrow-down"></div>
+    <div class="module mod-req-rx">
+      <span class="num" style="background:#b85c2a">1'</span>
+      信源解码
+      <div class="detail">数据还原 &rarr; BER评估</div>
+    </div>
+  </div>
+</div>
+
+<!-- Section 2: System Configurations -->
+<div class="section-title">二、四种通信体制的模块选用</div>
+
+<div class="configs">
+  <!-- SC -->
+  <div class="config-card cc-sc">
+    <h3>单载波通信 (SC-TDE / SC-FDE)</h3>
+    <p class="config-sub">跳过模块5、6，直接符号映射后成形发射</p>
+    <div class="config-flow">
+      <span class="flow-label fl-tx">TX</span>
+      <span class="cf-block cf-on">1 信源编码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">2 信道编码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">3 交织</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">4 符号映射</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-off">5 扩频</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-off">6 多载波变换</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">7 导频插入</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">8 同步+帧组装</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">9 成形/上变频</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-channel">信道</span>
+    </div>
+    <div class="config-flow">
+      <span class="flow-label fl-rx">RX</span>
+      <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-rxonly">* 多普勒补偿</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">7' 导频提取&rarr;估计&amp;均衡</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">2' 信道解码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">1' 信源解码</span>
+    </div>
+  </div>
+
+  <!-- DSSS -->
+  <div class="config-card cc-dsss">
+    <h3>直接序列扩频 (DSSS / DS-CDMA)</h3>
+    <p class="config-sub">启用模块5(DSSS直扩)，跳过模块6</p>
+    <div class="config-flow">
+      <span class="flow-label fl-tx">TX</span>
+      <span class="cf-block cf-on">1 信源编码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">2 信道编码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">3 交织</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">4 符号映射</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-special">5 DSSS扩频</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-off">6 多载波变换</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">7 导频插入</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">8 同步+帧组装</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">9 成形/上变频</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-channel">信道</span>
+    </div>
+    <div class="config-flow">
+      <span class="flow-label fl-rx">RX</span>
+      <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-rxonly">* 多普勒补偿</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">7' 导频提取&rarr;估计&amp;均衡</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-special-rx">5' 相关解扩</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">2' 信道解码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">1' 信源解码</span>
+    </div>
+  </div>
+
+  <!-- OFDM -->
+  <div class="config-card cc-ofdm">
+    <h3>正交频分复用 (OFDM / OTFS)</h3>
+    <p class="config-sub">启用模块6(IFFT/FFT)，跳过模块5</p>
+    <div class="config-flow">
+      <span class="flow-label fl-tx">TX</span>
+      <span class="cf-block cf-on">1 信源编码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">2 信道编码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">3 交织</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">4 符号映射</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-off">5 扩频</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-special">6 IFFT+CP</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">7 导频插入</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">8 同步+帧组装</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">9 成形/上变频</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-channel">信道</span>
+    </div>
+    <div class="config-flow">
+      <span class="flow-label fl-rx">RX</span>
+      <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-rxonly">* 多普勒补偿</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-special-rx">6' 去CP+FFT</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">7' 导频提取&rarr;估计&amp;均衡</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-off">5' 解扩</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">4' 符号判决</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">2' 信道解码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">1' 信源解码</span>
+    </div>
+  </div>
+
+  <!-- FH-MFSK -->
+  <div class="config-card cc-fh">
+    <h3>跳频多频移键控 (FH-MFSK)</h3>
+    <p class="config-sub">模块4变体(MFSK) + 模块5变体(跳频)，跳过模块6</p>
+    <div class="config-flow">
+      <span class="flow-label fl-tx">TX</span>
+      <span class="cf-block cf-on">1 信源编码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">2 信道编码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">3 交织</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-special">4 MFSK映射</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-special">5 FH跳频</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-off">6 多载波变换</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">7 导频插入</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">8 同步+帧组装</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on">9 成形/上变频</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-channel">信道</span>
+    </div>
+    <div class="config-flow">
+      <span class="flow-label fl-rx">RX</span>
+      <span class="cf-block cf-on-rx">9' 滤波/下变频</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">8' 同步+帧解析</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-rxonly">* 多普勒补偿</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">7' 导频提取&rarr;估计&amp;均衡</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-off">6' 逆变换</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-special-rx">5' 解跳频</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-special-rx">4' 能量检测</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">3' 解交织</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">2' 信道解码</span><span class="cf-arrow">&rarr;</span>
+      <span class="cf-block cf-on-rx">1' 信源解码</span>
+    </div>
+  </div>
+</div>
+
+<!-- Section 3: Module Usage Table -->
+<div class="section-title">三、模块使用对照表</div>
+
+<table class="pair-table">
+  <thead>
+    <tr>
+      <th style="width:40px">#</th>
+      <th style="text-align:left">发射端模块</th>
+      <th style="text-align:left">接收端模块</th>
+      <th>单载波</th>
+      <th>DSSS</th>
+      <th>OFDM</th>
+      <th>FH-MFSK</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>1</td>
+      <td class="mod-name">信源编码</td>
+      <td class="mod-name">信源解码</td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+    </tr>
+    <tr>
+      <td>2</td>
+      <td class="mod-name">信道编码</td>
+      <td class="mod-name">信道解码</td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+    </tr>
+    <tr>
+      <td>3</td>
+      <td class="mod-name">交织</td>
+      <td class="mod-name">解交织</td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+    </tr>
+    <tr>
+      <td>4</td>
+      <td class="mod-name">符号映射</td>
+      <td class="mod-name">符号判决</td>
+      <td><span class="check">&check;</span> PSK/QAM</td>
+      <td><span class="check">&check;</span> BPSK</td>
+      <td><span class="check">&check;</span> QAM</td>
+      <td><span class="variant">MFSK</span></td>
+    </tr>
+    <tr>
+      <td>5</td>
+      <td class="mod-name">扩频</td>
+      <td class="mod-name">解扩</td>
+      <td><span class="cross">&mdash;</span></td>
+      <td><span class="check">&check;</span> DSSS</td>
+      <td><span class="cross">&mdash;</span></td>
+      <td><span class="variant">FH跳频</span></td>
+    </tr>
+    <tr>
+      <td>6</td>
+      <td class="mod-name">多载波/多域变换</td>
+      <td class="mod-name">逆变换</td>
+      <td><span class="cross">&mdash;</span></td>
+      <td><span class="cross">&mdash;</span></td>
+      <td><span class="check">&check;</span> IFFT/FFT</td>
+      <td><span class="cross">&mdash;</span></td>
+    </tr>
+    <tr>
+      <td>7</td>
+      <td class="mod-name">导频插入</td>
+      <td class="mod-name">导频提取 &rarr; 信道估计与均衡</td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+    </tr>
+    <tr>
+      <td>8</td>
+      <td class="mod-name">同步序列插入 + 帧组装</td>
+      <td class="mod-name">同步检测 + 帧解析</td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+    </tr>
+    <tr>
+      <td>9</td>
+      <td class="mod-name">脉冲成形 / 上变频</td>
+      <td class="mod-name">匹配滤波 / 下变频</td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+    </tr>
+    <tr>
+      <td>*</td>
+      <td class="mod-name" style="color:#2a8a4a">（无发端对应）</td>
+      <td class="mod-name" style="color:#2a8a4a">多普勒估计与补偿</td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+      <td><span class="check">&check;</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<p style="text-align:center; margin-top:32px; font-size:12px; color:#99a;">
+  UWAcomm &mdash; 水声通信算法仿真项目 &mdash; 模块化框架 v1.0
+</p>
+
+</body>
+</html>
