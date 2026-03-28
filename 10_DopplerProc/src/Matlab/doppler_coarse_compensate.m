@@ -22,6 +22,7 @@ function [y_comp, alpha_est, est_info] = doppler_coarse_compensate(y, preamble, 
 p = inputParser;
 addParameter(p, 'est_method', 'xcorr');
 addParameter(p, 'comp_method', 'spline');
+addParameter(p, 'comp_mode', 'fast');  % 'fast'快速 或 'accurate'高精度
 addParameter(p, 'fc', 12000);
 addParameter(p, 'T_v', 0.5);
 addParameter(p, 'N_fft', 256);
@@ -66,9 +67,9 @@ est_info.alpha_est = alpha_est;
 %% ========== 重采样补偿 ========== %%
 switch opts.comp_method
     case 'spline'
-        y_comp = comp_resample_spline(y, alpha_est, fs);
+        y_comp = comp_resample_spline(y, alpha_est, fs, opts.comp_mode);
     case 'farrow'
-        y_comp = comp_resample_farrow(y, alpha_est, fs);
+        y_comp = comp_resample_farrow(y, alpha_est, fs, opts.comp_mode);
     otherwise
         error('不支持的补偿方法: %s！支持 spline/farrow', opts.comp_method);
 end
