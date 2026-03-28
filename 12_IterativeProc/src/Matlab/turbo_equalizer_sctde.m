@@ -56,6 +56,7 @@ end
 %% ========== Turbo迭代 ========== %%
 iter_info.llr_per_iter = {};
 LLR_decode_prev = [];
+LLR_prior_info = [];                   % SISO译码的先验（首次为空=全0）
 
 for iter = 1:num_iter
     %% 均衡
@@ -83,25 +84,42 @@ for iter = 1:num_iter
         LLR_deinter = LLR_eq;
     end
 
-    %% 译码（卷积码Viterbi软判决）
-    % 构建trellis
-    [~, trellis] = conv_encode(zeros(1, 10), codec_params.gen_polys, codec_params.constraint_len);
+    %% SISO译码（BCJR MAP算法，输出外信息）
+    [LLR_ext, LLR_post] = siso_decode_conv(LLR_deinter, LLR_prior_info, ...
+                                            codec_params.gen_polys, codec_params.constraint_len);
 
-    % 软判决Viterbi
-    [bits_decoded, ~] = viterbi_decode(LLR_deinter, trellis, 'soft');
+    % 硬判决（最终输出用）
+    bits_decoded = double(LLR_post > 0);
 
-    %% 为下一次迭代准备：译码LLR → 交织 → 软符号
+    %% 为下一次迭代准备：外信息→重编码→交织→软符号
     if iter < num_iter
-        % 重编码获得编码后LLR（简化：用硬判决重编码再转软值）
-        coded_bits = conv_encode(bits_decoded, codec_params.gen_polys, codec_params.constraint_len);
-        LLR_decode = (2*coded_bits - 1) * 2 / max(nv, 1e-6);  % 硬LLR
+        % 用外信息（而非后验）重编码为编码比特LLR
+        % 外信息→信息比特软值→重编码展开为编码比特
+        n_rate = length(codec_params.gen_polys);
+        N_info_bits = length(LLR_ext);
+
+        % 将信息比特外信息展开为编码比特LLR
+        % 简化：每个信息比特的外信息复制n次（对应n个编码比特）
+        LLR_coded_ext = zeros(1, N_info_bits * n_rate);
+        for b = 1:N_info_bits
+            LLR_coded_ext((b-1)*n_rate+1 : b*n_rate) = LLR_ext(b);
+        end
+
+        % 加上尾比特（外信息=0）
+        tail_len = length(LLR_deinter) - length(LLR_coded_ext);
+        if tail_len > 0
+            LLR_coded_ext = [LLR_coded_ext, zeros(1, tail_len)];
+        end
 
         % 交织
         if ~isempty(codec_params.interleaver_seed) && codec_params.interleaver_seed >= 0
-            [LLR_decode_inter, ~] = random_interleave(LLR_decode, codec_params.interleaver_seed);
+            [LLR_decode_inter, ~] = random_interleave(LLR_coded_ext, codec_params.interleaver_seed);
         else
-            LLR_decode_inter = LLR_decode;
+            LLR_decode_inter = LLR_coded_ext;
         end
+
+        % 更新先验（下一次SISO译码的先验 = 本次均衡器的外信息经解交织）
+        LLR_prior_info = LLR_ext;
     end
 
     iter_info.llr_per_iter{iter} = LLR_eq;
