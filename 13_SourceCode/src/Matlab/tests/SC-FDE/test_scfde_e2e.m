@@ -82,24 +82,26 @@ for ci = 1:size(fading_configs, 1)
 
     rng(50 + ci);
 
-    % 按块长重算编码参数
-    M_coded_blk = 2 * blk_fft;
-    N_info_blk = M_coded_blk / n_code - mem;
-    N_blocks = ceil(2000 / N_info_blk);   % 总约2000信息比特
-    total_info = N_blocks * N_info_blk;
+    % 跨块编码：一次性编码所有信息，逐块均衡，拼接LLR后一次性译码
+    M_sym_per_blk = blk_fft;              % 每块QPSK符号数
+    M_coded_per_blk = 2 * M_sym_per_blk;  % 每块编码比特数
+    N_blocks = 16;                         % 块数
+    M_coded_total = M_coded_per_blk * N_blocks;  % 总编码比特
+    N_info_total = M_coded_total / n_code - mem;  % 总信息比特
 
-    info_bits_all = randi([0 1], 1, total_info);
-    bits_out_all = [];
+    info_bits_all = randi([0 1], 1, N_info_total);
 
-    %% ========== 逐块处理 ========== %%
+    % 一次性编码+交织
+    coded_all = conv_encode(info_bits_all, codec.gen_polys, codec.constraint_len);
+    coded_all = coded_all(1:M_coded_total);
+    [inter_all, perm_all] = random_interleave(coded_all, codec.interleave_seed);
+    sym_all = bits2qpsk(inter_all);
+
+    LLR_all = zeros(1, M_coded_total);  % 拼接所有块的LLR
+
+    %% ========== 逐块均衡 ========== %%
     for bi = 1:N_blocks
-        info_blk = info_bits_all((bi-1)*N_info_blk+1 : bi*N_info_blk);
-
-        % TX: 编码→交织→QPSK→CP→RRC
-        coded_blk = conv_encode(info_blk, codec.gen_polys, codec.constraint_len);
-        coded_blk = coded_blk(1:M_coded_blk);
-        [inter_blk, perm_blk] = random_interleave(coded_blk, codec.interleave_seed + bi);
-        data_sym = bits2qpsk(inter_blk);
+        data_sym = sym_all((bi-1)*M_sym_per_blk+1 : bi*M_sym_per_blk);
         x_block = data_sym(1:blk_fft);
         x_cp = [x_block(end-blk_cp+1:end), x_block];
 
@@ -183,32 +185,28 @@ for ci = 1:size(fading_configs, 1)
             end
         end
 
-        % 7': 均衡+译码
-        codec_blk = codec;
-        codec_blk.interleave_seed = codec.interleave_seed + bi;
+        % 7': 均衡（只输出LLR，不逐块译码）
         nv_eq = max(ch_info.noise_var, 1e-10);
 
-        if ~strcmpi(fading_type, 'static') && size(ch_info.h_time, 2) > 1
-            % 时变：BEM-Turbo迭代ICI消除均衡
-            data_pb_start = length(pilot) + length(gap);
-            cp_pb = blk_cp * sps;
-            h_block = zeros(length(sym_delays), blk_fft);
-            for sn = 1:blk_fft
-                pb_idx = data_pb_start + cp_pb + (sn-1)*sps + 1;
-                pb_idx = min(pb_idx, size(ch_info.h_time, 2));
-                h_block(:, sn) = ch_info.h_time(:, pb_idx);
-            end
-            [bits_blk, ~] = eq_bem_turbo_fde(Y_freq, h_block, sym_delays, ...
-                blk_fft, nv_eq, codec_blk, 3);
-        else
-            % 静态：标准Turbo均衡
-            [bits_blk, ~] = turbo_equalizer_scfde(Y_freq, H_est, turbo_iter, nv_eq, codec_blk);
-        end
-        bits_out_all = [bits_out_all, bits_blk(:).']; %#ok<AGROW>
+        % 对角MMSE均衡（块中点H_est，O(N)快速）
+        W = conj(H_est) ./ (abs(H_est).^2 + nv_eq);
+        x_hat = ifft(W .* Y_freq);
+        LLR_blk = zeros(1, 2*blk_fft);
+        LLR_blk(1:2:end) = -2*sqrt(2)*real(x_hat)/nv_eq;
+        LLR_blk(2:2:end) = -2*sqrt(2)*imag(x_hat)/nv_eq;
+
+        % 收集LLR
+        LLR_all((bi-1)*M_coded_per_blk+1 : bi*M_coded_per_blk) = LLR_blk(1:M_coded_per_blk);
     end
 
+    %% 跨块一次性译码
+    LLR_deint = random_deinterleave(LLR_all, perm_all);
+    LLR_deint = max(min(LLR_deint, 30), -30);
+    [~, Lpost_info, ~] = siso_decode_conv(LLR_deint, [], codec.gen_polys, codec.constraint_len);
+    bits_out_all = double(Lpost_info > 0);
+
     %% BER
-    n_cmp = min(length(bits_out_all), total_info);
+    n_cmp = min(length(bits_out_all), N_info_total);
     ber = mean(bits_out_all(1:n_cmp) ~= info_bits_all(1:n_cmp));
 
     fprintf('%7.1f%%', ber*100);
