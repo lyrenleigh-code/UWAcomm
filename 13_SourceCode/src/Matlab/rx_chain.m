@@ -34,32 +34,54 @@ if isfield(tx_info, 'is_passband') && tx_info.is_passband
     lpf_bw = params.sym_rate * (1 + params.waveform.rolloff);
     [bb_raw, ~] = downconvert(rx_signal, params.fs_passband, params.fc, lpf_bw);
 
-    % OTFS不用RRC匹配滤波（对应TX不用RRC）
-    if isfield(tx_info, 'otfs_no_rrc') && tx_info.otfs_no_rrc
-        % sinc低通滤波（与TX一致）
-        filt_len = 6*sps+1;
-        lpf_filt = sinc((-3*sps:3*sps)/sps) .* hanning(filt_len).';
-        lpf_filt = lpf_filt / sum(lpf_filt) * sps;
-        bb_filtered = conv(bb_raw, lpf_filt, 'same');
+    if false
+        % OTFS通带占位（OTFS走DD域直接模式，不经此路径）
+        N_ot = params.tx.N_doppler;
+        M_ot = params.tx.M_delay;
+        cp_sym = params.tx.cp_len;
+        otfs_sps = tx_info.otfs_sps;
+        n_up = N_ot * M_ot * otfs_sps;
+        cp_up = cp_sym * otfs_sps;
 
-        % 下采样（搜索最优偏移）
-        best_off = 0; best_power = 0;
-        ref_sym = tx_info.baseband_signal;
-        N_ref = min(20, length(ref_sym));
-        for off = 0:sps-1
-            sym_test = bb_filtered(off+1:sps:end);
-            if length(sym_test) >= N_ref
-                corr_val = abs(sum(sym_test(1:N_ref) .* conj(ref_sym(1:N_ref))));
-                if corr_val > best_power, best_power = corr_val; best_off = off; end
-            end
+        % 相关定时：用TX上采样基带信号找帧起始（补偿LPF群延迟）
+        ref = tx_info.shaped_baseband;
+        ref_seg = ref(1:min(2*M_ot*otfs_sps, length(ref)));
+        search_range = min(cp_up*3, length(bb_raw)-length(ref_seg));
+        best_off = 0; best_corr = 0;
+        for off = 0:search_range
+            if off+length(ref_seg) > length(bb_raw), break; end
+            seg = bb_raw(off+1 : off+length(ref_seg));
+            c = abs(sum(seg .* conj(ref_seg)));
+            if c > best_corr, best_corr = c; best_off = off; end
         end
-        rx_downsampled = bb_filtered(best_off+1:sps:end);
-        N_orig = length(tx_info.baseband_signal);
-        if length(rx_downsampled) > N_orig, rx_signal = rx_downsampled(1:N_orig);
-        elseif length(rx_downsampled) < N_orig, rx_signal = [rx_downsampled, zeros(1,N_orig-length(rx_downsampled))];
-        else, rx_signal = rx_downsampled; end
+
+        % 从帧起始跳过CP，提取数据帧
+        frame_start = best_off + cp_up + 1;
+        if frame_start+n_up-1 <= length(bb_raw)
+            bb_frame = bb_raw(frame_start : frame_start+n_up-1);
+        else
+            bb_frame = bb_raw(min(frame_start,end):end);
+            bb_frame = [bb_frame, zeros(1, n_up-length(bb_frame))];
+        end
+
+        % 每时隙频域截断下采样
+        rx_sym_mat = zeros(N_ot, M_ot);
+        for n = 1:N_ot
+            slot = bb_frame((n-1)*M_ot*otfs_sps+1 : n*M_ot*otfs_sps);
+            S = fft(slot);
+            S_trunc = zeros(1, M_ot);
+            S_trunc(1:M_ot/2) = S(1:M_ot/2);
+            S_trunc(M_ot/2+1:M_ot) = S(end-M_ot/2+1:end);
+            rx_sym_mat(n,:) = ifft(S_trunc) / otfs_sps;
+        end
+
+        % 重组为时域 + CP占位 → otfs_demodulate
+        rx_time = zeros(1, N_ot*M_ot);
+        for n = 1:N_ot
+            rx_time((n-1)*M_ot+1:n*M_ot) = rx_sym_mat(n,:);
+        end
+        rx_signal = [zeros(1, cp_sym), rx_time];
         rx_info.baseband_recovered = rx_signal;
-        % 跳过后面的RRC处理
     else
 
     % 匹配滤波（RRC）
@@ -208,40 +230,34 @@ end
 function bits_out = rx_otfs(rx_signal, params, tx_info, ch_info)
     N = params.tx.N_doppler;
     M = params.tx.M_delay;
-    cp_len = params.tx.cp_len;
 
-    % 去CP
-    n_total = N * M;
-    if cp_len > 0 && length(rx_signal) >= cp_len + n_total
-        rx_body = rx_signal(cp_len+1 : cp_len+n_total);
-    else
-        rx_body = rx_signal(1:min(length(rx_signal), n_total));
-        rx_body = [rx_body, zeros(1, n_total - length(rx_body))];
-    end
-
-    % SFFT: 时域→TF→DD
-    rx_tf = reshape(rx_body, M, N).';
-    rx_tf_freq = fft(rx_tf, M, 2);
-    Y_dd = ifft(rx_tf_freq, N, 1);
-
-    % DD域信道参数（符号级时延）
+    % DD域信道参数
     if isfield(params.channel, 'sym_delays')
         sd = params.channel.sym_delays;
     else
         sd = round(ch_info.delays_samp / params.waveform.sps);
     end
+    gains = ch_info.gains_init;
+
+    % DD域直接模式：在此施加信道（circshift）+ 噪声
+    dd_data = tx_info.dd_data;
+    Y_dd = zeros(N, M);
+    for p = 1:ch_info.num_paths
+        Y_dd = Y_dd + gains(p) * circshift(dd_data, [0, sd(p)]);
+    end
+    sig_pwr = mean(abs(Y_dd(:)).^2);
+    nv = sig_pwr * 10^(-params.snr_db/10);
+    Y_dd = Y_dd + sqrt(nv/2)*(randn(N,M)+1j*randn(N,M));
+
     h_dd = zeros(N, M);
     path_info = struct('num_paths', ch_info.num_paths, ...
         'delay_idx', sd, ...
         'doppler_idx', zeros(1, ch_info.num_paths), ...
-        'gain', ch_info.gains_init);
+        'gain', gains);
     for p = 1:ch_info.num_paths
         dl = mod(sd(p), M);
-        h_dd(1, dl+1) = ch_info.gains_init(p);
+        h_dd(1, dl+1) = gains(p);
     end
-
-    nv = ch_info.noise_var;
-    if nv == 0, nv = 1e-10; end
 
     codec_otfs = params.codec;
     if isfield(params.rx, 'mp_iters')

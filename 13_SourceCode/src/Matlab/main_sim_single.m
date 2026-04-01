@@ -38,7 +38,18 @@ for si = 1:length(schemes)
         [tx_signal, tx_info] = tx_chain(params);
 
         % 信道
-        [rx_signal, ch_info] = gen_uwa_channel(tx_signal, params.channel);
+        if isfield(tx_info, 'otfs_dd_mode') && tx_info.otfs_dd_mode
+            % OTFS：信道在DD域施加（rx_otfs内部处理）
+            rx_signal = tx_signal;  % 占位，实际信道在rx_otfs中
+            n_p = length(params.channel.gains);
+            ch_info = struct('num_paths', n_p, ...
+                'delays_samp', round(params.channel.delays_s * params.channel.fs), ...
+                'gains_init', params.channel.gains / sqrt(sum(abs(params.channel.gains).^2)), ...
+                'noise_var', 0, 'fs', params.channel.fs, 'fading_type', 'static');
+        else
+            % 其他体制：信道在通带施加
+            [rx_signal, ch_info] = gen_uwa_channel(tx_signal, params.channel);
+        end
         ch_info_list{si} = ch_info;
 
         % 接收

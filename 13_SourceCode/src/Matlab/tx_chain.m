@@ -171,22 +171,11 @@ tx_info.baseband_signal = tx_signal;  % 保存复基带信号
 %% ========== 7. 脉冲成形 + 上变频（生成通带实信号） ========== %%
 addpath(fullfile(proj_root, '09_Waveform', 'src', 'Matlab'));
 if strcmpi(params.scheme, 'OTFS')
-    % OTFS：ISFFT已自然带限，不加RRC，直接上采样+上变频
-    sps = params.waveform.sps;
-    baseband_up = zeros(1, length(tx_signal) * sps);
-    baseband_up(1:sps:end) = tx_signal;
-    % 简单低通插值（sinc近似）
-    filt_len = 6*sps+1;
-    lpf = sinc((-3*sps:3*sps)/sps) .* hanning(filt_len).';
-    lpf = lpf / sum(lpf) * sps;
-    baseband_up = conv(baseband_up, lpf, 'same');
-    tx_info.shaped_baseband = baseband_up;
-    [passband, tx_info.t_passband] = upconvert(baseband_up, params.fs_passband, params.fc);
-    tx_signal = passband;
-    tx_info.passband_signal = passband;
-    tx_info.is_passband = true;
-    tx_info.otfs_no_rrc = true;  % 标记OTFS不用RRC
+    % OTFS：DD域直接处理（信道在rx_chain中以DD域circshift施加）
+    tx_info.is_passband = false;
+    tx_info.otfs_dd_mode = true;
 elseif true
+    % 其他体制：RRC脉冲成形+上变频
 
     % 脉冲成形（上采样+RRC）
     [shaped, tx_info.filter_coeff, ~] = pulse_shape(tx_signal, ...
