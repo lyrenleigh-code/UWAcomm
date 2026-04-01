@@ -52,29 +52,33 @@ pilot = exp(1j*pi*4000/t_pilot(end)*t_pilot.^2);  % 基带LFM chirp
 pilot = pilot / sqrt(mean(abs(pilot).^2));
 
 snr_list = [15];
+% 扫描块长：找编码增益 vs ICI的最优折中
+blk_sweep = [64, 128, 256, 512, 1024];
 fading_configs = {
-    'static', 0, 0,    N_fft, cp_len;
-    'slow',   1, 5e-5, 256,   16;
-    'fast',   5, 2e-4, 128,   16;
+    'slow',   1, 5e-5;
+    'fast',   5, 2e-4;
 };
 
 fprintf('N_fft=%d, CP=%d, sps=%d, %d径信道\n\n', N_fft, cp_len, sps, length(sym_delays));
 
-for snr_idx = 1:length(snr_list)
-    snr_db = snr_list(snr_idx);
-    fprintf('========== SNR = %d dB (时变MMSE-ICI均衡) ==========\n', snr_db);
-    fprintf('%-10s %10s\n', '衰落', 'infoBER%');
-    fprintf('%s\n', repmat('-',1,22));
+snr_db = snr_list(1);
+n_code = length(codec.gen_polys);
+mem = codec.constraint_len - 1;
 
-    n_code = length(codec.gen_polys);
-    mem = codec.constraint_len - 1;
+fprintf('SNR=%ddB, BEM-Turbo ICI均衡, 块长扫描\n\n', snr_db);
+fprintf('%-8s', '衰落');
+for bi = 1:length(blk_sweep), fprintf('%8d', blk_sweep(bi)); end
+fprintf('\n%s\n', repmat('-', 1, 8+8*length(blk_sweep)));
 
 for ci = 1:size(fading_configs, 1)
     fading_type = fading_configs{ci,1};
     fd_hz = fading_configs{ci,2};
     doppler_rate = fading_configs{ci,3};
-    blk_fft = fading_configs{ci,4};       % 自适应块长
-    blk_cp = fading_configs{ci,5};        % 自适应CP
+    fprintf('%-8s', fading_type);
+
+  for bi = 1:length(blk_sweep)
+    blk_fft = blk_sweep(bi);
+    blk_cp = min(16, blk_fft/4);  % CP自适应
 
     rng(50 + ci);
 
@@ -185,25 +189,17 @@ for ci = 1:size(fading_configs, 1)
         nv_eq = max(ch_info.noise_var, 1e-10);
 
         if ~strcmpi(fading_type, 'static') && size(ch_info.h_time, 2) > 1
-            % 时变：提取块内符号率时变增益 → ICI矩阵MMSE均衡
-            % 数据段在帧中的位置（过采样域）
+            % 时变：BEM-Turbo迭代ICI消除均衡
             data_pb_start = length(pilot) + length(gap);
             cp_pb = blk_cp * sps;
-            % 符号率时刻对应的过采样索引
             h_block = zeros(length(sym_delays), blk_fft);
             for sn = 1:blk_fft
                 pb_idx = data_pb_start + cp_pb + (sn-1)*sps + 1;
                 pb_idx = min(pb_idx, size(ch_info.h_time, 2));
                 h_block(:, sn) = ch_info.h_time(:, pb_idx);
             end
-            [x_hat_tv, ~] = eq_mmse_tv_fde(Y_freq, h_block, sym_delays, blk_fft, nv_eq);
-            % 符号→LLR→解交织→Viterbi（不经Turbo，时变MMSE已是最优线性）
-            LLR_tv = zeros(1, 2*blk_fft);
-            LLR_tv(1:2:end) = -2*sqrt(2)*real(x_hat_tv) / nv_eq;
-            LLR_tv(2:2:end) = -2*sqrt(2)*imag(x_hat_tv) / nv_eq;
-            LLR_deint = random_deinterleave(LLR_tv(1:M_coded_blk), perm_blk);
-            [~, Lpost_info, ~] = siso_decode_conv(LLR_deint, [], codec_blk.gen_polys, codec_blk.constraint_len);
-            bits_blk = double(Lpost_info > 0);
+            [bits_blk, ~] = eq_bem_turbo_fde(Y_freq, h_block, sym_delays, ...
+                blk_fft, nv_eq, codec_blk, 3);
         else
             % 静态：标准Turbo均衡
             [bits_blk, ~] = turbo_equalizer_scfde(Y_freq, H_est, turbo_iter, nv_eq, codec_blk);
@@ -215,9 +211,9 @@ for ci = 1:size(fading_configs, 1)
     n_cmp = min(length(bits_out_all), total_info);
     ber = mean(bits_out_all(1:n_cmp) ~= info_bits_all(1:n_cmp));
 
-    fprintf('%-10s %9.2f%%\n', fading_type, ber*100);
-end
-    fprintf('\n');
-end
+    fprintf('%7.1f%%', ber*100);
+  end  % blk_sweep
+  fprintf('\n');
+end  % fading
 
 fprintf('\n完成\n');
