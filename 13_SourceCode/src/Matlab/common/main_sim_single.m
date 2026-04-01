@@ -7,11 +7,13 @@ fprintf('========================================\n');
 fprintf('  UWAcomm 端到端仿真 — 单SNR点\n');
 fprintf('========================================\n\n');
 
-proj_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+proj_root = fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath'))))));
 addpath(fullfile(proj_root, '02_ChannelCoding', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '03_Interleaving', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '07_ChannelEstEq', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '12_IterativeProc', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '09_Waveform', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '10_DopplerProc', 'src', 'Matlab'));
 
 %% ========== 配置 ========== %%
 schemes = {'SC-FDE', 'OFDM', 'SC-TDE', 'OTFS', 'DSSS', 'FH-MFSK'};

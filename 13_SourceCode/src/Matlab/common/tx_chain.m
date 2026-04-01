@@ -17,7 +17,7 @@ function [tx_signal, tx_info] = tx_chain(params)
 % 备注：
 %   链路：信息比特 → 信道编码 → 交织 → 调制 → [扩频] → [CP/训练/帧结构] → 发射
 
-proj_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+proj_root = fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath'))))));
 addpath(fullfile(proj_root, '02_ChannelCoding', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '03_Interleaving', 'src', 'Matlab'));
 

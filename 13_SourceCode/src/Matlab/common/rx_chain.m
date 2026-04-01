@@ -14,7 +14,7 @@ function [bits_out, rx_info] = rx_chain(rx_signal, params, tx_info, ch_info)
 %       .eq_output  : 均衡输出符号
 %       .scheme     : 体制名称
 
-proj_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+proj_root = fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath'))))));
 addpath(fullfile(proj_root, '02_ChannelCoding', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '03_Interleaving', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '07_ChannelEstEq', 'src', 'Matlab'));

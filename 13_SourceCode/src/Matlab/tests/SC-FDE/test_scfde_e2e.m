@@ -11,13 +11,15 @@ fprintf('========================================\n');
 fprintf('  SC-FDE 端到端测试（framework_v5完整链路）\n');
 fprintf('========================================\n\n');
 
-proj_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+% 路径：tests/SC-FDE/ → src/Matlab/ → src/ → 13_SourceCode/ → UWAcomm/
+proj_root = fileparts(fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))))));
 addpath(fullfile(proj_root, '02_ChannelCoding', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '03_Interleaving', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '07_ChannelEstEq', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '09_Waveform', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '10_DopplerProc', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '12_IterativeProc', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '13_SourceCode', 'src', 'Matlab', 'common'));
 
 constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
 bits2qpsk = @(b) constellation(bi2de(reshape(b(1:floor(length(b)/2)*2),2,[]).','left-msb')+1);
@@ -49,15 +51,23 @@ t_pilot = (0:pilot_len-1) / fs;
 pilot = exp(1j*pi*4000/t_pilot(end)*t_pilot.^2);  % 基带LFM chirp
 pilot = pilot / sqrt(mean(abs(pilot).^2));
 
+snr_list = [15];
 fading_configs = {
-    'static', 0, 0,    N_fft, cp_len;     % 无衰落, 大块
-    'slow',   1, 5e-5, 256,   16;         % 慢衰落, 短块, CP=max_delay*2
-    'fast',   5, 2e-4, 128,   16;         % 快衰落, 中等块(编码增益+短时假设折中)
+    'static', 0, 0,    N_fft, cp_len;
+    'slow',   1, 5e-5, 256,   16;
+    'fast',   5, 2e-4, 128,   16;
 };
 
-fprintf('SNR=%ddB, N_fft=%d, CP=%d, sps=%d, %d径信道\n\n', snr_db, N_fft, cp_len, sps, length(sym_delays));
-fprintf('%-8s %8s %8s %8s %8s %10s\n', '衰落', 'fd(Hz)', 'alpha', 'blk_fft', 'N块', 'infoBER%');
-fprintf('%s\n', repmat('-',1,58));
+fprintf('N_fft=%d, CP=%d, sps=%d, %d径信道\n\n', N_fft, cp_len, sps, length(sym_delays));
+
+for snr_idx = 1:length(snr_list)
+    snr_db = snr_list(snr_idx);
+    fprintf('========== SNR = %d dB (时变MMSE-ICI均衡) ==========\n', snr_db);
+    fprintf('%-10s %10s\n', '衰落', 'infoBER%');
+    fprintf('%s\n', repmat('-',1,22));
+
+    n_code = length(codec.gen_polys);
+    mem = codec.constraint_len - 1;
 
 for ci = 1:size(fading_configs, 1)
     fading_type = fading_configs{ci,1};
@@ -169,10 +179,35 @@ for ci = 1:size(fading_configs, 1)
             end
         end
 
-        % 7': Turbo均衡
+        % 7': 均衡+译码
         codec_blk = codec;
         codec_blk.interleave_seed = codec.interleave_seed + bi;
-        [bits_blk, ~] = turbo_equalizer_scfde(Y_freq, H_est, turbo_iter, ch_info.noise_var, codec_blk);
+        nv_eq = max(ch_info.noise_var, 1e-10);
+
+        if ~strcmpi(fading_type, 'static') && size(ch_info.h_time, 2) > 1
+            % 时变：提取块内符号率时变增益 → ICI矩阵MMSE均衡
+            % 数据段在帧中的位置（过采样域）
+            data_pb_start = length(pilot) + length(gap);
+            cp_pb = blk_cp * sps;
+            % 符号率时刻对应的过采样索引
+            h_block = zeros(length(sym_delays), blk_fft);
+            for sn = 1:blk_fft
+                pb_idx = data_pb_start + cp_pb + (sn-1)*sps + 1;
+                pb_idx = min(pb_idx, size(ch_info.h_time, 2));
+                h_block(:, sn) = ch_info.h_time(:, pb_idx);
+            end
+            [x_hat_tv, ~] = eq_mmse_tv_fde(Y_freq, h_block, sym_delays, blk_fft, nv_eq);
+            % 符号→LLR→解交织→Viterbi（不经Turbo，时变MMSE已是最优线性）
+            LLR_tv = zeros(1, 2*blk_fft);
+            LLR_tv(1:2:end) = -2*sqrt(2)*real(x_hat_tv) / nv_eq;
+            LLR_tv(2:2:end) = -2*sqrt(2)*imag(x_hat_tv) / nv_eq;
+            LLR_deint = random_deinterleave(LLR_tv(1:M_coded_blk), perm_blk);
+            [~, Lpost_info, ~] = siso_decode_conv(LLR_deint, [], codec_blk.gen_polys, codec_blk.constraint_len);
+            bits_blk = double(Lpost_info > 0);
+        else
+            % 静态：标准Turbo均衡
+            [bits_blk, ~] = turbo_equalizer_scfde(Y_freq, H_est, turbo_iter, nv_eq, codec_blk);
+        end
         bits_out_all = [bits_out_all, bits_blk(:).']; %#ok<AGROW>
     end
 
@@ -180,8 +215,9 @@ for ci = 1:size(fading_configs, 1)
     n_cmp = min(length(bits_out_all), total_info);
     ber = mean(bits_out_all(1:n_cmp) ~= info_bits_all(1:n_cmp));
 
-    fprintf('%-8s %8d %8.1e  blk=%4d  %d块  infoBER=%6.2f%%\n', ...
-        fading_type, fd_hz, doppler_rate, blk_fft, N_blocks, ber*100);
+    fprintf('%-10s %9.2f%%\n', fading_type, ber*100);
+end
+    fprintf('\n');
 end
 
 fprintf('\n完成\n');
