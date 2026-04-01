@@ -24,8 +24,26 @@
   - `soft_mapper.m` V1 — 后验LLR→软符号+残余方差（含LLR截断防var_x塌缩）
   - `eq_otfs_mp.m` V3 — OTFS MP均衡器（修复：BP先验项+阻尼+软估计输出）
 
+### 模块6. 06_MultiCarrier — 多载波/多域变换+CP (16个函数)
+- OFDM: ofdm_modulate/demodulate, ofdm_pilot_insert/extract
+- SC-FDE: scfde_add_cp/remove_cp
+- OTFS: otfs_modulate/demodulate, otfs_pilot_embed, otfs_get_data_indices
+- PAPR: papr_calculate, papr_clip
+- 可视化: plot_ofdm_spectrum, plot_otfs_dd_grid
+
 ### 模块8. 08_Sync — 同步+帧组装 (16个函数, 16项测试)
 ### 模块9. 09_Waveform — 脉冲成形/上下变频 (8个函数, 20项测试)
+
+### 模块10. 10_DopplerProc — 多普勒估计与补偿 (14个函数)
+- 粗估计：est_doppler_caf/cp/xcorr/zoomfft
+- 粗补偿：comp_resample_spline(快速Catmull-Rom/精确Thomas), comp_resample_farrow(Lagrange)
+- 残余补偿：comp_cfo_rotate, comp_ici_matrix
+- 辅助：doppler_coarse_compensate, doppler_residual_compensate, gen_doppler_channel
+
+### 模块11. 11_ArrayProc — 阵列接收预处理 (8个函数)
+- 波束形成：bf_das(DAS), bf_mvdr(MVDR/Capon)
+- 阵列处理：bf_delay_calibration, bf_nonuniform_resample
+- 辅助：gen_array_config, gen_doppler_channel_array, plot_beampattern
 
 ### 模块12. 12_IterativeProc — Turbo均衡迭代调度（4个调度器+测试+文档）
 - `turbo_equalizer_scfde.m` V7 — SC-FDE: LMMSE-IC ⇌ BCJR外信息迭代
@@ -40,31 +58,6 @@
   - OTFS: 9.8%→0.8%收敛(3dB), 3.3%→0%(6dB)
 
 ## 待开发模块
-
-### 阶段一（续）：多载波支持
-
-#### 模块6. 06_MultiCarrier — 多载波/多域变换 + CP
-- [ ] **OFDM**: ofdm_modulate/demodulate, ofdm_pilot_insert/extract
-- [ ] **SC-FDE**: scfde_add_cp/remove_cp
-- [ ] **OTFS**: otfs_modulate/demodulate, otfs_pilot_embed, otfs_get_data_indices
-- [ ] 测试 + README
-
-### 阶段二：多普勒处理
-
-#### 模块10. 10_DopplerProc — 多普勒估计与补偿
-- [ ] **10-1 粗多普勒估计**: est_doppler_caf/cp/xcorr/zoomfft
-- [ ] **10-1 粗多普勒补偿**: comp_resample（三次样条/Farrow）
-- [ ] **10-2 残余多普勒补偿**: comp_cfo, comp_ici_matrix
-- [ ] 测试 + README
-
-### 阶段三：阵列接收
-
-#### 模块11. 11_ArrayProc — 阵列接收预处理
-- [ ] gen_uwa_channel_array, bf_delay_calibration, bf_nonuniform_resample
-- [ ] bf_conventional, est_doppler_beamforming
-- [ ] 测试 + README
-
-### 阶段四：集成
 
 #### 模块13. 13_SourceCode — 端到端仿真
 - [ ] 水声信道仿真器（单路/阵列）
@@ -105,10 +98,10 @@
 
 | 指标 | 数值 |
 |------|------|
-| 已完成模块 | 9 / 11 + 迭代调度 |
-| 待开发模块 | 6(MultiCarrier) + 10(Doppler) + 11(Array) + 13(集成) |
-| 已完成 .m 文件 | ~95 个 |
-| 已完成测试项 | ~160 项 |
+| 已完成模块 | 12 / 13（仅模块13待开发） |
+| 待开发模块 | 13(端到端集成) |
+| 已完成 .m 文件 | ~120 个 |
+| 已完成测试项 | ~170 项 |
 | 总提交数 | ~65 次 |
 
 ## 模块与文件夹对照
@@ -120,11 +113,11 @@
 | 3 | 交织/解交织 | `03_Interleaving/` | 已完成 |
 | 4 | 符号映射/判决 | `04_Modulation/` | 已完成 |
 | 5 | 扩频/解扩 | `05_SpreadSpectrum/` | 已完成 |
-| 6 | 多载波变换+CP | `06_MultiCarrier/` | **下一个** |
+| 6 | 多载波变换+CP | `06_MultiCarrier/` | 已完成（16个函数） |
 | 7 | 信道估计与均衡 | `07_ChannelEstEq/` | 已完成（含Turbo接口） |
 | 8 | 同步+帧组装 | `08_Sync/` | 已完成 |
 | 9 | 脉冲成形/变频 | `09_Waveform/` | 已完成 |
-| 10 | 多普勒处理 | `10_DopplerProc/` | 待开发 |
-| 11 | 阵列预处理 | `11_ArrayProc/` | 待开发 |
+| 10 | 多普勒处理 | `10_DopplerProc/` | 已完成（14个函数） |
+| 11 | 阵列预处理 | `11_ArrayProc/` | 已完成（8个函数） |
 | 12 | Turbo迭代调度 | `12_IterativeProc/` | **已完成（4体制Turbo均衡）** |
 | 13 | 端到端仿真 | `13_SourceCode/` | 待开发 |
