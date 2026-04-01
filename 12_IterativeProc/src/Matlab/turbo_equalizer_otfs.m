@@ -75,7 +75,11 @@ bits_decoded = [];
 %% ========== Turbo外层迭代 ========== %%
 for iter = 1:num_iter
     %% 1. MP均衡（内层BP 10次）
-    mp_iters = 10;
+    if isfield(codec_params, 'mp_iters')
+        mp_iters = codec_params.mp_iters;
+    else
+        mp_iters = 10;
+    end
     [x_hat_dd, ~, x_mean_dd] = eq_otfs_mp(Y_dd, h_dd, path_info, N, M, ...
         noise_var, mp_iters, constellation, prior_mean, prior_var);
 
