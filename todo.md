@@ -2,6 +2,7 @@
 
 > 框架参考：`framework/framework_v5.html`（待升级v6）
 > Turbo均衡方案：`12_IterativeProc/turbo_equalizer_implementation.md`
+> 调试记录：`D:\Obsidian\workspace\UWAcomm\端到端帧组装调试笔记.md`
 > 6种通信体制：SC-TDE / SC-FDE / DSSS / OFDM / OTFS / FH-MFSK + 阵列增强
 
 ---
@@ -10,10 +11,10 @@
 
 | 指标 | 数值 |
 |------|------|
-| MATLAB函数文件 | 162个 |
-| 代码总行数 | 17,359行 |
-| 文档文件(md+html) | 23个 |
-| Git提交数 | 118次 |
+| MATLAB函数文件 | 165个 |
+| 代码总行数 | 18,223行 |
+| 文档文件(md+html) | 25个 |
+| Git提交数 | 120次 |
 | 模块数 | 13个（12个算法模块 + 1个集成模块） |
 
 ---
@@ -28,97 +29,77 @@
 | 04 符号映射/判决 | `04_Modulation/` | 6 | 774 | ✅ |
 | 05 扩频/解扩 | `05_SpreadSpectrum/` | 17 | 1,196 | ✅ |
 | 06 多载波+CP | `06_MultiCarrier/` | 15 | 1,623 | ✅ |
-| 07 信道估计与均衡 | `07_ChannelEstEq/` | 34 | 2,759 | ✅ 最大模块 |
+| 07 信道估计与均衡 | `07_ChannelEstEq/` | 35 | 3,092 | ✅ 含GAMP/VAMP/Kalman跟踪+DFE h_est初始化 |
 | 08 同步+帧组装 | `08_Sync/` | 17 | 1,199 | ✅ |
 | 09 脉冲成形/变频 | `09_Waveform/` | 9 | 1,099 | ✅ |
-| 10 多普勒处理 | `10_DopplerProc/` | 14 | 1,197 | ✅ |
+| 10 多普勒处理 | `10_DopplerProc/` | 14 | 1,200 | ✅ comp_resample V7(正alpha) |
 | 11 阵列预处理 | `11_ArrayProc/` | 8 | 607 | ✅ |
-| 12 Turbo迭代调度 | `12_IterativeProc/` | 6 | 869 | ✅ |
-| 13 端到端仿真 | `13_SourceCode/` | 10 | ~2,400 | P1+P2完成，P3-P6进行中 |
+| 12 Turbo迭代调度 | `12_IterativeProc/` | 7 | 979 | ✅ V8(DFE iter1)+跨块版本 |
+| 13 端到端仿真 | `13_SourceCode/` | 12 | 2,864 | P1+P2完成, P3调试中 |
 
 ---
 
-## 模块13 端到端集成
+## 端到端验证结果
 
-### 目录结构
+### SC-FDE (P1) + OFDM (P2) — 通带帧组装 ✅
 
-```
-13_SourceCode/src/Matlab/
-├── common/                    公共函数（6个）
-│   ├── gen_uwa_channel.m      水声信道（多径+Jakes+多普勒+AWGN）
-│   ├── sys_params.m           6体制参数配置
-│   ├── tx_chain.m             通用发射链路
-│   ├── rx_chain.m             通用接收链路
-│   ├── main_sim_single.m      单SNR点6体制仿真
-│   └── adaptive_block_len.m   自适应块长选择
-├── tests/
-│   ├── SC-FDE/                ✅ P1
-│   │   ├── test_scfde_static.m        静态SNR vs BER（通带）
-│   │   └── test_scfde_timevarying.m   时变fd=[0,1,5]Hz × SNR
-│   ├── OFDM/                  ✅ P2
-│   │   ├── test_ofdm_e2e.m           静态SNR vs BER（通带）
-│   │   └── test_ofdm_timevarying.m   时变fd=[0,1,5]Hz × SNR
-│   ├── SC-TDE/                ⬜ P3
-│   ├── OTFS/                  ⬜ P4
-│   ├── DSSS/                  ⬜ P5
-│   └── FH-MFSK/              ⬜ P6
-└── README.md
-```
+三体制统一帧结构：`[LFM_pb|guard|data_pb|guard|LFM_pb]` 全实数
 
-### 通带仿真信号流
+| 体制 | static | fd=1Hz 5dB | fd=1Hz 20dB | fd=5Hz 5dB | fd=5Hz 20dB |
+|------|--------|-----------|------------|-----------|------------|
+| SC-FDE V2.1 | 0% | 0% | 0% | 0.54% | 0% |
+| OFDM V2.0 | 0% | 0% | 0% | 0.54% | 0% |
 
-```
-TX: info → 02编码 → 03交织 → 04 QPSK → 加CP → 09 RRC成形 → 09上变频 → 通带实信号(DAC)
-信道: RRC成形基带(复数) → gen_uwa_channel(多径+Jakes+多普勒)
-通带: 信道后基带 → 09上变频 → +实噪声 → 09下变频 → 复基带
-RX: 09 RRC匹配 → 下采样 → 去CP+FFT → 07 MMSE均衡 → LLR → 03解交织 → 02 BCJR译码
-```
+均衡方式：跨块Turbo(LMMSE-IC + DD信道更新 + BCJR) 6次迭代
 
-### 仿真信道
+### SC-TDE (P3) — 静态信道 ✅
 
-```
-6径水声信道（最大时延~15ms）:
-  时延(ms): [0, 0.83, 2.5, 6.7, 10.0, 15.0]
-  增益:     [1, 0.6, 0.45, 0.3, 0.2, 0.12] (归一化)
-  CP = 128符号 > 90符号最大时延
-```
+信道估计方法对比（Turbo_DFE(31,90) × 6次迭代，SNR=0dB起无误码）:
 
-### 已验证性能
+| 方法 | 0%BER起点 | -3dB BER | 与oracle差距 |
+|------|----------|---------|-------------|
+| oracle | 0dB | 12.91% | 基准 |
+| MMSE | 3dB | 38.99% | 差~3dB |
+| OMP | 0dB | 13.76% | ~1dB |
+| SBL | 0dB | 15.07% | ~1dB |
+| **GAMP** | **0dB** | **12.96%** | **≈oracle** |
+| VAMP | 0dB | 13.26% | ~0.5dB |
+| Turbo-VAMP | 0dB | 10.41% | 优于oracle |
 
-**SC-FDE / OFDM 静态信道（通带仿真）：**
+推荐：Turbo_DFE + GAMP信道估计
 
-| SNR | 0dB | 3dB | 5dB+ |
-|-----|-----|-----|------|
-| BER | 0.56% | 0% | 0% |
+### SC-TDE (P3) — 时变信道（调试中）
 
-**OFDM 时变信道（通带仿真, SNR=[5,10,15,20]dB）：**
+基带独立测试（模块07, test_tv_eq.m）:
 
-| 衰落 | 5dB | 10dB | 15dB | 20dB | 块长 |
-|------|-----|------|------|------|------|
-| static | 0% | 0% | 0% | 0% | 1024 |
-| fd=1Hz | 0.07% | 0% | 0% | 0% | 256 |
-| fd=5Hz | 8.50% | 3.86% | 4.05% | 1.69% | 128 |
+| 方法 | fd=1Hz 20dB | fd=5Hz 20dB | 说明 |
+|------|------------|------------|------|
+| Turbo+orc(固定h) | 40.24% | 49.00% | ISI消除用冻结快照→失败 |
+| DFE+TV-orc(每符号h) | 42.99% | 4.50% | DFE错误传播限制fd=1Hz |
+| **LE+TV-orc** | **34.98%** | **0.00%** | LE无错误传播+完美跟踪=最优 |
+| LE+Kalman | 42.14% | 49.90% | Kalman跟踪精度不足 |
+
+结论：LE iter1(避免错误传播) + 时变ISI消除(需精确信道跟踪)是正确方向。Kalman受限于LE软判决质量。
 
 ---
 
 ## 逐体制开发计划
 
 ### ✅ P1: SC-FDE — 完成
-- 通带仿真（基带信道→上变频→实噪声→下变频）
-- 跨块编码 + 自适应块长 + oracle H_est
-- 已知α补偿 + 对角MMSE
-- 静态+时变测试脚本
+- 通带实数帧组装(LFM+guard)
+- 无噪声同步+直达径窗口+有效时延偏移
+- 跨块Turbo(LMMSE-IC+DD+BCJR) 6次
+- 信道seed固定(per fading), SNR只变噪声
+- comp_resample V7(正alpha)
 
 ### ✅ P2: OFDM — 完成
-- 与SC-FDE相同通带链路
-- 6径15ms信道
-- 静态SNR曲线 + 时变BER矩阵
-- 可视化（波形/频谱/CIR/频响/星座/BER曲线）
+- 与SC-FDE统一帧架构和信号流
+- 结果与SC-FDE一致（处理链路相同）
 
-### ⬜ P3: SC-TDE
-- RLS+PLL时域自适应均衡
-- 训练序列帧结构
-- 时变：RLS跟踪+单抽头ZF IC
+### ⏳ P3: SC-TDE — 静态通过，时变调试中
+- 静态：Turbo_DFE(31,90) + GAMP信道估计, 0dB起无误码
+- 时变：LE iter1无错误传播+TV-orc ISI消除可行(fd=5Hz=0%)
+- 待解决：Kalman跟踪精度提升 / LE iter1质量提升
 
 ### ⬜ P4: OTFS
 - DD域处理（信道circshift模型）
@@ -137,24 +118,30 @@ RX: 09 RRC匹配 → 下采样 → 去CP+FFT → 07 MMSE均衡 → LLR → 03解
 
 ## 关键技术方案
 
-### Turbo均衡（模块12，已完成）
-- LMMSE-IC: x̃ = x̄ + IFFT(G·(Y-HX̄))
-- SISO(BCJR): max-log / log-map / sova 三模式
-- 外信息交换: Le = Lpost - La
-- 4体制收敛: SC-FDE/OFDM/SC-TDE/OTFS
+### 通带帧组装（V3统一架构）
+```
+TX: QPSK → 09 RRC成形 → 09上变频(通带实数)
+    08 gen_lfm(通带实LFM) → 功率归一化
+    帧: [LFM_pb | guard(800) | data_pb | guard(800) | LFM_pb]
+CH: 等效基带帧 → 13 gen_uwa_channel → 09上变频 → +实噪声
+RX: 09下变频 → 08 sync_detect(无噪声,直达径窗口50样本)
+    10 comp_resample_spline(alpha) → 07 ch_est_*(训练序列)
+    07 eq_*/12 turbo_equalizer_* → 03解交织 → 02 BCJR → bits
+```
 
-### 时变信道处理
-- 10-1粗多普勒: 已知α重采样（估计精度作为独立课题）
-- 自适应块长: static=1024, fd=1Hz→256, fd=5Hz→128
-- 跨块编码: 编码和均衡解耦（长码字高增益+短块低ICI）
-- Oracle H_est: 块中点时变信道
-- BEM-Turbo ICI均衡: eq_bem_turbo_fde（可选，计算量大）
+### 信道估计（模块07）
+- 训练序列→Toeplitz矩阵→稀疏估计(GAMP/VAMP推荐)
+- 估计结果用于：DFE权重初始化 + Turbo ISI消除
+- 静态：固定h_est, 时变：需Kalman或DD跟踪
 
-### 通带仿真
-- 信道施加在基带复数信号（复数增益×复数信号=正确）
-- 通带闭环: 基带→upconvert→实噪声→downconvert
-- 模块09: upconvert/downconvert（载波搬移）+ pulse_shape/match_filter（RRC带限）
-- 物理一致: alpha = fd/fc, fading_type='slow'（无5倍放大）
+### Turbo均衡
+- SC-FDE/OFDM: 跨块LMMSE-IC + DD信道更新 + BCJR (turbo_equalizer_scfde_crossblock)
+- SC-TDE: DFE(31,90) iter1 + 软ISI消除 iter2+ (turbo_equalizer_sctde V8)
+- 时变SC-TDE: LE iter1(无错误传播) + Kalman/TV ISI消除(待完善)
+
+### 多普勒补偿
+- comp_resample_spline V7: `pos=(1:N)/(1+alpha)`, 正alpha=补偿压缩
+- est_doppler_xcorr: 前后LFM互相关, 无噪声信号上做
 
 ---
 
@@ -162,13 +149,11 @@ RX: 09 RRC匹配 → 下采样 → 去CP+FFT → 07 MMSE均衡 → LLR → 03解
 
 | 问题 | 状态 | 说明 |
 |------|------|------|
-| gen_uwa_channel复数增益×实信号 | 已绕过 | 信道在基带施加，通带仅做上/下变频+加噪 |
-| OTFS通带实现 | 搁置 | DD域二维脉冲成形，需专项攻关 |
-| 多普勒估计精度 | 搁置 | 多径下前后导频xcorr虚假峰问题，作为独立课题 |
-| fd=5Hz BER地板~2-4% | 保留 | Jakes衰落块内ICI，非多普勒补偿可解 |
-| doppler_coarse_compensate接口 | 保留 | 矩阵维度错误，当前用已知α替代 |
-| gen_uwa_channel fading_type='fast' | 已修正 | fast模式fd×5倍放大，统一用'slow'避免 |
-| framework v5→v6升级 | 待完成 | P1-P6全部完成后统一更新 |
+| SC-TDE时变Kalman跟踪 | **调试中** | LE软判决质量不足→Kalman偏移, 需更鲁棒方案 |
+| DFE错误传播 | 已分析 | 长时延(90sym)频选+时变→DFE数据段发散, 改用LE iter1 |
+| 多普勒估计精度 | 搁置 | 多径下xcorr虚假峰, 独立课题 |
+| OTFS通带实现 | 搁置 | DD域二维脉冲成形, 需专项 |
+| framework v5→v6升级 | 待完成 | P1-P6完成后统一更新 |
 
 ---
 
@@ -178,4 +163,4 @@ RX: 09 RRC匹配 → 下采样 → 去CP+FFT → 07 MMSE均衡 → LLR → 03解
 |------|------|----------|
 | v1-v4 | framework_v1~v4.html | 模块递增+PTR+Turbo参考 |
 | v5 | framework_v5.html | Turbo外信息迭代,交织纳入迭代环 |
-| **v6（待）** | — | 通带仿真链路,跨块编码,BEM-ICI,模块13结构 |
+| **v6（待）** | — | 通带实数帧,跨块编码,GAMP信道估计,Kalman跟踪 |
