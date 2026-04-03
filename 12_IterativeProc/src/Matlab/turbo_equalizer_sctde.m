@@ -1,6 +1,6 @@
 function [bits_out, iter_info] = turbo_equalizer_sctde(rx, h_est, training, num_iter, snr_or_nv, eq_params, codec_params)
-% 功能：SC-TDE Turbo均衡——RLS+软ISI消除 ⇌ BCJR(SISO) 外信息迭代
-% 版本：V7.0.0
+% 功能：SC-TDE Turbo均衡——DFE(iter1)+软ISI消除(iter2+) ⇌ BCJR(SISO) 外信息迭代
+% 版本：V8.0.0
 % 输入：
 %   rx           - 接收信号 (1×N 或 MxN多通道)
 %   h_est        - 时域信道估计 (1×L 或 MxL多通道)
@@ -27,12 +27,13 @@ function [bits_out, iter_info] = turbo_equalizer_sctde(rx, h_est, training, num_
 %       .num_iter       : 实际迭代次数
 %
 % 备注：
-%   V7改进（对齐SC-FDE的P0+P1架构）：
-%   1. SISO(BCJR)译码器替代Viterbi
-%   2. soft_mapper生成软符号（含QPSK符号反转修复）
-%   3. 交织/解交织纳入迭代环路
-%   4. LLR符号修正：取负（我们的QPSK: bit=1→Re<0）
-%   5. IC-only模式（La_eq=0），Turbo增益来自软ISI消除
+%   V8改进：
+%   1. iter1: eq_dfe(num_ff, num_fb, h_est初始化) 替代 eq_linear_rls(num_fb=0)
+%      - DFE反馈抽头覆盖长时延ISI（num_fb应≥max_delay）
+%      - h_est用于DFE权重初始化（MMSE匹配滤波）
+%   2. iter2+: 软ISI消除 + 单抽头ZF（用h_est，同V7）
+%   3. SISO(BCJR)译码 + soft_mapper反馈
+%   4. LLR符号修正：取负（QPSK: bit=1→Re<0）
 
 %% ========== 入参 ========== %%
 if nargin < 7 || isempty(codec_params), codec_params = struct(); end
@@ -90,9 +91,9 @@ bits_decoded = [];
 for iter = 1:num_iter
     %% 1. 均衡
     if iter == 1
-        % 第1次：线性RLS（无ISI消除），保存h(0)用于后续单抽头ZF
-        [LLR_eq_raw, x_hat, nv_est] = eq_linear_rls(rx_ptr, training, ...
-            eq_params.num_ff, eq_params.lambda, eq_params.pll);
+        % 第1次：DFE（h_est初始化，num_fb覆盖长时延ISI）
+        [LLR_eq_raw, x_hat, nv_est] = eq_dfe(rx_ptr, h_ptr, training, ...
+            eq_params.num_ff, eq_params.num_fb, eq_params.lambda, eq_params.pll);
         LLR_eq = -LLR_eq_raw;  % 符号修正
         h0 = h_ptr(1);         % 主径增益
         nv_zf = nv_est;        % 基准噪声

@@ -1,9 +1,9 @@
 function y_resampled = comp_resample_spline(y, alpha_est, fs, mode)
-% 功能：三次样条重采样——支持快速模式和高精度模式
-% 版本：V6.0.0
+% 功能：三次样条重采样多普勒补偿
+% 版本：V7.0.0
 % 输入：
 %   y         - 接收信号 (1xN，实数或复数)
-%   alpha_est - 估计的多普勒因子
+%   alpha_est - 估计的多普勒因子（正=靠近/压缩，与gen_uwa_channel一致）
 %   fs        - 采样率 (Hz)
 %   mode      - 运行模式（字符串，默认 'fast'）
 %               'fast'     : Catmull-Rom局部三次样条（全向量化，C1连续）
@@ -12,9 +12,12 @@ function y_resampled = comp_resample_spline(y, alpha_est, fs, mode)
 %   y_resampled - 重采样后信号 (1xN)
 %
 % 备注：
+%   多普勒压缩(alpha>0): 接收信号r(m)=s(m*(1+alpha)), 补偿需在位置
+%   n/(1+alpha)处采样以恢复s(n)。
+%   V7改动：pos=(1:N)/(1+alpha)，正alpha直接传入即可补偿压缩。
+%   （V6及之前为pos=(1:N)*(1+alpha)，需外部传-alpha，已废弃）
 %   fast模式：Catmull-Rom局部4点插值，无for循环，速度快
 %   accurate模式：全局三对角系统求解，C2连续（二阶导连续），精度最高
-%   两种模式均不调用MATLAB系统插值函数
 
 %% ========== 入参 ========== %%
 if nargin < 4 || isempty(mode), mode = 'fast'; end
@@ -23,7 +26,7 @@ y = y(:).';
 N = length(y);
 
 %% ========== 新采样位置 ========== %%
-pos = (1:N) * (1 + alpha_est);
+pos = (1:N) / (1 + alpha_est);
 
 %% ========== 按模式选择算法 ========== %%
 switch mode

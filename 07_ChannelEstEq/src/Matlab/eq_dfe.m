@@ -49,6 +49,26 @@ delta = 0.01;
 P = eye(total_taps) / delta;
 w = zeros(total_taps, 1);
 
+% 用h_est初始化前馈权重（MMSE匹配滤波初始化）
+if ~isempty(h_est)
+    h_est = h_est(:);
+    L_h = length(h_est);
+    % 前馈：信道匹配滤波器（截取到num_ff长度）
+    h_mf = conj(flipud(h_est));  % matched filter
+    if length(h_mf) > num_ff
+        h_mf = h_mf(1:num_ff);
+    end
+    w_init_ff = zeros(num_ff, 1);
+    w_init_ff(1:length(h_mf)) = h_mf / (h_est' * h_est + delta);  % MMSE正则化
+    % 反馈：信道尾部（去除主径后的ISI）
+    w_init_fb = zeros(num_fb, 1);
+    if L_h > 1 && num_fb > 0
+        fb_taps = h_est(2:min(L_h, num_fb+1));
+        w_init_fb(1:length(fb_taps)) = -fb_taps / (h_est(1) + delta);  % ISI消除
+    end
+    w = [w_init_ff; w_init_fb];
+end
+
 %% ========== 初始化PLL ========== %%
 pll_enable = pll_params.enable;
 Kp = pll_params.Kp;
