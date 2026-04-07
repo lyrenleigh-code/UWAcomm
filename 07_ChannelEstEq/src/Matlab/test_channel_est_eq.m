@@ -217,32 +217,116 @@ try
     fprintf('       BEM(CE)对比: NMSE=%.1fdB\n', nmse_bem_kal);
 catch, end
 
+% === 2F: 训练导频 vs 散布导频 NMSE对比（fd=5Hz, SNR=15dB）===
+fprintf('\n');
+fd_sp = 5; N_sp = train_len_tv + N_data_tv;
+pilot_sp_len = max_d + 100; pilot_sp_interval = 300;  % 每300符号插入一段导频
+rng(42); tr_sp = constellation(randi(4,1,train_len_tv));
+rng(999); pilot_sp = constellation(randi(4,1,pilot_sp_len));
+data_sp = constellation(randi(4,1,N_data_tv));
+% 帧结构: [训练|数据段1|导频|数据段2|导频|...]
+frame_sp = tr_sp; pilot_pos_sp = []; data_idx = 1;
+while data_idx <= N_data_tv
+    chunk = min(pilot_sp_interval, N_data_tv - data_idx + 1);
+    frame_sp = [frame_sp, data_sp(data_idx:data_idx+chunk-1)];
+    data_idx = data_idx + chunk;
+    if data_idx <= N_data_tv
+        pilot_pos_sp(end+1) = length(frame_sp) + 1;
+        frame_sp = [frame_sp, pilot_sp];
+    end
+end
+pilot_pos_sp(end+1) = length(frame_sp) + 1;
+frame_sp = [frame_sp, pilot_sp];  % 尾导频
+N_frame_sp = length(frame_sp);
+
+[rx_sp, h_true_sp] = gen_jakes_ch(fd_sp, 15, 600, N_frame_sp, frame_sp, [], sym_delays, gains, K, sym_rate);
+
+% 训练+散布导频观测
+[obs_y_tr, obs_x_tr, obs_t_tr] = build_train_obs(rx_sp, tr_sp, sym_delays, K, max_d, train_len_tv);
+obs_y_sp = obs_y_tr(:); obs_x_sp = obs_x_tr; obs_t_sp = obs_t_tr(:);
+for pi_i = 1:length(pilot_pos_sp)
+    pp = pilot_pos_sp(pi_i);
+    for kk = max_d+1:pilot_sp_len
+        n = pp + kk - 1;
+        if n > N_frame_sp, break; end
+        xv = zeros(1, K);
+        for p = 1:K
+            idx = n - sym_delays(p);
+            if idx >= pp && idx < pp+pilot_sp_len, xv(p) = pilot_sp(idx-pp+1);
+            elseif idx >= 1 && idx <= train_len_tv, xv(p) = tr_sp(idx); end
+        end
+        if any(xv~=0)
+            obs_y_sp(end+1) = rx_sp(n);
+            obs_x_sp = [obs_x_sp; xv];
+            obs_t_sp(end+1) = n;
+        end
+    end
+end
+
+% 各方法对比
+sp_methods = {'BEM(CE)','BEM(DCT)','DD-BEM','Kalman'};
+nmse_train_only = NaN(1,4);
+nmse_scattered  = NaN(1,4);
+
+% 训练导频版
+try [h_t,~,~]=ch_est_bem(obs_y_tr(:),obs_x_tr,obs_t_tr(:),N_frame_sp,sym_delays,fd_sp,sym_rate,noise_var_base,'ce');
+    nmse_train_only(1)=10*log10(mean(sum(abs(h_t-h_true_sp).^2,1)./sum(abs(h_true_sp).^2,1))); catch, end
+try [h_t,~,~]=ch_est_bem(obs_y_tr(:),obs_x_tr,obs_t_tr(:),N_frame_sp,sym_delays,fd_sp,sym_rate,noise_var_base,'dct');
+    nmse_train_only(2)=10*log10(mean(sum(abs(h_t-h_true_sp).^2,1)./sum(abs(h_true_sp).^2,1))); catch, end
+try [h_t,~]=ch_est_bem_dd(rx_sp,tr_sp,sym_delays,fd_sp,sym_rate,noise_var_base,[],struct('num_iter',3,'bem_type','ce'));
+    nmse_train_only(3)=10*log10(mean(sum(abs(h_t-h_true_sp).^2,1)./sum(abs(h_true_sp).^2,1))); catch, end
+try h_init_sp=h_true_sp(:,round(train_len_tv/2));
+    [h_t,~,~]=ch_track_kalman(rx_sp(train_len_tv+1:end),frame_sp(train_len_tv+1:end),sym_delays,h_init_sp,fd_sp,sym_rate,noise_var_base);
+    h_true_d=h_true_sp(:,train_len_tv+1:end);
+    nmse_train_only(4)=10*log10(mean(sum(abs(h_t-h_true_d).^2,1)./sum(abs(h_true_d).^2,1))); catch, end
+
+% 散布导频版
+try [h_s,~,~]=ch_est_bem(obs_y_sp(:),obs_x_sp,obs_t_sp(:),N_frame_sp,sym_delays,fd_sp,sym_rate,noise_var_base,'ce');
+    nmse_scattered(1)=10*log10(mean(sum(abs(h_s-h_true_sp).^2,1)./sum(abs(h_true_sp).^2,1))); catch, end
+try [h_s,~,~]=ch_est_bem(obs_y_sp(:),obs_x_sp,obs_t_sp(:),N_frame_sp,sym_delays,fd_sp,sym_rate,noise_var_base,'dct');
+    nmse_scattered(2)=10*log10(mean(sum(abs(h_s-h_true_sp).^2,1)./sum(abs(h_true_sp).^2,1))); catch, end
+try [h_s,~]=ch_est_bem_dd(rx_sp,tr_sp,sym_delays,fd_sp,sym_rate,noise_var_base,h_s,struct('num_iter',2,'bem_type','ce'));
+    nmse_scattered(3)=10*log10(mean(sum(abs(h_s-h_true_sp).^2,1)./sum(abs(h_true_sp).^2,1))); catch, end
+nmse_scattered(4) = nmse_train_only(4);  % Kalman逐符号，不依赖导频结构
+
+fprintf('2F 训练导频 vs 散布导频 NMSE (fd=5Hz, SNR=15dB):\n');
+fprintf('  %10s |', '方法'); for mi=1:4, fprintf(' %9s', sp_methods{mi}); end; fprintf('\n');
+fprintf('  %10s |', '仅训练'); for mi=1:4, fprintf(' %8.1fdB', nmse_train_only(mi)); end; fprintf('\n');
+fprintf('  %10s |', '散布导频'); for mi=1:4, fprintf(' %8.1fdB', nmse_scattered(mi)); end; fprintf('\n');
+fprintf('  %10s |', '增益'); for mi=1:4, fprintf(' %+7.1fdB', nmse_train_only(mi)-nmse_scattered(mi)); end; fprintf('\n');
+pass_count = pass_count + 1;
+
 % 可视化2: 时变信道估计综合
-figure('Position',[50 300 1400 500]);
+figure('Position',[50 250 1600 600]);
 % 2A: NMSE vs fd
-subplot(2,3,1);
+subplot(2,4,1);
 bar(nmse_bem_fd'); set(gca,'XTickLabel',arrayfun(@(f) sprintf('%.1fHz',f),fd_test_list,'Uni',0));
-ylabel('NMSE(dB)'); title('2A: NMSE vs fd'); legend('CE','DCT'); grid on;
+ylabel('NMSE(dB)'); title('2A: BEM NMSE vs fd'); legend('CE','DCT'); grid on;
 % 2B: NMSE vs SNR
-subplot(2,3,2);
+subplot(2,4,2);
 plot(snr_tv_list, nmse_bem_snr, 'bo-', 'LineWidth',1.5, 'MarkerSize',6); grid on;
-xlabel('SNR(dB)'); ylabel('NMSE(dB)'); title('2B: BEM(CE) NMSE vs SNR (fd=5Hz)');
-% 2C: SAGE时延
-subplot(2,3,3);
+xlabel('SNR(dB)'); ylabel('NMSE(dB)'); title('2B: BEM(CE) vs SNR');
+% 2D: SAGE时延
+subplot(2,4,3);
 stem(sym_delays/sym_rate*1000, abs(gains), 'k', 'filled', 'LineWidth',1.5); hold on;
 if exist('params_sage','var') && ~isempty(params_sage)
     stem(params_sage(:,1)/sym_rate*1000, abs(info_sage.gains_complex), 'r', 'LineWidth',1.5);
 end
-xlabel('时延(ms)'); ylabel('|h|'); title('2D: SAGE参数估计'); legend('真实','SAGE'); grid on;
-% 2D: 主径跟踪
+xlabel('时延(ms)'); ylabel('|h|'); title('2D: SAGE'); legend('真实','SAGE'); grid on;
+% 2F: 训练 vs 散布导频
+subplot(2,4,4);
+bar([nmse_train_only; nmse_scattered]');
+set(gca,'XTickLabel',sp_methods,'XTickLabelRotation',15);
+ylabel('NMSE(dB)'); legend('仅训练','散布导频'); title('2F: 导频结构对比'); grid on;
+% 2E: 主径跟踪
 t_d = (1:N_data_tv)/sym_rate*1000;
-subplot(2,3,4);
+subplot(2,4,5);
 plot(t_d, abs(h_true_data_kal(1,:)), 'k', 'LineWidth',1.5); hold on;
 if ~isempty(h_kal), plot(t_d, abs(h_kal(1,:)), 'g', 'LineWidth',1); end
 if ~isempty(h_bem_kal), plot(t_d, abs(h_bem_kal(1,train_len_tv+1:end)), 'b--', 'LineWidth',1); end
 xlabel('时间(ms)'); ylabel('|h_1|'); title('2E: 主径跟踪'); legend('真实','Kalman','BEM'); grid on;
-% 2D: NMSE随时间
-subplot(2,3,5);
+% NMSE随时间
+subplot(2,4,6);
 win=50;
 if ~isempty(h_kal)
     nmse_t=movmean(sum(abs(h_kal-h_true_data_kal).^2,1)./sum(abs(h_true_data_kal).^2,1),win);
@@ -254,12 +338,17 @@ if ~isempty(h_bem_kal)
     plot(t_d, 10*log10(nmse_b+1e-10), 'b', 'LineWidth',1);
 end
 xlabel('时间(ms)'); ylabel('NMSE(dB)'); title('瞬时NMSE'); legend('Kalman','BEM'); grid on; ylim([-25 10]);
-% 2D: 主径相位
-subplot(2,3,6);
+% 主径相位
+subplot(2,4,7);
 plot(t_d, angle(h_true_data_kal(1,:))*180/pi, 'k', 'LineWidth',1.5); hold on;
 if ~isempty(h_kal), plot(t_d, angle(h_kal(1,:))*180/pi, 'g', 'LineWidth',1); end
 if ~isempty(h_bem_kal), plot(t_d, angle(h_bem_kal(1,train_len_tv+1:end))*180/pi, 'b--', 'LineWidth',1); end
 xlabel('时间(ms)'); ylabel('相位(°)'); title('主径相位'); grid on;
+% 2C: DD-BEM增益
+subplot(2,4,8);
+bar([nmse_bem_fd(1,:); nmse_dd_fd]');
+set(gca,'XTickLabel',arrayfun(@(f) sprintf('%.1fHz',f),fd_test_list,'Uni',0));
+ylabel('NMSE(dB)'); legend('BEM(CE)','DD-BEM'); title('2C: DD增益'); grid on;
 sgtitle('2. 时变信道估计综合测试');
 
 %% ==================== 三、均衡器SNR vs SER（静态信道, GAMP估计）==================== %%
@@ -469,25 +558,30 @@ xlabel('频率(kHz)'); ylabel('|H|(dB)'); title('频响: 真实 vs GAMP');
 legend('真实','GAMP'); grid on; xlim([0 sym_rate/2/1000]);
 sgtitle('4B. 频域均衡器（静态, GAMP估计）');
 
-% === 4C: Turbo迭代均衡——TDE vs FDE 对比 ===
+% === 3C: Turbo迭代均衡——TDE vs FDE 对比（同一6径信道）===
 fprintf('\n');
 snr_tc_list = [-3, 0, 3, 5, 10];
 iter_list_tc = [1, 2, 4, 6];
 
-% --- 4C-1: Turbo TDE（3径短信道 + turbo_equalizer_sctde）---
-N_data_tde = 2000;
-M_coded_tde = 2*N_data_tde; N_info_tde = M_coded_tde/n_code - mem;
-rng(70);
-ib_tde = randi([0 1],1,N_info_tde);
-cd_tde = conv_encode(ib_tde,codec.gen_polys,codec.constraint_len); cd_tde=cd_tde(1:M_coded_tde);
-[it_tde,~] = random_interleave(cd_tde,codec.interleave_seed);
-sym_tde = bits2qpsk(it_tde);
-tr_tde = constellation(randi(4,1,train_len_eq));
-tx_tde = [tr_tde, sym_tde];
-rx_tde_clean = conv(tx_tde, h_sym_td); rx_tde_clean = rx_tde_clean(1:length(tx_tde));
+% 共用6径信道和编码数据
+blk_fft_tc = 256; blk_cp_tc = max(sym_delays)+10;
+N_blks_tc = 4; M_blk_tc = 2*blk_fft_tc; M_tot_tc = M_blk_tc*N_blks_tc;
+N_info_tc = M_tot_tc/n_code - mem;
+N_data_tde = blk_fft_tc * N_blks_tc;  % TDE数据量与FDE一致
 
-eq_p_tde = struct('num_ff',num_ff_td,'num_fb',num_fb_td,'lambda',lambda_dfe,...
-                   'pll',pll_off);
+rng(70);
+ib_tc = randi([0 1],1,N_info_tc);
+cd_tc = conv_encode(ib_tc,codec.gen_polys,codec.constraint_len); cd_tc=cd_tc(1:M_tot_tc);
+[it_tc,~] = random_interleave(cd_tc,codec.interleave_seed);
+sym_tc = bits2qpsk(it_tc);
+tr_tc = constellation(randi(4,1,train_len_eq));
+
+% --- Turbo TDE（6径信道 + turbo_equalizer_sctde）---
+tx_tde = [tr_tc, sym_tc];
+rx_tde_clean = conv(tx_tde, h_sym_eq); rx_tde_clean = rx_tde_clean(1:length(tx_tde));
+
+eq_p_tde = struct('num_ff',4*L_h,'num_fb',max(sym_delays),'lambda',0.9995,...
+                   'pll',struct('enable',false,'Kp',0,'Ki',0));
 ber_tde = NaN(length(snr_tc_list), length(iter_list_tc));
 
 for si=1:length(snr_tc_list)
@@ -497,14 +591,14 @@ for si=1:length(snr_tc_list)
             rng(500+si);
             nv_i=10^(-snr_i/10);
             rx_tde=rx_tde_clean+sqrt(nv_i/2)*(randn(size(rx_tde_clean))+1j*randn(size(rx_tde_clean)));
-            [bo_ti,~]=turbo_equalizer_sctde(rx_tde,h_est_td,tr_tde,iter_list_tc(ii),snr_i,eq_p_tde,codec);
-            nc_ti=min(length(bo_ti),N_info_tde);
-            ber_tde(si,ii)=mean(bo_ti(1:nc_ti)~=ib_tde(1:nc_ti));
+            [bo_ti,~]=turbo_equalizer_sctde(rx_tde,h_est_eq,tr_tc,iter_list_tc(ii),snr_i,eq_p_tde,codec);
+            nc_ti=min(length(bo_ti),N_info_tc);
+            ber_tde(si,ii)=mean(bo_ti(1:nc_ti)~=ib_tc(1:nc_ti));
         catch, end
     end
 end
 
-fprintf('[通过] Turbo TDE (3径, SNR vs iter):\n');
+fprintf('[通过] Turbo TDE (6径, SNR vs iter):\n');
 fprintf('  %6s |', 'SNR'); fprintf(' iter%-3d', iter_list_tc); fprintf('\n');
 for si=1:length(snr_tc_list)
     fprintf('  %4ddB |', snr_tc_list(si));
@@ -512,22 +606,13 @@ for si=1:length(snr_tc_list)
 end
 pass_count = pass_count + 1;
 
-% --- 4C-2: Turbo FDE（6径长信道 + 分块LMMSE-IC+BCJR）---
-blk_fft_tc = 256; blk_cp_tc = max(sym_delays)+10;
-N_blks_tc = 4; M_blk_tc = 2*blk_fft_tc; M_tot_tc = M_blk_tc*N_blks_tc;
-N_info_tc = M_tot_tc/n_code - mem;
+% --- Turbo FDE（同一6径信道 + 分块LMMSE-IC+BCJR）---
 
-rng(71);
-ib_tc = randi([0 1],1,N_info_tc);
-cd_tc = conv_encode(ib_tc,codec.gen_polys,codec.constraint_len); cd_tc=cd_tc(1:M_tot_tc);
-[it_tc,~] = random_interleave(cd_tc,codec.interleave_seed);
-sym_tc = bits2qpsk(it_tc);
-
-rx_cp_clean = cell(1,N_blks_tc);
+rx_cp_clean_tc = cell(1,N_blks_tc);
 for bi=1:N_blks_tc
     ds = sym_tc((bi-1)*blk_fft_tc+1:bi*blk_fft_tc);
     x_cp = [ds(end-blk_cp_tc+1:end), ds];
-    rc = conv(x_cp, h_sym_eq); rx_cp_clean{bi} = rc(1:length(x_cp));
+    rc = conv(x_cp, h_sym_eq); rx_cp_clean_tc{bi} = rc(1:length(x_cp));
 end
 H_est_tc = fft(htd_eq, blk_fft_tc);
 [~,pm_tc] = random_interleave(zeros(1,M_tot_tc),codec.interleave_seed);
@@ -539,7 +624,7 @@ for si=1:length(snr_tc_list)
     Y_blks_tc = cell(1,N_blks_tc);
     for bi=1:N_blks_tc
         rng(400+bi+si*10);
-        rc_n = rx_cp_clean{bi} + sqrt(nv_i/2)*(randn(size(rx_cp_clean{bi}))+1j*randn(size(rx_cp_clean{bi})));
+        rc_n = rx_cp_clean_tc{bi} + sqrt(nv_i/2)*(randn(size(rx_cp_clean_tc{bi}))+1j*randn(size(rx_cp_clean_tc{bi})));
         Y_blks_tc{bi} = fft(rc_n(blk_cp_tc+1:blk_cp_tc+blk_fft_tc));
     end
     for ii=1:length(iter_list_tc)
@@ -569,7 +654,7 @@ for si=1:length(snr_tc_list)
     end
 end
 
-fprintf('[通过] Turbo FDE (6径, SNR vs iter):\n');
+fprintf('[通过] Turbo FDE (同一6径, SNR vs iter):\n');
 fprintf('  %6s |', 'SNR'); fprintf(' iter%-3d', iter_list_tc); fprintf('\n');
 for si=1:length(snr_tc_list)
     fprintf('  %4ddB |', snr_tc_list(si));
@@ -594,14 +679,14 @@ for ii=1:length(iter_list_tc)
 end
 grid on; xlabel('SNR(dB)'); ylabel('BER'); ylim([1e-5 1]);
 title('Turbo FDE (6径)'); legend('Location','southwest');
-sgtitle('4C. Turbo均衡: TDE vs FDE');
+sgtitle('3C. Turbo均衡: TDE vs FDE（同一6径信道）');
 
 %% ==================== 四、时变均衡（RRC+gen_uwa_channel+分块FDE）==================== %%
 fprintf('\n--- 4. 时变均衡（RRC+分块LMMSE-IC）---\n\n');
 
-fd_list_eq = [0, 1, 5];
-snr_list_eq = [0, 5, 10, 15, 20];
-tv_methods = {'oracle','BEM(CE)','BEM(DCT)'};
+fd_list_eq = [0, 1, 5, 10];
+snr_list_eq = [-3, 0, 3, 5, 10, 15, 20];
+tv_methods = {'oracle','BEM(CE)','BEM(DCT)','DD-BEM'};
 N_tv_methods = length(tv_methods);
 ber_tv = zeros(length(fd_list_eq), length(snr_list_eq), N_tv_methods);
 
@@ -688,22 +773,29 @@ for fi = 1:length(fd_list_eq)
             end
         end
         fd_est_i=max(fd_i,0.5);
-        h_tv_bems = cell(1,2);  % CE, DCT
-        bem_types = {'ce','dct'};
+        h_tv_bems = cell(1,3);  % CE, DCT, DD-BEM
+        bem_types_eq = {'ce','dct'};
         for bti=1:2
             try
-                [h_tv_bems{bti},~,~]=ch_est_bem(obs_y_f(:),obs_x_f,obs_t_f(:),N_frame_fde,sym_delays,fd_est_i,sym_rate,nv_eq_i,bem_types{bti});
+                [h_tv_bems{bti},~,~]=ch_est_bem(obs_y_f(:),obs_x_f,obs_t_f(:),N_frame_fde,sym_delays,fd_est_i,sym_rate,nv_eq_i,bem_types_eq{bti});
             catch
                 h_tv_bems{bti}=[];
             end
         end
+        % DD-BEM: 以CE为初始，DD迭代精化
+        try
+            [h_tv_bems{3},~]=ch_est_bem_dd(rx_sym_fde,tr_tv,sym_delays,fd_est_i,sym_rate,nv_eq_i,h_tv_bems{1},...
+                struct('num_iter',2,'dd_step',5,'bem_type','ce','blk_size',blk_fft));
+        catch
+            h_tv_bems{3}=h_tv_bems{1};
+        end
 
-        for mi=1:N_tv_methods  % 1=oracle, 2=CE, 3=DCT, 4=P
+        for mi=1:N_tv_methods  % 1=oracle, 2=CE, 3=DCT, 4=DD-BEM
             H_blks_i=cell(1,N_blks);
             for bi=1:N_blks
                 mid=blk_starts_fde(bi)+round(sym_per_blk/2);
                 if mi==1, hm=h_paths_fde(:,min(mid,N_frame_fde));
-                elseif ~isempty(h_tv_bems{mi-1}), hm=h_tv_bems{mi-1}(:,min(mid,N_frame_fde));
+                elseif mi<=4 && ~isempty(h_tv_bems{mi-1}), hm=h_tv_bems{mi-1}(:,min(mid,N_frame_fde));
                 else, hm=h_paths_fde(:,min(mid,N_frame_fde)); end
                 htd=zeros(1,blk_fft);
                 for p=1:K, if sym_delays(p)+1<=blk_fft, htd(sym_delays(p)+1)=hm(p); end, end
@@ -744,33 +836,43 @@ for fi = 1:length(fd_list_eq)
 end
 pass_count = pass_count + 1;
 
-% 可视化5: 时变均衡BER（多方法对比）
-figure('Position',[50 50 1200 500]);
+% 可视化: 时变均衡BER（多方法+多fd）
+figure('Position',[50 50 1400 500]);
 line_styles = {'-','--',':','-.'};
-colors_tv = [0 0.45 0.74; 0.85 0.33 0.1; 0.47 0.67 0.19];
-markers_tv = {'o','s','d'};
-% 左图：fd=5Hz全方法对比（最有区分度）
-subplot(1,2,1);
-fi_main = 3;  % fd=5Hz
+markers_tv = {'o','s','d','^'};
+colors_m = lines(N_tv_methods);
+% 左图：fd=5Hz全方法对比
+subplot(1,3,1);
+fi_5 = find(fd_list_eq==5,1);
 for mi=1:N_tv_methods
-    semilogy(snr_list_eq, max(ber_tv(fi_main,:,mi),1e-5), [markers_tv{1} line_styles{mi}], ...
-        'LineWidth',1.5, 'MarkerSize',6, 'DisplayName',tv_methods{mi}); hold on;
+    semilogy(snr_list_eq, max(ber_tv(fi_5,:,mi),1e-5), [markers_tv{mi} line_styles{mi}], ...
+        'Color',colors_m(mi,:), 'LineWidth',1.5, 'MarkerSize',6, 'DisplayName',tv_methods{mi}); hold on;
 end
 grid on; xlabel('SNR(dB)'); ylabel('BER'); ylim([1e-5 1]);
-title(sprintf('fd=%dHz: 不同信道估计方法', fd_list_eq(fi_main)));
-legend('Location','southwest'); set(gca,'FontSize',11);
-% 右图：各fd下oracle vs BEM(CE)
-subplot(1,2,2);
+title('fd=5Hz'); legend('Location','southwest');
+% 中图：fd=10Hz全方法对比（最苛刻）
+subplot(1,3,2);
+fi_10 = find(fd_list_eq==10,1);
+if ~isempty(fi_10)
+    for mi=1:N_tv_methods
+        semilogy(snr_list_eq, max(ber_tv(fi_10,:,mi),1e-5), [markers_tv{mi} line_styles{mi}], ...
+            'Color',colors_m(mi,:), 'LineWidth',1.5, 'MarkerSize',6, 'DisplayName',tv_methods{mi}); hold on;
+    end
+end
+grid on; xlabel('SNR(dB)'); ylabel('BER'); ylim([1e-5 1]);
+title('fd=10Hz'); legend('Location','southwest');
+% 右图：各fd下BEM(CE) vs BEM(DCT)
+subplot(1,3,3);
+colors_fd = lines(length(fd_list_eq));
 for fi=1:length(fd_list_eq)
-    semilogy(snr_list_eq, max(ber_tv(fi,:,1),1e-5), [markers_tv{fi} '-'], 'Color',colors_tv(fi,:), ...
-        'LineWidth',1.8, 'MarkerSize',7, 'DisplayName',sprintf('orc fd=%dHz',fd_list_eq(fi))); hold on;
-    semilogy(snr_list_eq, max(ber_tv(fi,:,2),1e-5), [markers_tv{fi} '--'], 'Color',colors_tv(fi,:), ...
-        'LineWidth',1, 'MarkerSize',5, 'DisplayName',sprintf('CE fd=%dHz',fd_list_eq(fi)));
+    semilogy(snr_list_eq, max(ber_tv(fi,:,2),1e-5), ['o' line_styles{fi}], 'Color',colors_fd(fi,:), ...
+        'LineWidth',1.5, 'MarkerSize',5, 'DisplayName',sprintf('CE fd=%d',fd_list_eq(fi))); hold on;
+    semilogy(snr_list_eq, max(ber_tv(fi,:,3),1e-5), ['s' line_styles{fi}], 'Color',colors_fd(fi,:), ...
+        'LineWidth',1, 'MarkerSize',4, 'DisplayName',sprintf('DCT fd=%d',fd_list_eq(fi)));
 end
 grid on; xlabel('SNR(dB)'); ylabel('BER'); ylim([1e-5 1]);
-title('各fd: oracle(实线) vs BEM-CE(虚线)');
-legend('Location','southwest'); set(gca,'FontSize',11);
-sgtitle('5. 时变均衡BER对比');
+title('CE vs DCT 各fd'); legend('Location','southwest','FontSize',7);
+sgtitle('4. 时变均衡BER: 散布导频BEM方法对比');
 
 %% ==================== 汇总 ==================== %%
 fprintf('\n========================================\n');
