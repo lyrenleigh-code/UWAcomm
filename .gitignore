@@ -25,3 +25,4 @@ desktop.ini
 # IDE
 .vscode/
 .idea/
+*.txt

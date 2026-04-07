@@ -1,0 +1,924 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>时变信道同步技术框架图</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600&family=Noto+Sans+SC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0a0e17;
+    --surface:   #111827;
+    --card:      #151d2e;
+    --border:    #1e2d47;
+    --border2:   #243650;
+    --cyan:      #00d4ff;
+    --cyan-dim:  #00d4ff33;
+    --teal:      #00ffb3;
+    --teal-dim:  #00ffb322;
+    --amber:     #ffb347;
+    --amber-dim: #ffb34722;
+    --purple:    #a78bfa;
+    --purple-dim:#a78bfa22;
+    --coral:     #ff6b6b;
+    --coral-dim: #ff6b6b22;
+    --text:      #e2e8f0;
+    --text2:     #94a3b8;
+    --text3:     #4a5568;
+    --green:     #4ade80;
+    --grid-line: #1a2540;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Noto Sans SC', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid background */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background-image:
+      linear-gradient(var(--grid-line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrapper {
+    position: relative;
+    z-index: 1;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 40px 24px 80px;
+  }
+
+  /* Header */
+  header {
+    text-align: center;
+    margin-bottom: 56px;
+  }
+  .tag {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--cyan);
+    background: var(--cyan-dim);
+    border: 1px solid var(--cyan);
+    padding: 4px 12px;
+    border-radius: 2px;
+    margin-bottom: 20px;
+    text-transform: uppercase;
+  }
+  h1 {
+    font-size: clamp(22px, 4vw, 36px);
+    font-weight: 700;
+    color: var(--text);
+    letter-spacing: -0.02em;
+    margin-bottom: 12px;
+  }
+  h1 span { color: var(--cyan); }
+  .subtitle {
+    font-size: 14px;
+    color: var(--text2);
+    font-weight: 300;
+    letter-spacing: 0.05em;
+  }
+
+  /* Signal flow bar */
+  .flow-bar {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    margin-bottom: 48px;
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .flow-step {
+    flex: 1;
+    padding: 14px 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    text-align: center;
+    border-right: 1px solid var(--border2);
+    cursor: pointer;
+    transition: background 0.2s;
+    position: relative;
+  }
+  .flow-step:last-child { border-right: none; }
+  .flow-step:hover { background: var(--border); }
+  .flow-step.active { background: var(--cyan-dim); color: var(--cyan); }
+  .flow-step .fs-label { font-size: 10px; color: var(--text3); margin-bottom: 4px; }
+  .flow-step .fs-val { font-weight: 600; }
+  .flow-arrow {
+    font-size: 16px;
+    color: var(--text3);
+    padding: 0 4px;
+    flex-shrink: 0;
+  }
+
+  /* Layer cards */
+  .layer {
+    margin-bottom: 32px;
+    border: 1px solid var(--border2);
+    border-radius: 6px;
+    overflow: hidden;
+    transition: border-color 0.3s;
+  }
+  .layer:hover { border-color: var(--border2); }
+
+  .layer-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 24px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .layer-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .layer-title {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    flex: 1;
+  }
+  .layer-sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text2);
+  }
+  .layer-toggle {
+    font-size: 18px;
+    color: var(--text2);
+    transition: transform 0.3s;
+    flex-shrink: 0;
+  }
+  .layer.open .layer-toggle { transform: rotate(180deg); }
+  .layer-body {
+    display: none;
+    padding: 0 24px 24px;
+  }
+  .layer.open .layer-body { display: block; }
+
+  /* Layer colors */
+  .layer-frame .layer-header  { background: #0d1a2e; border-bottom: 1px solid var(--border2); }
+  .layer-frame .layer-num     { background: var(--teal-dim); color: var(--teal); border: 1px solid var(--teal); }
+  .layer-frame .layer-title   { color: var(--teal); }
+  .layer-frame                { border-color: #1e3a4a; }
+
+  .layer-symbol .layer-header { background: #1a1228; border-bottom: 1px solid var(--border2); }
+  .layer-symbol .layer-num    { background: var(--purple-dim); color: var(--purple); border: 1px solid var(--purple); }
+  .layer-symbol .layer-title  { color: var(--purple); }
+  .layer-symbol               { border-color: #2d1e50; }
+
+  .layer-bit .layer-header    { background: #1a120e; border-bottom: 1px solid var(--border2); }
+  .layer-bit .layer-num       { background: var(--amber-dim); color: var(--amber); border: 1px solid var(--amber); }
+  .layer-bit .layer-title     { color: var(--amber); }
+  .layer-bit                  { border-color: #3d2a0e; }
+
+  /* Inner grid */
+  .inner-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 16px;
+    margin-top: 20px;
+  }
+  @media (max-width: 768px) {
+    .inner-grid { grid-template-columns: 1fr 1fr; }
+  }
+  @media (max-width: 480px) {
+    .inner-grid { grid-template-columns: 1fr; }
+  }
+
+  .info-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 16px;
+  }
+  .info-card h4 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .info-card p, .info-card li {
+    font-size: 13px;
+    color: var(--text2);
+    line-height: 1.7;
+  }
+  .info-card ul { padding-left: 16px; }
+  .info-card li { margin-bottom: 3px; }
+
+  .ic-teal h4   { color: var(--teal); border-color: #1e3a30; }
+  .ic-purple h4 { color: var(--purple); border-color: #2d1e50; }
+  .ic-amber h4  { color: var(--amber); border-color: #3d2a0e; }
+  .ic-cyan h4   { color: var(--cyan); border-color: #1e2d47; }
+  .ic-coral h4  { color: var(--coral); border-color: #3a1e1e; }
+  .ic-green h4  { color: var(--green); border-color: #1e3a20; }
+
+  /* Formula block */
+  .formula {
+    background: #0a0e17;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--cyan);
+    border-radius: 3px;
+    padding: 12px 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--cyan);
+    margin: 12px 0;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .formula .comment {
+    color: var(--text3);
+    font-style: normal;
+  }
+
+  /* Algorithm pipeline */
+  .pipeline {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 16px 0;
+  }
+  .pipe-step {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 3px;
+    padding: 7px 14px;
+    font-size: 12px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .pipe-arrow {
+    color: var(--text3);
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+
+  /* Table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 16px;
+    font-size: 12px;
+  }
+  th {
+    background: var(--surface);
+    color: var(--text2);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border2);
+  }
+  td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text2);
+    vertical-align: middle;
+  }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface); }
+  .td-good  { color: var(--teal); }
+  .td-mid   { color: var(--amber); }
+  .td-low   { color: var(--coral); }
+  .td-mono  { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+
+  /* Joint design */
+  .joint-section { margin-top: 40px; }
+  .section-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.15em;
+    color: var(--cyan);
+    text-transform: uppercase;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border2);
+  }
+
+  /* Flow diagram */
+  .flow-diagram {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+  .fd-node {
+    width: 100%;
+    max-width: 560px;
+    border-radius: 5px;
+    padding: 14px 24px;
+    text-align: center;
+    border: 1px solid;
+    position: relative;
+  }
+  .fd-node h5 { font-size: 15px; font-weight: 700; margin-bottom: 4px; }
+  .fd-node p  { font-size: 12px; color: var(--text2); }
+  .fd-conn {
+    width: 1px;
+    height: 28px;
+    background: var(--border2);
+    position: relative;
+  }
+  .fd-conn::after {
+    content: '▼';
+    position: absolute;
+    bottom: -2px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    color: var(--text3);
+  }
+  .fdn-input  { background: var(--surface); border-color: var(--border2); }
+  .fdn-input h5 { color: var(--text); }
+  .fdn-frame  { background: #0a1a20; border-color: #1e4a5a; }
+  .fdn-frame h5 { color: var(--teal); }
+  .fdn-symbol { background: #12082a; border-color: #3a1e70; }
+  .fdn-symbol h5 { color: var(--purple); }
+  .fdn-bit    { background: #1a0e04; border-color: #5a3010; }
+  .fdn-bit h5 { color: var(--amber); }
+  .fdn-output { background: #0a1a14; border-color: #1e4a30; }
+  .fdn-output h5 { color: var(--green); }
+
+  /* Param comparison */
+  .param-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-top: 16px;
+  }
+  @media (max-width: 640px) { .param-grid { grid-template-columns: 1fr; } }
+  .param-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 18px;
+  }
+  .param-card h5 {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  .param-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8px;
+    font-size: 12px;
+    gap: 8px;
+  }
+  .param-row .pk { color: var(--text2); flex-shrink: 0; }
+  .param-row .pv {
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    text-align: right;
+  }
+
+  /* Scenario bar */
+  .scenario-bar {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-top: 16px;
+  }
+  @media (max-width: 640px) { .scenario-bar { grid-template-columns: 1fr 1fr; } }
+  .sc-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 14px;
+  }
+  .sc-name {
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: var(--text);
+  }
+  .sc-fd {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    margin-bottom: 8px;
+  }
+  .sc-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+  .sc-tag {
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 2px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .tag-c { background: var(--cyan-dim); color: var(--cyan); border: 1px solid var(--cyan); }
+  .tag-p { background: var(--purple-dim); color: var(--purple); border: 1px solid var(--purple); }
+  .tag-a { background: var(--amber-dim); color: var(--amber); border: 1px solid var(--amber); }
+
+  footer {
+    text-align: center;
+    margin-top: 60px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text3);
+    letter-spacing: 0.08em;
+  }
+
+  /* Animations */
+  @keyframes fadeIn { from { opacity:0; transform: translateY(12px); } to { opacity:1; transform: translateY(0); } }
+  .layer { animation: fadeIn 0.4s ease both; }
+  .layer:nth-child(1) { animation-delay: 0.1s; }
+  .layer:nth-child(2) { animation-delay: 0.2s; }
+  .layer:nth-child(3) { animation-delay: 0.3s; }
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+  <!-- Header -->
+  <header>
+    <div class="tag">Technical Framework</div>
+    <h1>时变信道下的<span>同步技术</span>框架</h1>
+    <p class="subtitle">Frame Sync · Symbol Sync · Bit Sync — Three-Layer Synchronization Architecture</p>
+  </header>
+
+  <!-- Signal flow bar -->
+  <div class="flow-bar">
+    <div class="flow-step active">
+      <div class="fs-label">INPUT</div>
+      <div class="fs-val">r(t)</div>
+    </div>
+    <div class="flow-step">
+      <div class="fs-label">LAYER 1</div>
+      <div class="fs-val">帧同步</div>
+    </div>
+    <div class="flow-step">
+      <div class="fs-label">LAYER 2</div>
+      <div class="fs-val">符号同步</div>
+    </div>
+    <div class="flow-step">
+      <div class="fs-label">LAYER 3</div>
+      <div class="fs-val">位同步</div>
+    </div>
+    <div class="flow-step">
+      <div class="fs-label">OUTPUT</div>
+      <div class="fs-val">y[n]</div>
+    </div>
+  </div>
+
+  <!-- LAYER 1: Frame Sync -->
+  <div class="layer layer-frame open">
+    <div class="layer-header" onclick="toggleLayer(this)">
+      <span class="layer-num">LAYER 01</span>
+      <span class="layer-title">帧同步 &nbsp;<span style="font-family:JetBrains Mono;font-size:13px;opacity:.7">Frame Synchronization</span></span>
+      <span class="layer-sub">粗粒度 · 帧级 · ms量级</span>
+      <span class="layer-toggle">▲</span>
+    </div>
+    <div class="layer-body">
+      <div class="inner-grid">
+        <div class="info-card ic-teal">
+          <h4>目标 &amp; 任务</h4>
+          <ul>
+            <li>定位帧起始边界 k₀</li>
+            <li>识别帧头/前导码位置</li>
+            <li>粗略估计信道时延</li>
+            <li>为后续层提供时间参考</li>
+          </ul>
+        </div>
+        <div class="info-card ic-teal">
+          <h4>时变信道的挑战</h4>
+          <ul>
+            <li>多普勒展宽相关峰</li>
+            <li>多径使时延扩展不稳定</li>
+            <li>相关峰位置随速度漂移</li>
+            <li>传统固定阈值检测失效</li>
+          </ul>
+        </div>
+        <div class="info-card ic-teal">
+          <h4>核心公式</h4>
+          <div class="formula">R(k) = |Σ r(n+k)·s*(n)|²</div>
+          <div class="formula">ε̂ = max_k max_f |Σ r(n+k)·s*(n)·e^(-j2πfnTs)|²</div>
+        </div>
+      </div>
+
+      <div class="inner-grid" style="margin-top:16px">
+        <div class="info-card ic-cyan" style="grid-column: span 3">
+          <h4>算法流水线</h4>
+          <div class="pipeline">
+            <div class="pipe-step">接收信号 r(t)</div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-step">滑动相关检测</div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-step">多普勒补偿窗扫描</div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-step">峰值检测 argmax</div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-step">帧边界 k̂₀</div>
+          </div>
+          <div class="pipeline" style="margin-top:8px">
+            <div class="pipe-step">CP 自相关 M(d)</div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-step">Schmidl-Cox 算法</div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-step">粗 CFO 估计 ε̂</div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-step">频偏预补偿</div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-step">→ 符号同步</div>
+          </div>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>算法</th>
+            <th>原理</th>
+            <th>时变鲁棒性</th>
+            <th>适用场景</th>
+            <th>复杂度</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="td-mono">滑动相关</td>
+            <td>已知前导码互相关</td>
+            <td class="td-low">弱</td>
+            <td>低速移动 (&lt;30 km/h)</td>
+            <td>O(N²)</td>
+          </tr>
+          <tr>
+            <td class="td-mono">Schmidl-Cox</td>
+            <td>CP 自相关 + 归一化</td>
+            <td class="td-mid">中</td>
+            <td>中速 OFDM (&lt;120 km/h)</td>
+            <td>O(N)</td>
+          </tr>
+          <tr>
+            <td class="td-mono">联合 CFO 补偿</td>
+            <td>二维时延-频率搜索</td>
+            <td class="td-good">强</td>
+            <td>高速/卫星 (&gt;300 km/h)</td>
+            <td>O(N·M)</td>
+          </tr>
+          <tr>
+            <td class="td-mono">Kalman 跟踪</td>
+            <td>状态空间递推预测</td>
+            <td class="td-good">强</td>
+            <td>平稳运动场景</td>
+            <td>O(N)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- LAYER 2: Symbol Sync -->
+  <div class="layer layer-symbol open">
+    <div class="layer-header" onclick="toggleLayer(this)">
+      <span class="layer-num">LAYER 02</span>
+      <span class="layer-title">符号同步 &nbsp;<span style="font-family:JetBrains Mono;font-size:13px;opacity:.7">Symbol Synchronization</span></span>
+      <span class="layer-sub">中粒度 · 符号级 · μs量级</span>
+      <span class="layer-toggle">▲</span>
+    </div>
+    <div class="layer-body">
+      <div class="inner-grid">
+        <div class="info-card ic-purple">
+          <h4>目标 &amp; 任务</h4>
+          <ul>
+            <li>确定最优采样时刻 τ̂</li>
+            <li>消除码间干扰 ISI</li>
+            <li>精确估计载波频偏 CFO</li>
+            <li>抑制子载波间干扰 ICI</li>
+          </ul>
+        </div>
+        <div class="info-card ic-purple">
+          <h4>OFDM 特殊性</h4>
+          <ul>
+            <li>整数倍定时偏移检测</li>
+            <li>小数倍采样偏移校正</li>
+            <li>残余 CFO 频域补偿</li>
+            <li>ICI 自消除 / OTFS 方案</li>
+          </ul>
+        </div>
+        <div class="info-card ic-purple">
+          <h4>核心公式</h4>
+          <div class="formula">Y_k = H_k·X_k + Σ C_{k-l}·X_l + N_k</div>
+          <div class="formula">ε̂ = (1/2π)·∠Σ r*(m)·r(m+N)</div>
+          <p style="font-size:11px;color:var(--text3);margin-top:8px">ν = f_d·T_s → ICI功率 ∝ ν²</p>
+        </div>
+      </div>
+
+      <div class="inner-grid" style="margin-top:16px">
+        <div class="info-card ic-cyan" style="grid-column: span 2">
+          <h4>定时误差检测 (TED) 环路</h4>
+          <div class="pipeline">
+            <div class="pipe-step">匹配滤波 MF/RRC</div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-step">可控采样 (NCO)</div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-step">TED 误差检测</div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-step">PI 环路滤波</div>
+            <div class="pipe-arrow">→</div>
+            <div class="pipe-step">VCO/NCO</div>
+            <div class="pipe-arrow" style="color:var(--purple)">↺</div>
+          </div>
+        </div>
+        <div class="info-card ic-purple">
+          <h4>TED 算法对比</h4>
+          <div class="param-row"><span class="pk">Mueller-Müller</span><span class="pv">需判决·高SNR</span></div>
+          <div class="param-row"><span class="pk">Gardner</span><span class="pv">无需判决·时变强</span></div>
+          <div class="param-row"><span class="pk">CP 自相关</span><span class="pv">专用OFDM</span></div>
+          <div class="param-row"><span class="pk">联合 ML</span><span class="pv">最优·复杂度高</span></div>
+        </div>
+      </div>
+
+      <table>
+        <thead>
+          <tr>
+            <th>归一化多普勒 ν</th>
+            <th>信道状态</th>
+            <th>ICI 影响</th>
+            <th>推荐方案</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="td-mono">ν &lt; 0.001</td>
+            <td>准静态</td>
+            <td class="td-good">可忽略</td>
+            <td>标准 CP-OFDM + 简单 TED</td>
+          </tr>
+          <tr>
+            <td class="td-mono">0.001–0.01</td>
+            <td>慢时变</td>
+            <td class="td-mid">轻微</td>
+            <td>Gardner TED + 导频辅助</td>
+          </tr>
+          <tr>
+            <td class="td-mono">0.01–0.1</td>
+            <td>中速时变</td>
+            <td class="td-mid">显著</td>
+            <td>BEM 建模 + EKF 跟踪</td>
+          </tr>
+          <tr>
+            <td class="td-mono">ν &gt; 0.1</td>
+            <td>快时变</td>
+            <td class="td-low">严重 ICI</td>
+            <td>OTFS / ICI 自消除</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- LAYER 3: Bit Sync -->
+  <div class="layer layer-bit open">
+    <div class="layer-header" onclick="toggleLayer(this)">
+      <span class="layer-num">LAYER 03</span>
+      <span class="layer-title">位同步 &nbsp;<span style="font-family:JetBrains Mono;font-size:13px;opacity:.7">Bit Synchronization / Phase Tracking</span></span>
+      <span class="layer-sub">精细粒度 · 亚符号级 · ns量级</span>
+      <span class="layer-toggle">▲</span>
+    </div>
+    <div class="layer-body">
+      <div class="inner-grid">
+        <div class="info-card ic-amber">
+          <h4>目标 &amp; 任务</h4>
+          <ul>
+            <li>恢复发端时钟相位</li>
+            <li>实时跟踪相位漂移</li>
+            <li>补偿残余频率偏差</li>
+            <li>维持相干解调条件</li>
+          </ul>
+        </div>
+        <div class="info-card ic-amber">
+          <h4>核心公式</h4>
+          <div class="formula">e_φ[n] = Im{y[n]·â*[n]·e^(-jφ̂[n])}</div>
+          <div class="formula">φ̂[n+1] = φ̂[n] + α₁·e_φ[n] + α₂·Σe_φ</div>
+          <p style="font-size:11px;color:var(--text3);margin-top:8px">5G PT-RS: θ̂[k] = ∠(y_p[k]·p*(k))</p>
+        </div>
+        <div class="info-card ic-amber">
+          <h4>PLL 参数设计</h4>
+          <div class="param-row"><span class="pk">环路带宽 B_L</span><span class="pv">0.01–0.05 f_s</span></div>
+          <div class="param-row"><span class="pk">滤波器阶数</span><span class="pv">2–3阶 PI/PID</span></div>
+          <div class="param-row"><span class="pk">更新频率</span><span class="pv">每符号1次</span></div>
+          <div class="param-row"><span class="pk">收敛速度</span><span class="pv">快（适应时变）</span></div>
+        </div>
+      </div>
+
+      <div class="inner-grid" style="margin-top:16px">
+        <div class="info-card ic-coral">
+          <h4>方案①：闭环 PLL</h4>
+          <div class="pipeline" style="flex-direction:column;align-items:flex-start">
+            <div class="pipe-step">相位检测 → 环路滤波</div>
+            <div class="pipe-arrow" style="transform:rotate(90deg)">→</div>
+            <div class="pipe-step">VCO 驱动 → 反馈控制</div>
+          </div>
+          <p style="font-size:12px;color:var(--text2);margin-top:8px">适用：慢时变，连续跟踪</p>
+        </div>
+        <div class="info-card ic-coral">
+          <h4>方案②：判决反馈</h4>
+          <div class="pipeline" style="flex-direction:column;align-items:flex-start">
+            <div class="pipe-step">判决结果 â[n]</div>
+            <div class="pipe-arrow" style="transform:rotate(90deg)">→</div>
+            <div class="pipe-step">误差计算 → 相位补偿</div>
+          </div>
+          <p style="font-size:12px;color:var(--text2);margin-top:8px">适用：中速时变，适应快</p>
+        </div>
+        <div class="info-card ic-coral">
+          <h4>方案③：Kalman 跟踪</h4>
+          <div class="formula" style="font-size:10px;white-space:normal">x = [φ, Δf, Δ(Δf)]ᵀ 联合估计</div>
+          <div class="pipeline" style="flex-direction:column;align-items:flex-start">
+            <div class="pipe-step">状态预测 → Kalman 增益</div>
+            <div class="pipe-arrow" style="transform:rotate(90deg)">→</div>
+            <div class="pipe-step">状态更新 → 相位补偿</div>
+          </div>
+          <p style="font-size:12px;color:var(--text2);margin-top:8px">适用：高速，最优跟踪</p>
+        </div>
+      </div>
+
+      <div class="info-card ic-amber" style="margin-top:16px">
+        <h4>5G NR PT-RS 导频辅助相位跟踪</h4>
+        <div class="pipeline">
+          <div class="pipe-step">PT-RS 插入（发端）</div>
+          <div class="pipe-arrow">→</div>
+          <div class="pipe-step">导频位置相位估计</div>
+          <div class="pipe-arrow">→</div>
+          <div class="pipe-step">三次样条插值</div>
+          <div class="pipe-arrow">→</div>
+          <div class="pipe-step">全符号相位补偿</div>
+        </div>
+        <p style="font-size:12px;color:var(--text2);margin-top:10px">
+          PT-RS 时域密度随多普勒自适应调整：速度越高 → 导频间隔越小 → 相位跟踪越精确
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Joint Design -->
+  <div class="joint-section">
+    <div class="section-title">联合同步设计 &amp; 应用场景</div>
+
+    <!-- Signal flow diagram -->
+    <div style="display:flex;gap:32px;flex-wrap:wrap">
+      <div style="flex:1;min-width:280px">
+        <p style="font-size:12px;color:var(--text2);margin-bottom:16px">三层同步流程（粗→细，层层依赖）</p>
+        <div class="flow-diagram">
+          <div class="fd-node fdn-input">
+            <h5>接收信号 r(t)</h5>
+            <p>时变信道输出，含多普勒偏移 + 多径失真</p>
+          </div>
+          <div class="fd-conn"></div>
+          <div class="fd-node fdn-frame">
+            <h5>帧同步</h5>
+            <p>相关检测 → 帧边界 k₀ + 粗 CFO 估计</p>
+          </div>
+          <div class="fd-conn"></div>
+          <div class="fd-node fdn-symbol">
+            <h5>符号同步</h5>
+            <p>TED 环路 → 最优采样时刻 τ̂ + 精细 CFO 补偿</p>
+          </div>
+          <div class="fd-conn"></div>
+          <div class="fd-node fdn-bit">
+            <h5>位同步 / 相位跟踪</h5>
+            <p>PLL / Kalman / PT-RS → 实时相位频率跟踪</p>
+          </div>
+          <div class="fd-conn"></div>
+          <div class="fd-node fdn-output">
+            <h5>同步后符号序列</h5>
+            <p>输入信道均衡 → 解调 → 译码</p>
+          </div>
+        </div>
+      </div>
+
+      <div style="flex:1.5;min-width:320px">
+        <p style="font-size:12px;color:var(--text2);margin-bottom:16px">应用场景与推荐方案</p>
+        <div class="scenario-bar">
+          <div class="sc-card">
+            <div class="sc-name">低速行人</div>
+            <div class="sc-fd" style="color:var(--teal)">f_d ≈ 9 Hz</div>
+            <div class="sc-tags">
+              <span class="sc-tag tag-c">稀疏导频</span>
+              <span class="sc-tag tag-c">线性插值</span>
+            </div>
+          </div>
+          <div class="sc-card">
+            <div class="sc-name">车载 V2X</div>
+            <div class="sc-fd" style="color:var(--amber)">f_d ≈ 222 Hz</div>
+            <div class="sc-tags">
+              <span class="sc-tag tag-a">密集导频</span>
+              <span class="sc-tag tag-a">EKF 跟踪</span>
+            </div>
+          </div>
+          <div class="sc-card">
+            <div class="sc-name">高铁通信</div>
+            <div class="sc-fd" style="color:var(--coral)">f_d ≈ 648 Hz</div>
+            <div class="sc-tags">
+              <span class="sc-tag tag-p">BEM 建模</span>
+              <span class="sc-tag tag-p">OTFS</span>
+            </div>
+          </div>
+          <div class="sc-card">
+            <div class="sc-name">LEO 卫星</div>
+            <div class="sc-fd" style="color:var(--coral)">f_d ≈ 数十kHz</div>
+            <div class="sc-tags">
+              <span class="sc-tag tag-p">多普勒预补偿</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top:16px">
+          <p style="font-size:12px;color:var(--text2);margin-bottom:12px">三层同步参数对比</p>
+          <table>
+            <thead>
+              <tr>
+                <th>维度</th>
+                <th>帧同步</th>
+                <th>符号同步</th>
+                <th>位同步</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>精度要求</td>
+                <td class="td-mono">ms 级</td>
+                <td class="td-mono">μs 级</td>
+                <td class="td-mono">ns 级</td>
+              </tr>
+              <tr>
+                <td>更新频率</td>
+                <td>每帧一次</td>
+                <td>每符号 1–4次</td>
+                <td>每导频一次</td>
+              </tr>
+              <tr>
+                <td>5G 对应</td>
+                <td>PSS/SSS</td>
+                <td>DMRS</td>
+                <td>PT-RS</td>
+              </tr>
+              <tr>
+                <td>高速策略</td>
+                <td>二维搜索</td>
+                <td>BEM + OTFS</td>
+                <td>宽带宽 Kalman</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>TIME-VARYING CHANNEL SYNCHRONIZATION FRAMEWORK &nbsp;·&nbsp; THREE-LAYER ARCHITECTURE</footer>
+</div>
+
+<script>
+  function toggleLayer(header) {
+    const layer = header.parentElement;
+    layer.classList.toggle('open');
+  }
+
+  // Flow bar highlight
+  const steps = document.querySelectorAll('.flow-step');
+  steps.forEach((s, i) => {
+    s.addEventListener('click', () => {
+      steps.forEach(x => x.classList.remove('active'));
+      s.classList.add('active');
+    });
+  });
+</script>
+</body>
+</html>

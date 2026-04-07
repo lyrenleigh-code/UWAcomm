@@ -1,7 +1,8 @@
 %% test_sync.m
 % 功能：同步+帧组装模块单元测试
-% 版本：V1.0.0
+% 版本：V2.0.0
 % 运行方式：>> run('test_sync.m')
+% V2.0新增：多普勒补偿同步测试、相位跟踪(PLL/DFPT/Kalman)测试
 
 clc; close all;
 fprintf('========================================\n');
@@ -134,10 +135,16 @@ try
     t = (0:255) / fs;
     rx = preamble .* exp(1j*2*pi*true_cfo*t);
 
-    [cfo_est, ~] = cfo_estimate(rx, preamble, fs, 'correlate');
-    cfo_err = abs(cfo_est - true_cfo);
+    % 诊断：确认调用的是哪个cfo_estimate
+    fprintf('  [诊断] cfo_estimate路径: %s\n', which('cfo_estimate'));
 
-    assert(cfo_err < 20, 'CFO估计误差过大');
+    [cfo_est, cfo_norm] = cfo_estimate(rx, preamble, fs, 'correlate');
+    cfo_err = abs(cfo_est - true_cfo);
+    fprintf('  [诊断] 3.1 真实=%.4fHz, 估计=%.4fHz, 归一化=%.6f, 误差=%.4fHz\n', ...
+            true_cfo, cfo_est, cfo_norm, cfo_err);
+
+    assert(cfo_err < 20, sprintf('CFO估计误差过大: 估计=%.4fHz, 真实=%dHz, 误差=%.4fHz', ...
+           cfo_est, true_cfo, cfo_err));
 
     fprintf('[通过] 3.1 互相关CFO | 真实=%.1fHz, 估计=%.1fHz, 误差=%.1fHz\n', ...
             true_cfo, cfo_est, cfo_err);
@@ -156,10 +163,13 @@ try
     t = (0:255) / fs;
     rx = preamble_sc .* exp(1j*2*pi*true_cfo*t);
 
-    [cfo_est, ~] = cfo_estimate(rx, preamble_sc, fs, 'schmidl');
+    [cfo_est, cfo_norm] = cfo_estimate(rx, preamble_sc, fs, 'schmidl');
     cfo_err = abs(cfo_est - true_cfo);
+    fprintf('  [诊断] 3.2 真实=%.4fHz, 估计=%.4fHz, 归一化=%.6f, 误差=%.4fHz\n', ...
+            true_cfo, cfo_est, cfo_norm, cfo_err);
 
-    assert(cfo_err < 20, 'Schmidl CFO估计误差过大');
+    assert(cfo_err < 20, sprintf('Schmidl CFO估计误差过大: 估计=%.4fHz, 真实=%dHz, 误差=%.4fHz', ...
+           cfo_est, true_cfo, cfo_err));
 
     fprintf('[通过] 3.2 Schmidl-Cox CFO | 真实=%.1fHz, 估计=%.1fHz, 误差=%.1fHz\n', ...
             true_cfo, cfo_est, cfo_err);
@@ -295,8 +305,301 @@ catch e
     fail_count = fail_count + 1;
 end
 
-%% ==================== 六、异常输入 ==================== %%
-fprintf('\n--- 6. 异常输入测试 ---\n\n');
+%% ==================== 六、多普勒补偿同步 ==================== %%
+fprintf('\n--- 6. 多普勒补偿同步检测(V2.0) ---\n\n');
+
+% 保存可视化数据
+vis6 = struct();
+
+%% 6.1 多普勒频移下的LFM同步
+try
+    rng(60);
+    fs = 48000;
+    [preamble, ~] = gen_lfm(fs, 0.01, 8000, 16000);
+    offset = 500;
+    L = length(preamble);
+    fd_true = 30;  % 30Hz多普勒频移
+    t_preamble = (0:L-1) / fs;
+
+    preamble_shifted = preamble .* exp(1j*2*pi*fd_true*t_preamble);
+    received = [zeros(1, offset), preamble_shifted, randn(1, 1000)*0.1];
+
+    [pos_std, peak_std, corr_std] = sync_detect(received, preamble, 0.3);
+    dp = struct('method','doppler','fs',fs,'fd_max',50,'num_fd',21);
+    [pos_dp, peak_dp, corr_dp] = sync_detect(received, preamble, 0.3, dp);
+
+    assert(abs(pos_dp - offset - 1) <= 2, '多普勒补偿同步偏差过大');
+    assert(peak_dp >= peak_std - 1e-10, '多普勒补偿后峰值应不低于标准方法');
+
+    fprintf('[通过] 6.1 多普勒补偿LFM | fd=%dHz, 标准峰值=%.3f, 补偿峰值=%.3f\n', ...
+            fd_true, peak_std, peak_dp);
+    pass_count = pass_count + 1;
+    vis6.corr_std = corr_std; vis6.corr_dp = corr_dp; vis6.offset1 = offset;
+    vis6.fd1 = fd_true; vis6.ok1 = true;
+catch e
+    fprintf('[失败] 6.1 多普勒补偿LFM | %s\n', e.message);
+    fail_count = fail_count + 1;
+    vis6.ok1 = false;
+end
+
+%% 6.2 多普勒补偿ZC同步
+try
+    rng(61);
+    [preamble, ~] = gen_zc_seq(255, 7);
+    offset = 300;
+    L = length(preamble);
+    fd_true = 40;
+    t_preamble = (0:L-1) / fs;
+
+    preamble_shifted = preamble .* exp(1j*2*pi*fd_true*t_preamble);
+    noise = 0.3 * (randn(1, 1500) + 1j*randn(1, 1500));
+    received = noise;
+    received(offset+1 : offset+L) = received(offset+1 : offset+L) + preamble_shifted;
+
+    [~, ~, corr_std_zc] = sync_detect(received, preamble, 0.3);
+    dp = struct('method','doppler','fs',fs,'fd_max',60,'num_fd',25);
+    [pos, peak, corr_dp_zc] = sync_detect(received, preamble, 0.3, dp);
+
+    assert(abs(pos - offset - 1) <= 2, 'ZC多普勒补偿同步偏差过大');
+
+    fprintf('[通过] 6.2 多普勒补偿ZC | fd=%dHz, 位置=%d, 峰值=%.3f\n', ...
+            fd_true, pos, peak);
+    pass_count = pass_count + 1;
+    vis6.corr_std_zc = corr_std_zc; vis6.corr_dp_zc = corr_dp_zc;
+    vis6.offset2 = offset; vis6.fd2 = fd_true; vis6.ok2 = true;
+catch e
+    fprintf('[失败] 6.2 多普勒补偿ZC | %s\n', e.message);
+    fail_count = fail_count + 1;
+    vis6.ok2 = false;
+end
+
+%% --- 可视化：多普勒补偿对比（独立于测试） --- %%
+try
+    if isfield(vis6,'ok1') && vis6.ok1 && isfield(vis6,'ok2') && vis6.ok2
+        figure('Name','多普勒补偿同步对比','NumberTitle','off','Position',[50 50 1100 500]);
+        subplot(1,2,1);
+        plot(vis6.corr_std, 'b', 'LineWidth', 1); hold on;
+        plot(vis6.corr_dp, 'r', 'LineWidth', 1);
+        xl = line([vis6.offset1+1, vis6.offset1+1], [0 1.1], 'Color','k','LineStyle','--');
+        legend('标准互相关', '多普勒补偿', '真实位置', 'Location','best');
+        xlabel('采样点'); ylabel('归一化相关值');
+        title(sprintf('6.1 LFM同步 | fd=%dHz', vis6.fd1)); grid on; ylim([0 1.1]);
+
+        subplot(1,2,2);
+        plot(vis6.corr_std_zc, 'b', 'LineWidth', 1); hold on;
+        plot(vis6.corr_dp_zc, 'r', 'LineWidth', 1);
+        line([vis6.offset2+1, vis6.offset2+1], [0 1.1], 'Color','k','LineStyle','--');
+        legend('标准互相关', '多普勒补偿', '真实位置', 'Location','best');
+        xlabel('采样点'); ylabel('归一化相关值');
+        title(sprintf('6.2 ZC同步 | fd=%dHz', vis6.fd2)); grid on; ylim([0 1.1]);
+    end
+catch; end
+
+%% ==================== 七、相位跟踪(V2.0) ==================== %%
+fprintf('\n--- 7. 相位跟踪 ---\n\n');
+
+% 保存可视化数据
+vis7 = struct();
+
+%% 7.1 PLL相位跟踪（恒定频偏）
+try
+    rng(70);
+    N_sym = 500;
+    bits = randi([0 3], 1, N_sym);
+    qpsk = exp(1j * (pi/4 + bits*pi/2)) / sqrt(2);
+
+    freq_offset = 0.005;
+    phase_ramp = 2*pi*freq_offset*(0:N_sym-1);
+    noise = 0.05 * (randn(1, N_sym) + 1j*randn(1, N_sym));
+    rx = qpsk .* exp(1j * phase_ramp) + noise;
+
+    pll_params = struct('Bn', 0.02, 'mod_order', 4);
+    [ph_est_pll, ~, info_pll] = phase_track(rx, 'pll', pll_params);
+
+    tail = floor(N_sym/2):N_sym;
+    phase_err_rms = sqrt(mean(info_pll.phase_error(tail).^2));
+    assert(phase_err_rms < 0.3, 'PLL收敛后相位误差过大');
+
+    fprintf('[通过] 7.1 PLL | 频偏=%.3f, 收敛后RMS误差=%.4f rad\n', ...
+            freq_offset, phase_err_rms);
+    pass_count = pass_count + 1;
+    vis7.phase_ramp = phase_ramp; vis7.ph_pll = ph_est_pll;
+    vis7.err_pll = info_pll.phase_error; vis7.rx_pll = rx;
+    vis7.corr_pll = info_pll.corrected; vis7.ok1 = true;
+catch e
+    fprintf('[失败] 7.1 PLL | %s\n', e.message);
+    fail_count = fail_count + 1;
+    vis7.ok1 = false;
+end
+
+%% 7.2 DFPT判决反馈相位跟踪
+try
+    rng(71);
+    N_sym = 500;
+    bits2 = randi([0 3], 1, N_sym);
+    qpsk2 = exp(1j * (pi/4 + bits2*pi/2)) / sqrt(2);
+
+    phase_drift = 0.3 * sin(2*pi*(0:N_sym-1)/N_sym);
+    noise2 = 0.03 * (randn(1, N_sym) + 1j*randn(1, N_sym));
+    rx2 = qpsk2 .* exp(1j * phase_drift) + noise2;
+
+    dfpt_params = struct('mu', 0.05, 'mod_order', 4);
+    [ph_est_dfpt, ~, info_dfpt] = phase_track(rx2, 'dfpt', dfpt_params);
+
+    corrected_dfpt = info_dfpt.corrected;
+    err_power = mean(abs(corrected_dfpt - qpsk2).^2);
+    assert(err_power < 0.1, 'DFPT补偿后误差过大');
+
+    fprintf('[通过] 7.2 DFPT | 正弦相位漂移, 补偿后MSE=%.4f\n', err_power);
+    pass_count = pass_count + 1;
+    vis7.phase_drift = phase_drift; vis7.ph_dfpt = ph_est_dfpt;
+    vis7.err_dfpt = info_dfpt.phase_error; vis7.rx_dfpt = rx2;
+    vis7.corr_dfpt = corrected_dfpt; vis7.ok2 = true;
+catch e
+    fprintf('[失败] 7.2 DFPT | %s\n', e.message);
+    fail_count = fail_count + 1;
+    vis7.ok2 = false;
+end
+
+%% 7.3 Kalman联合跟踪（线性频偏斜率）
+try
+    rng(72);
+    N_sym = 500;
+    bits3 = randi([0 3], 1, N_sym);
+    qpsk3 = exp(1j * (pi/4 + bits3*pi/2)) / sqrt(2);
+
+    Ts = 1/48000;
+    freq_rate = 5;
+    t = (0:N_sym-1) * Ts;
+    phase_accel = 2*pi * 0.5 * freq_rate * t.^2;
+    noise3 = 0.05 * (randn(1, N_sym) + 1j*randn(1, N_sym));
+    rx3 = qpsk3 .* exp(1j * phase_accel) + noise3;
+
+    kal_params = struct('Ts', Ts, 'q_phase', 1e-3, 'q_freq', 1e-4, ...
+                        'q_frate', 1e-5, 'r_obs', 0.1, 'mod_order', 4);
+    [ph_est_kal, freq_est_kal, info_kal] = phase_track(rx3, 'kalman', kal_params);
+
+    assert(~isempty(freq_est_kal), 'Kalman应输出频偏估计');
+    tail = floor(N_sym*0.6):N_sym;
+    phase_err_rms_kal = sqrt(mean(info_kal.phase_error(tail).^2));
+    assert(phase_err_rms_kal < 0.5, 'Kalman收敛后相位误差过大');
+
+    fprintf('[通过] 7.3 Kalman | 线性频偏斜率=%dHz/s, 收敛后RMS=%.4f rad\n', ...
+            freq_rate, phase_err_rms_kal);
+    pass_count = pass_count + 1;
+    vis7.phase_accel = phase_accel; vis7.ph_kal = ph_est_kal;
+    vis7.freq_kal = freq_est_kal; vis7.rx_kal = rx3;
+    vis7.corr_kal = info_kal.corrected; vis7.ok3 = true;
+catch e
+    fprintf('[失败] 7.3 Kalman | %s\n', e.message);
+    fail_count = fail_count + 1;
+    vis7.ok3 = false;
+end
+
+%% 7.4 三种相位跟踪方法均可运行
+try
+    rng(73);
+    N_sym = 200;
+    test_signal = exp(1j * pi/4 * ones(1, N_sym)) / sqrt(2);
+    methods_pt = {'pll', 'dfpt', 'kalman'};
+    all_ok = true;
+    for k = 1:3
+        [ph, fr, inf] = phase_track(test_signal, methods_pt{k});
+        if isempty(ph) || isempty(inf.corrected), all_ok = false; end
+    end
+    assert(all_ok, '某些相位跟踪方法输出异常');
+
+    fprintf('[通过] 7.4 三种方法 | pll/dfpt/kalman 均正常\n');
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 7.4 三种方法 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 7.5 BPSK模式相位跟踪
+try
+    rng(74);
+    N_sym = 300;
+    bpsk = 2*randi([0 1], 1, N_sym) - 1;
+    phase_offset = pi/6;
+    rx_bpsk = bpsk * exp(1j * phase_offset) + 0.02*(randn(1,N_sym)+1j*randn(1,N_sym));
+
+    p = struct('Bn', 0.03, 'mod_order', 2);
+    [ph_est_bpsk, ~, info_bpsk] = phase_track(rx_bpsk, 'pll', p);
+
+    tail = floor(N_sym/2):N_sym;
+    est_phase_tail = mean(ph_est_bpsk(tail));
+    assert(abs(est_phase_tail - phase_offset) < 0.15, 'BPSK相位估计偏差过大');
+
+    fprintf('[通过] 7.5 BPSK PLL | 真实相偏=%.2frad, 估计=%.2frad\n', ...
+            phase_offset, est_phase_tail);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 7.5 BPSK PLL | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% --- 可视化：相位跟踪综合图（独立于测试） --- %%
+try
+    if isfield(vis7,'ok1') && vis7.ok1 && isfield(vis7,'ok2') && vis7.ok2 ...
+            && isfield(vis7,'ok3') && vis7.ok3
+        figure('Name','相位跟踪结果','NumberTitle','off','Position',[60 40 1200 800]);
+
+        % PLL
+        subplot(3,3,1);
+        plot(vis7.phase_ramp,'b','LineWidth',1); hold on;
+        plot(vis7.ph_pll,'r--','LineWidth',1);
+        legend('真实相位','PLL估计'); xlabel('符号索引'); ylabel('rad');
+        title('7.1 PLL: 恒定频偏'); grid on;
+
+        subplot(3,3,2);
+        plot(vis7.err_pll,'Color',[0.2 0.6 0.2],'LineWidth',0.5);
+        xlabel('符号索引'); ylabel('rad'); title('PLL 相位误差'); grid on;
+
+        subplot(3,3,3);
+        plot(real(vis7.rx_pll), imag(vis7.rx_pll), '.','Color',[.7 .7 .7],'MarkerSize',3); hold on;
+        plot(real(vis7.corr_pll), imag(vis7.corr_pll), 'r.','MarkerSize',3);
+        legend('补偿前','补偿后'); xlabel('I'); ylabel('Q');
+        title('PLL 星座图'); grid on; axis equal; axis([-1.5 1.5 -1.5 1.5]);
+
+        % DFPT
+        subplot(3,3,4);
+        plot(vis7.phase_drift,'b','LineWidth',1); hold on;
+        plot(vis7.ph_dfpt,'r--','LineWidth',1);
+        legend('真实相位','DFPT估计'); xlabel('符号索引'); ylabel('rad');
+        title('7.2 DFPT: 正弦漂移'); grid on;
+
+        subplot(3,3,5);
+        plot(vis7.err_dfpt,'Color',[0.2 0.6 0.2],'LineWidth',0.5);
+        xlabel('符号索引'); ylabel('rad'); title('DFPT 相位误差'); grid on;
+
+        subplot(3,3,6);
+        plot(real(vis7.rx_dfpt), imag(vis7.rx_dfpt), '.','Color',[.7 .7 .7],'MarkerSize',3); hold on;
+        plot(real(vis7.corr_dfpt), imag(vis7.corr_dfpt), 'r.','MarkerSize',3);
+        legend('补偿前','补偿后'); xlabel('I'); ylabel('Q');
+        title('DFPT 星座图'); grid on; axis equal; axis([-1.5 1.5 -1.5 1.5]);
+
+        % Kalman
+        subplot(3,3,7);
+        plot(vis7.phase_accel,'b','LineWidth',1); hold on;
+        plot(vis7.ph_kal,'r--','LineWidth',1);
+        legend('真实相位','Kalman估计'); xlabel('符号索引'); ylabel('rad');
+        title('7.3 Kalman: 频偏斜率'); grid on;
+
+        subplot(3,3,8);
+        plot(vis7.freq_kal,'Color',[0.8 0.4 0],'LineWidth',1);
+        xlabel('符号索引'); ylabel('Hz'); title('Kalman 频偏估计'); grid on;
+
+        subplot(3,3,9);
+        plot(real(vis7.rx_kal), imag(vis7.rx_kal), '.','Color',[.7 .7 .7],'MarkerSize',3); hold on;
+        plot(real(vis7.corr_kal), imag(vis7.corr_kal), 'r.','MarkerSize',3);
+        legend('补偿前','补偿后'); xlabel('I'); ylabel('Q');
+        title('Kalman 星座图'); grid on; axis equal; axis([-1.5 1.5 -1.5 1.5]);
+    end
+catch; end
+
+%% ==================== 八、异常输入 ==================== %%
+fprintf('\n--- 8. 异常输入测试 ---\n\n');
 
 try
     caught = 0;
@@ -305,13 +608,15 @@ try
     try timing_fine([], 8); catch; caught=caught+1; end
     try gen_barker(6); catch; caught=caught+1; end           % 非法Barker长度
     try gen_zc_seq(0); catch; caught=caught+1; end           % N<1
+    try phase_track([]); catch; caught=caught+1; end         % 空信号
+    try sync_detect([1 2 3], [1 -1], 0.5, struct('method','doppler')); catch; caught=caught+1; end  % doppler缺fs
 
-    assert(caught == 5, '部分函数未对异常输入报错');
+    assert(caught == 7, '部分函数未对异常输入报错');
 
-    fprintf('[通过] 6.1 异常输入拒绝 | 5项均正确报错\n');
+    fprintf('[通过] 8.1 异常输入拒绝 | 7项均正确报错\n');
     pass_count = pass_count + 1;
 catch e
-    fprintf('[失败] 6.1 异常输入 | %s\n', e.message);
+    fprintf('[失败] 8.1 异常输入 | %s\n', e.message);
     fail_count = fail_count + 1;
 end
 

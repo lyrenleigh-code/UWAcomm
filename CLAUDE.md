@@ -64,6 +64,29 @@ UWAcomm/
 - 当前SC-FDE/OFDM端到端仍使用oracle H_est，属**待修正项**
 - 每次调试结果记录到 `D:\Obsidian\workspace\UWAcomm\` 的笔记中
 
+### 3. MATLAB测试调试流程
+
+每次运行 `test_*.m` 单元测试时，**必须**按以下流程执行：
+
+```matlab
+% 1. 清除函数缓存（防止git分支切换或外部编辑后用旧版本）
+clear functions; clear all;
+
+% 2. 切换到测试所在目录
+cd('D:\TechReq\UWAcomm\XX_模块\src\Matlab');
+
+% 3. 用diary输出测试结果到txt
+diary('test_xxx_results.txt');
+run('test_xxx.m');
+diary off;
+```
+
+**关键规则：**
+- **必须 `clear functions`**：MATLAB会缓存已加载的.m文件，git切换分支或Claude Code修改文件后，MATLAB内存中仍是旧版本，导致测试结果与磁盘代码不一致
+- **测试结果保存为txt**：每次测试运行必须通过 `diary` 输出到 `test_*_results.txt`，便于对比和追溯
+- **测试与可视化分离**：测试逻辑（assert/pass/fail计数）和可视化绘图代码必须在**独立的try/catch块**中，避免绘图失败导致测试误判
+- **诊断输出**：测试失败时catch块必须打印实际值（不仅仅是"误差过大"），便于定位问题
+
 ### 3. 模块README要求
 
 每个模块的README.md必须包含：
