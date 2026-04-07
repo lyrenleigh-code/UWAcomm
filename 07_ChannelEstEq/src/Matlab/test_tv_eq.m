@@ -40,7 +40,7 @@ snr_list = [0, 5, 10, 15, 20];
 fd_list = [0, 1, 5];
 
 %% ========== 方法定义 ========== %%
-methods = {'Turbo+orc', 'TV-orc', 'LE+TV-orc', 'LE+Kalman'};
+methods = {'FDE分块(orc)', 'FDE+导频+BEM', 'FDE+BEM+DD'};
 N_methods = length(methods);
 
 fprintf('纯基带符号级（无RRC/无通带/无同步）\n');
@@ -132,156 +132,272 @@ for fi = 1:length(fd_list)
         for mi = 1:N_methods
             mname = methods{mi};
 
-            if strcmp(mname, 'Turbo+orc')
-                % 标准Turbo（oracle信道，固定ISI消除）
-                [bo,~] = turbo_equalizer_sctde(rx_sym, h_orc, training, 6, noise_var, eq_p, codec);
+            if false
+                % placeholder
 
-            elseif strcmp(mname, 'TV-orc')
-                % 时变oracle：DFE iter1 + 每符号真实h(n)做ISI消除 iter2+
-                % （性能上界：完美信道跟踪）
-                [LLR_dfe,~,nv_dfe] = eq_dfe(rx_sym, h_orc, training, 31, 90, 0.998, pll);
-                LLR_eq = -LLR_dfe;
-                [~,perm_t] = random_interleave(zeros(1,M_coded), codec.interleave_seed);
-                bo = [];
-                for titer = 1:6
-                    lt = LLR_eq(1:min(length(LLR_eq),M_coded));
-                    if length(lt)<M_coded, lt=[lt,zeros(1,M_coded-length(lt))]; end
-                    ld = random_deinterleave(lt, perm_t);
-                    ld = max(min(ld,30),-30);
-                    [~,Lpi,Lpc] = siso_decode_conv(ld,[],codec.gen_polys,codec.constraint_len,codec.decode_mode);
-                    bo = double(Lpi>0);
-                    if titer < 6
-                        Li = random_interleave(Lpc, codec.interleave_seed);
-                        if length(Li)<M_coded, Li=[Li,zeros(1,M_coded-length(Li))];
-                        else, Li=Li(1:M_coded); end
-                        [xbar,~] = soft_mapper(Li, 'qpsk');
-                        fs = zeros(1, N_tx);
-                        fs(1:T) = training;
-                        nf = min(length(xbar), N_dsym);
-                        if nf>0, fs(T+1:T+nf) = xbar(1:nf); end
-                        % 每符号真实信道ISI消除
-                        deq = zeros(1, N_dsym);
-                        for n=1:N_dsym
-                            nn=T+n; isi=0;
-                            for pp=1:K_sparse
-                                d=sym_delays(pp); idx=nn-d;
-                                if idx>=1&&idx<=N_tx&&d>0
-                                    isi=isi+h_true_paths(pp,nn)*fs(idx);
-                                end
-                            end
-                            h0n=h_true_paths(1,nn);
-                            ric=rx_sym(nn)-isi;
-                            if abs(h0n)>1e-6, deq(n)=ric/h0n; else, deq(n)=ric; end
-                        end
-                        nvp=nv_dfe/max(mean(abs(h_true_paths(1,T+1:end)).^2),1e-6);
-                        LLR_eq=zeros(1,2*N_dsym);
-                        LLR_eq(1:2:end)=-2*sqrt(2)*real(deq)/nvp;
-                        LLR_eq(2:2:end)=-2*sqrt(2)*imag(deq)/nvp;
+            elseif contains(mname, 'FDE分块') || contains(mname, 'FDE+导频')
+                % === SC-FDE风格分块频域均衡 ===
+                use_orc = contains(mname, 'orc');
+                use_bem = contains(mname, 'BEM');  % BEM信道估计
+
+                % 块参数
+                if fd_hz <= 1, blk_fft=256; else, blk_fft=128; end
+                blk_cp = max(sym_delays) + 10;
+
+                % 帧内导频参数（BEM方法用）
+                pilot_len = 50;  % 每段导频50符号（短，约训练的1/10）
+                rng(999); pilot_sym = constellation(randi(4,1,pilot_len));
+
+                % 数据编码
+                sym_per_blk = blk_cp + blk_fft;
+                N_blks = floor(N_data_sym / blk_fft);
+                M_blk = 2*blk_fft; M_tot = M_blk*N_blks;
+                N_info_blk = M_tot/n_code - mem;
+
+                rng(100+fi);
+                ib_blk = randi([0 1],1,N_info_blk);
+                cd_blk = conv_encode(ib_blk,codec.gen_polys,codec.constraint_len);
+                cd_blk = cd_blk(1:M_tot);
+                [it_blk,pm_blk] = random_interleave(cd_blk,codec.interleave_seed);
+                sym_blk = bits2qpsk(it_blk);
+
+                % TX帧组装: [训练|数据块1|导频|数据块2|导频|...|数据块N|尾导频]
+                % 前后包围：训练(头) + 散布导频(中) + 尾导频(尾)
+                frame_parts = training;
+                blk_starts = zeros(1,N_blks);
+                pilot_positions = [];
+                for bi=1:N_blks
+                    if use_bem && bi > 1
+                        pilot_positions(end+1) = length(frame_parts)+1;
+                        frame_parts = [frame_parts, pilot_sym];
                     end
+                    blk_starts(bi) = length(frame_parts)+1;
+                    ds_b = sym_blk((bi-1)*blk_fft+1:bi*blk_fft);
+                    frame_parts = [frame_parts, ds_b(end-blk_cp+1:end), ds_b];
                 end
-
-            elseif strcmp(mname, 'LE+TV-orc') || strcmp(mname, 'LE+Kalman')
-                % iter1: 线性均衡器（eq_rls居中延迟，无反馈→无错误传播）
-                use_kalman = strcmp(mname, 'LE+Kalman');
-                [x_rls,~,~] = eq_rls(rx_sym, training, 0.998, 101, N_data_sym);
-                % RLS LLR（试两种极性取好的）
-                LLR_rls = zeros(1, 2*N_data_sym);
-                for kk=1:N_data_sym
-                    LLR_rls(2*kk-1) = -4*real(x_rls(train_len+kk));
-                    LLR_rls(2*kk) = -4*imag(x_rls(train_len+kk));
+                % 帧尾导频（前后包围，对应实际系统的LFM2位置）
+                if use_bem
+                    pilot_positions(end+1) = length(frame_parts)+1;
+                    frame_parts = [frame_parts, pilot_sym];
                 end
-                LLR_rls = LLR_rls(1:min(length(LLR_rls),M_coded));
-                if length(LLR_rls)<M_coded, LLR_rls=[LLR_rls,zeros(1,M_coded-length(LLR_rls))]; end
-                [~,perm_t] = random_interleave(zeros(1,M_coded), codec.interleave_seed);
-                % 确定LLR极性
-                best_sgn = 1;
-                for sgn=[+1,-1]
-                    ld_t = random_deinterleave(sgn*LLR_rls, perm_t);
-                    ld_t = max(min(ld_t,30),-30);
-                    [~,Lp_t,~] = siso_decode_conv(ld_t,[],codec.gen_polys,codec.constraint_len);
-                    bt = mean(double(Lp_t>0)~=info_bits(1:min(length(Lp_t),N_info)));  % 仅用于极性检测
-                    if bt < 0.4, best_sgn = sgn; break; end
+                tx_blk = frame_parts;
+                N_tx_blk = length(tx_blk);
+
+                % 时变信道
+                if fd_hz == 0
+                    rx_blk = conv(tx_blk, h_sym); rx_blk = rx_blk(1:N_tx_blk);
+                    h_blk_paths = repmat(gains(:), 1, N_tx_blk);
+                else
+                    rng(200+fi);
+                    t_b = (0:N_tx_blk-1)/sym_rate;
+                    h_blk_tv = zeros(K_sparse, N_tx_blk);
+                    for p=1:K_sparse
+                        fad=zeros(1,N_tx_blk);
+                        for k=1:8
+                            theta=2*pi*rand; beta=pi*k/8;
+                            fad=fad+exp(1j*(2*pi*fd_hz*cos(beta)*t_b+theta));
+                        end
+                        h_blk_tv(p,:) = gains(p)*fad/sqrt(8);
+                    end
+                    rx_blk = zeros(1, N_tx_blk);
+                    for n=1:N_tx_blk
+                        for p=1:K_sparse
+                            d=sym_delays(p);
+                            if n-d>=1, rx_blk(n)=rx_blk(n)+h_blk_tv(p,n)*tx_blk(n-d); end
+                        end
+                    end
+                    h_blk_paths = h_blk_tv;
                 end
-                LLR_eq = best_sgn * LLR_rls;
+                % 加噪
+                sp = mean(abs(rx_blk).^2);
+                nv_blk = sp*10^(-snr_db/10);
+                rng(300+fi*100+si);
+                rx_blk = rx_blk + sqrt(nv_blk/2)*(randn(size(rx_blk))+1j*randn(size(rx_blk)));
+                nv_eq = max(nv_blk, 1e-10);
 
-                % Kalman参数
-                h_paths_init = h_est_gamp(sym_delays+1);
-                alpha_ar = besselj(0, 2*pi*max(fd_hz,0.1)/sym_rate);
-                q_proc = max((1-alpha_ar^2)*mean(abs(h_paths_init).^2), 1e-8);
-                nv_eq = max(noise_var, 1e-10);
+                % === 信道估计 ===
+                if use_bem
+                    % BEM信道估计：从训练段+帧内导频联合估计
+                    % CE-BEM基函数: b_q(n) = exp(j*2π*q*n/N), q=-Q/2:Q/2
+                    T_frame = N_tx_blk / sym_rate;
+                    Q_bem = max(5, 2*ceil(fd_hz * T_frame) + 3);  % +2余量提升频率分辨率
+                    % 诊断（仅首个SNR点打印）
+                    if si == 1
+                        fprintf('\n  [BEM] fd=%dHz: T=%.3fs, Q=%d, N_blks=%d, pilots=%d, K*Q=%d, obs~%d\n', ...
+                            fd_hz, T_frame, Q_bem, N_blks, length(pilot_positions), K_sparse*Q_bem, ...
+                            train_len + length(pilot_positions)*pilot_len);
+                    end
+                    q_range = -(Q_bem-1)/2 : (Q_bem-1)/2;
 
-                bo = [];
-                for titer = 1:6
-                    lt = LLR_eq(1:min(length(LLR_eq),M_coded));
-                    if length(lt)<M_coded, lt=[lt,zeros(1,M_coded-length(lt))]; end
-                    ld = random_deinterleave(lt, perm_t);
-                    ld = max(min(ld,30),-30);
-                    [~,Lpi,Lpc] = siso_decode_conv(ld,[],codec.gen_polys,codec.constraint_len,codec.decode_mode);
-                    bo = double(Lpi>0);
-
-                    if titer < 6
-                        Li = random_interleave(Lpc, codec.interleave_seed);
-                        if length(Li)<M_coded, Li=[Li,zeros(1,M_coded-length(Li))];
-                        else, Li=Li(1:M_coded); end
-                        [xbar, var_x_arr] = soft_mapper(Li, 'qpsk');
-
-                        % 置信度加权：var_x<0.5的符号参与ISI消除，否则置0
-                        % soft_mapper返回标量var_x，需按符号展开
-                        if isscalar(var_x_arr), var_x_per = var_x_arr*ones(1,length(xbar));
-                        else, var_x_per = var_x_arr; end
-                        xbar_conf = xbar;
-                        xbar_conf(var_x_per > 0.5) = 0;  % 低置信度→不参与
-
-                        fs = zeros(1, N_tx);
-                        fs(1:T) = training;  % 训练段100%置信
-                        nf = min(length(xbar_conf), N_dsym);
-                        if nf>0, fs(T+1:T+nf) = xbar_conf(1:nf); end
-
-                        if use_kalman
-                            % Kalman稀疏跟踪
-                            hk = h_paths_init(:); Pk = q_proc*10*eye(K_sparse);
-                            h_tv = zeros(K_sparse, N_dsym);
-                            for n=1:N_dsym
-                                nn=T+n;
-                                hk_p = alpha_ar*hk;
-                                Pk_p = alpha_ar^2*Pk + q_proc*eye(K_sparse);
-                                phi=zeros(K_sparse,1);
-                                for pp=1:K_sparse
-                                    idx=nn-sym_delays(pp);
-                                    if idx>=1&&idx<=N_tx, phi(pp)=fs(idx); end
+                    % 收集所有导频观测（训练+帧内导频）
+                    % 训练段
+                    obs_y = []; obs_x = []; obs_n = [];
+                    for n=1:train_len
+                        y_n = rx_blk(n);
+                        % 观测模型: y(n) = Σ_p h_p(n)*x(n-d_p)
+                        % h_p(n) = Σ_q c_pq * b_q(n)
+                        % y(n) = Σ_p Σ_q c_pq * b_q(n) * x(n-d_p)
+                        x_vec = zeros(1, K_sparse);
+                        for p=1:K_sparse
+                            idx = n - sym_delays(p);
+                            if idx >= 1, x_vec(p) = training(idx); end
+                        end
+                        if any(x_vec ~= 0)
+                            obs_y(end+1) = y_n;
+                            obs_x = [obs_x; x_vec];
+                            obs_n(end+1) = n;
+                        end
+                    end
+                    % 帧内导频段
+                    for pi_idx = 1:length(pilot_positions)
+                        pp = pilot_positions(pi_idx);
+                        for kk = 1:pilot_len
+                            n = pp + kk - 1;
+                            if n > N_tx_blk, break; end
+                            x_vec = zeros(1, K_sparse);
+                            for p=1:K_sparse
+                                idx = n - sym_delays(p);
+                                if idx >= 1 && idx <= N_tx_blk
+                                    x_vec(p) = tx_blk(idx);
                                 end
-                                inn=rx_sym(nn)-phi'*hk_p;
-                                S=phi'*Pk_p*phi+nv_eq;
-                                Kg=Pk_p*phi/S;
-                                hk=hk_p+Kg*inn;
-                                Pk=(eye(K_sparse)-Kg*phi')*Pk_p;
-                                h_tv(:,n)=hk;
                             end
+                            if any(x_vec ~= 0)
+                                obs_y(end+1) = rx_blk(n);
+                                obs_x = [obs_x; x_vec];
+                                obs_n(end+1) = n;
+                            end
+                        end
+                    end
+
+                    % 构建BEM观测矩阵: y = Phi * c + noise
+                    % c = [c_11,...,c_1Q, c_21,...,c_PQ] (K_sparse*Q_bem × 1)
+                    N_obs = length(obs_y);
+                    Phi_bem = zeros(N_obs, K_sparse * Q_bem);
+                    for ii = 1:N_obs
+                        n = obs_n(ii);
+                        for p = 1:K_sparse
+                            for qi = 1:Q_bem
+                                q = q_range(qi);
+                                basis = exp(1j*2*pi*q*n/N_tx_blk);
+                                col = (p-1)*Q_bem + qi;
+                                Phi_bem(ii, col) = obs_x(ii, p) * basis;
+                            end
+                        end
+                    end
+
+                    % LS估计BEM系数
+                    c_bem = (Phi_bem' * Phi_bem + nv_eq*eye(size(Phi_bem,2))) \ (Phi_bem' * obs_y(:));
+
+                    % 从BEM系数重构每块中点的信道 + NMSE诊断
+                    nmse_blks = zeros(1, N_blks);
+                    for bi = 1:N_blks
+                        mid = blk_starts(bi) + round(sym_per_blk/2);
+                        hm_bem = zeros(K_sparse, 1);
+                        for p = 1:K_sparse
+                            for qi = 1:Q_bem
+                                q = q_range(qi);
+                                hm_bem(p) = hm_bem(p) + c_bem((p-1)*Q_bem+qi) * exp(1j*2*pi*q*mid/N_tx_blk);
+                            end
+                        end
+                        % NMSE: BEM重构 vs 真实信道
+                        mid_clamp = min(mid, size(h_blk_paths,2));
+                        h_true_bi = h_blk_paths(:, mid_clamp);
+                        nmse_blks(bi) = sum(abs(hm_bem - h_true_bi).^2) / sum(abs(h_true_bi).^2);
+
+                        hn = hm_bem(:).' / sqrt(sum(abs(hm_bem).^2));
+                        htd = zeros(1, blk_fft);
+                        for p=1:K_sparse
+                            if sym_delays(p)+1<=blk_fft, htd(sym_delays(p)+1)=hn(p); end
+                        end
+                        H_blks{bi} = fft(htd);
+                    end
+                    if si == 1
+                        fprintf('  NMSE/块: '); fprintf('%.1fdB ', 10*log10(nmse_blks+1e-10));
+                        fprintf('(avg=%.1fdB)\n', 10*log10(mean(nmse_blks)+1e-10));
+                    end
+                else
+                    % 初始H_est: oracle或Turbo-VAMP（固定，不分块更新）
+                    rx_tr_blk = rx_blk(1:train_len);
+                    T_mat_blk = zeros(train_len, L_h);
+                    for col=1:L_h, T_mat_blk(col:train_len,col)=training(1:train_len-col+1).'; end
+                    [h_tvamp_blk,~,~,~] = ch_est_turbo_vamp(rx_tr_blk(:), T_mat_blk, L_h, 30, K_sparse, nv_blk);
+                    for bi=1:N_blks
+                        if use_orc
+                            mid = blk_starts(bi) + round(sym_per_blk/2);
+                            mid = min(mid, size(h_blk_paths,2));
+                            hm = h_blk_paths(:,mid);
                         else
-                            % TV-orc：直接用真实信道
-                            h_tv = h_true_paths(:, T+1:T+N_dsym);
+                            hm = h_tvamp_blk(sym_delays+1);
                         end
-
-                        % 时变ISI消除 + 单抽头ZF
-                        deq = zeros(1, N_dsym);
-                        for n=1:N_dsym
-                            nn=T+n; isi=0;
-                            for pp=1:K_sparse
-                                d=sym_delays(pp); idx=nn-d;
-                                if idx>=1&&idx<=N_tx&&d>0
-                                    isi=isi+h_tv(pp,n)*fs(idx);
-                                end
-                            end
-                            h0n=h_tv(1,n);
-                            ric=rx_sym(nn)-isi;
-                            if abs(h0n)>1e-6, deq(n)=ric/h0n; else, deq(n)=ric; end
+                        hn = hm(:).' / sqrt(sum(abs(hm).^2));
+                        htd = zeros(1, blk_fft);
+                        for p=1:K_sparse
+                            if sym_delays(p)+1<=blk_fft, htd(sym_delays(p)+1)=hn(p); end
                         end
-                        nvp=max(noise_var,1e-6)/max(mean(abs(h_tv(1,:)).^2),1e-6);
-                        LLR_eq=zeros(1,2*N_dsym);
-                        LLR_eq(1:2:end)=-2*sqrt(2)*real(deq)/nvp;
-                        LLR_eq(2:2:end)=-2*sqrt(2)*imag(deq)/nvp;
+                        H_blks{bi} = fft(htd);
                     end
                 end
+
+                % 分块提取+FFT
+                Y_blks = cell(1,N_blks);
+                for bi=1:N_blks
+                    blk_sym = rx_blk(blk_starts(bi):blk_starts(bi)+sym_per_blk-1);
+                    Y_blks{bi} = fft(blk_sym(blk_cp+1:end));
+                end
+
+                % 跨块Turbo: LMMSE-IC + BCJR + 渐进DD信道精化
+                use_dd_refine = contains(mname, 'DD');
+                n_turbo = 8;  % 增加迭代次数
+                H_cur = H_blks;
+                x_bar_b = cell(1,N_blks); var_x_b = ones(1,N_blks);
+                for bi=1:N_blks, x_bar_b{bi}=zeros(1,blk_fft); end
+                [~,pm_t] = random_interleave(zeros(1,M_tot),codec.interleave_seed);
+                bo = [];
+                for titer = 1:n_turbo
+                    LLR_all = zeros(1, M_tot);
+                    for bi=1:N_blks
+                        [xt,mu_t,nvt] = eq_mmse_ic_fde(Y_blks{bi}, H_cur{bi}, x_bar_b{bi}, var_x_b(bi), nv_eq);
+                        le = soft_demapper(xt, mu_t, nvt, zeros(1,M_blk), 'qpsk');
+                        LLR_all((bi-1)*M_blk+1:bi*M_blk) = le;
+                    end
+                    ld = random_deinterleave(LLR_all, pm_t);
+                    ld = max(min(ld,30),-30);
+                    [~,Lpi,Lpc] = siso_decode_conv(ld,[],codec.gen_polys,codec.constraint_len,codec.decode_mode);
+                    bo = double(Lpi>0);
+                    if titer < n_turbo
+                        Li = random_interleave(Lpc, codec.interleave_seed);
+                        if length(Li)<M_tot, Li=[Li,zeros(1,M_tot-length(Li))];
+                        else, Li=Li(1:M_tot); end
+                        for bi=1:N_blks
+                            cb = Li((bi-1)*M_blk+1:bi*M_blk);
+                            [x_bar_b{bi},vr] = soft_mapper(cb,'qpsk');
+                            var_x_b(bi) = max(vr, nv_eq);
+
+                            if use_dd_refine && titer >= 2
+                                % 正则化DD: 不确定时自动回退BEM
+                                X_bar_f = fft(x_bar_b{bi});
+                                lambda_reg = nv_eq * 2;  % 正则化强度
+                                H_dd_reg = (Y_blks{bi}.*conj(X_bar_f) + lambda_reg*H_blks{bi}) ...
+                                         ./ (abs(X_bar_f).^2 + nv_eq + lambda_reg);
+                                % 稀疏投影
+                                h_dd_td = ifft(H_dd_reg);
+                                h_dd_s = zeros(1, blk_fft);
+                                for p=1:K_sparse
+                                    if sym_delays(p)+1<=blk_fft
+                                        h_dd_s(sym_delays(p)+1) = h_dd_td(sym_delays(p)+1);
+                                    end
+                                end
+                                % 渐进权重：iter越大越信任DD
+                                w_dd = min((titer-1)/(n_turbo-1), 0.8);
+                                H_cur{bi} = (1-w_dd)*H_blks{bi} + w_dd*fft(h_dd_s);
+                            end
+                        end
+                    end
+                end
+                % BER用块数据的info_bits（不覆盖外层变量）
+                nc = min(length(bo), N_info_blk);
+                bers(mi) = mean(bo(1:nc) ~= ib_blk(1:nc));
+                continue;  % 跳过外层BER计算
             end
 
             nc = min(length(bo), N_info);

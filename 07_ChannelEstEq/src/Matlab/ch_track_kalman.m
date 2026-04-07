@@ -53,14 +53,24 @@ if length(h_init) ~= P, error('h_init长度(%d)须与径数(%d)一致！', lengt
 if isfield(opts, 'alpha') && ~isempty(opts.alpha)
     alpha = opts.alpha;
 else
-    alpha = besselj(0, 2*pi*fd_hz/sym_rate);
+    % α设计：相干时间内衰减到0.5
+    % Tc ≈ 1/(4fd), Tc_samples = sym_rate/(4fd)
+    % α^Tc_samples = 0.5 → α = 0.5^(1/Tc_samples)
+    fd_eff = max(fd_hz, 0.1);
+    Tc_samples = sym_rate / (4*fd_eff);
+    alpha = 0.5^(1/Tc_samples);
+    alpha = max(alpha, 0.99);  % 不低于0.99（防过快衰减）
 end
 
 % 过程噪声方差
 if isfield(opts, 'q_proc') && ~isempty(opts.q_proc)
     q_proc = opts.q_proc;
 else
-    q_proc = (1 - alpha^2) * max(mean(abs(h_init).^2), 1e-8);
+    % 过程噪声设计：保证Kalman增益K合理（K≈q/(q+R)≈0.01~0.1）
+    % 目标：K_target ≈ 0.05（每步修正5%）
+    % q = K_target · noise_var / (1 - K_target)
+    K_target = min(0.05, 2*pi*max(fd_hz,0.1)/sym_rate * 10);  % fd越大跟踪越快
+    q_proc = K_target * noise_var / (1 - K_target);
     q_proc = max(q_proc, 1e-10);
 end
 
