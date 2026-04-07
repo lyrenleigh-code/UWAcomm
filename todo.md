@@ -157,6 +157,23 @@ RX: 09下变频 → 08 sync_detect(无噪声,直达径窗口50样本)
 - 估计结果用于：DFE权重初始化 + LMMSE-IC频域均衡 + Turbo ISI消除
 - 静态：固定h_est，时变：需分块估计或Kalman跟踪
 
+信道估计算法体系（模块07）：
+```
+① 静态/单快照估计（已完成11个）
+   经典: ch_est_ls / ch_est_mmse
+   稀疏: ch_est_omp / ch_est_sbl / ch_est_amp
+   消息传递: ch_est_gamp / ch_est_vamp / ch_est_turbo_vamp / ch_est_ws_turbo_vamp
+
+② 时变信道估计（待开发）
+   ch_est_tsbl.m     — T-SBL时序稀疏贝叶斯（多快照联合，稀疏+时变）
+   ch_est_sage.m     — SAGE/EM空时交替EM（高分辨率多径参数估计）
+   ch_est_bem.m      — BEM基扩展独立函数（CE-BEM/P-BEM/DCT-BEM）
+
+③ 信道跟踪（待开发）
+   ch_track_kalman.m — 稀疏Kalman跟踪（AR(1)+逐符号更新）
+   ch_track_rls.m    — RLS自适应跟踪（遗忘因子，独立于eq_dfe）
+```
+
 ### Turbo均衡
 - SC-FDE/OFDM: 跨块LMMSE-IC + DD信道更新 + BCJR (turbo_equalizer_scfde_crossblock)
 - SC-TDE: DFE(31,90) iter1 + 软ISI消除 iter2+ (turbo_equalizer_sctde V8)
@@ -172,8 +189,13 @@ RX: 09下变频 → 08 sync_detect(无噪声,直达径窗口50样本)
 
 | 优先级 | 任务 | 状态 | 说明 |
 |--------|------|------|------|
-| **P3-1** | **07模块时变均衡调试** | **调试中** | test_tv_eq.m: 分块FDE+Kalman跟踪 |
-| **P1/P2** | **SC-FDE/OFDM端到端改用ch_est_*估计** | **待改** | 当前用oracle,需改为GAMP/训练估计 |
+| **07-A** | **ch_est_tsbl.m T-SBL时序稀疏贝叶斯** | **待开发** | 多快照联合稀疏+时变，SBL→T-SBL扩展 |
+| **07-B** | **ch_est_sage.m SAGE/EM多径参数估计** | **待开发** | 空时交替广义EM，高分辨率时延/增益/多普勒估计 |
+| **07-C** | **ch_est_bem.m BEM基扩展独立函数** | **待开发** | 从test_tv_eq.m提炼，支持CE/P/DCT-BEM |
+| **07-D** | **ch_track_kalman.m 稀疏Kalman跟踪** | **待开发** | 从test_ch_est_tv.m提炼，AR(1)+逐符号更新 |
+| **07-E** | **ch_track_rls.m RLS信道跟踪** | **待开发** | 遗忘因子自适应，独立于eq_dfe |
+| **P3-1** | 07模块时变均衡调试 | 调试中 | test_tv_eq.m: BEM+散布导频已验证 |
+| **P1/P2** | SC-FDE/OFDM端到端改用ch_est_*估计 | 待改 | 当前用oracle,需改为估计 |
 | P3-2 | SC-TDE端到端时变集成 | 阻塞于P3-1 | 07方案确定后集成 |
 | P4 | OTFS端到端 | 待P3 | DD域处理+通带 |
 | P5 | DSSS端到端 | 待P4 | 扩频+Rake |

@@ -45,7 +45,9 @@ UWAcomm/
 |------|---------|------------|------------------|
 | 02 信道编解码 | 卷积编码 + SISO(BCJR)译码 | `conv_encode`, `siso_decode_conv`, `sova_decode_conv` | TX编码, RX译码 |
 | 03 交织 | 随机交织/解交织 | `random_interleave`, `random_deinterleave` | TX交织, RX解交织, Turbo迭代环 |
-| 07 信道估计 | LS/MMSE/OMP/SBL/GAMP/VAMP/Turbo-VAMP | `ch_est_ls`, `ch_est_mmse`, `ch_est_omp`, `ch_est_sbl`, `ch_est_gamp`, `ch_est_vamp`, `ch_est_turbo_vamp` | **RX信道估计（从训练序列）** |
+| 07 静态信道估计 | LS/MMSE/OMP/SBL/GAMP/VAMP/Turbo-VAMP | `ch_est_ls`, `ch_est_mmse`, `ch_est_omp`, `ch_est_sbl`, `ch_est_gamp`, `ch_est_vamp`, `ch_est_turbo_vamp` | **RX信道估计（从训练序列）** |
+| 07 时变信道估计 | T-SBL/SAGE/BEM（待开发） | `ch_est_tsbl`⬜, `ch_est_sage`⬜, `ch_est_bem`⬜ | **RX时变信道估计** |
+| 07 信道跟踪 | Kalman/RLS（待开发） | `ch_track_kalman`⬜, `ch_track_rls`⬜ | **RX逐符号信道跟踪** |
 | 07 均衡 | RLS-DFE/双向DFE/MMSE-IC/频域MMSE | `eq_dfe`, `eq_bidirectional_dfe`, `eq_mmse_ic_fde`, `eq_linear_rls` | RX均衡 |
 | 07 软信息 | LLR↔符号映射 | `soft_demapper`, `soft_mapper` | Turbo迭代中的软信息交换 |
 | 08 同步 | LFM/HFM/ZC/Barker生成 + 帧同步检测 | `gen_lfm`, `sync_detect` | TX前导生成, RX帧同步 |
