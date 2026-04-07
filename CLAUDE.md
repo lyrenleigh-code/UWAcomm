@@ -63,6 +63,7 @@ UWAcomm/
 - **信道估计规则**：端到端测试**必须调用模块07的ch_est_*函数**（如ch_est_gamp）从接收信号估计信道。**Oracle（ch_info.h_time真实信道）只能作为性能对比基准，不能作为最终结果**。最终提交的端到端BER曲线必须基于估计信道
 - 当前SC-FDE/OFDM端到端仍使用oracle H_est，属**待修正项**
 - 每次调试结果记录到 `D:\Obsidian\workspace\UWAcomm\` 的笔记中
+- **模块更新必须同步README**：每次新增、修改或删除模块内的函数文件时，必须同步更新该模块的 `src/Matlab/README.md`（对外接口表、内部函数列表、使用示例、依赖关系）
 
 ### 3. MATLAB测试调试流程
 
