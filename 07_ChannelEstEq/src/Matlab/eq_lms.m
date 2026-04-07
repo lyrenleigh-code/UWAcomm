@@ -42,8 +42,9 @@ for n = 1:total_len
         e = training(n) - x_hat(n);
         mse_history(n) = abs(e)^2;
     else
-        % 判决引导模式
-        e = sign(real(x_hat(n))) - x_hat(n);
+        % 判决引导模式（QPSK最近星座点）
+        d = (sign(real(x_hat(n))) + 1j*sign(imag(x_hat(n)))) / sqrt(2);
+        e = d - x_hat(n);
     end
 
     % 权重更新
