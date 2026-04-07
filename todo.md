@@ -11,10 +11,10 @@
 
 | 指标 | 数值 |
 |------|------|
-| MATLAB函数文件 | 173个 |
-| 代码总行数 | 20,719行 |
-| 文档文件(md+html) | 27个 |
-| Git提交数 | 134次 |
+| MATLAB函数文件 | 172个 |
+| 代码总行数 | 20,118行 |
+| 文档文件(md+html) | 28个 |
+| Git提交数 | 141次 |
 | 模块数 | 13个（12个算法模块 + 1个集成模块） |
 
 ---
@@ -30,7 +30,7 @@
 | 05 扩频/解扩 | `05_SpreadSpectrum/` | 17 | ✅ |
 | 06 多载波+CP | `06_MultiCarrier/` | 15 | ✅ |
 | 07 信道估计与均衡 | `07_ChannelEstEq/` | 42 | ✅ 统一测试V2(24项), BEM V2+DD-BEM |
-| 08 同步+帧组装 | `08_Sync/` | 17 | ✅ |
+| 08 同步+帧组装 | `08_Sync/` | 18 | ✅ 三层同步(帧/符号/位), phase_track V1.0, sync_detect V2.0(多普勒补偿), 22项测试 |
 | 09 脉冲成形/变频 | `09_Waveform/` | 9 | ✅ |
 | 10 多普勒处理 | `10_DopplerProc/` | 14 | ✅ comp_resample V7(正alpha) |
 | 11 阵列预处理 | `11_ArrayProc/` | 8 | ✅ |
@@ -192,6 +192,9 @@
 | turbo_equalizer_sctde | V8.0.0 | ✅ | DFE iter1 |
 | turbo_equalizer_scfde_crossblock | V1.0.0 | ✅ | 跨块Turbo |
 | test_channel_est_eq | V2.0.0 | ✅ | 24项测试+6张可视化 |
+| sync_detect | V2.0.0 | ✅ | 新增doppler方法(二维时延-多普勒补偿搜索) |
+| phase_track | V1.0.0 | ✅ | 位同步: PLL/DFPT/Kalman三种相位跟踪 |
+| test_sync | V2.0.0 | ✅ | 22项测试, 可视化与测试分离 |
 
 ---
 
