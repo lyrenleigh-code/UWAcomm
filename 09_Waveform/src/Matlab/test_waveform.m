@@ -1,7 +1,8 @@
 %% test_waveform.m
 % 功能：脉冲成形/上下变频模块单元测试
-% 版本：V1.0.0
+% 版本：V1.1.0
 % 运行方式：>> run('test_waveform.m')
+% V1.1: 增加可视化（滤波器/眼图/频谱/FSK时频/SQNR/星座图）
 
 clc; close all;
 fprintf('========================================\n');
@@ -10,6 +11,7 @@ fprintf('========================================\n\n');
 
 pass_count = 0;
 fail_count = 0;
+vis = struct();  % 可视化数据收集
 
 %% ==================== 一、脉冲成形 ==================== %%
 fprintf('--- 1. 脉冲成形 ---\n\n');
@@ -29,9 +31,17 @@ try
 
     fprintf('[通过] 1.1 四种滤波器生成 | rc/rrc/rect/gauss, 长度=%d\n', span*sps+1);
     pass_count = pass_count + 1;
+    % 收集四种滤波器系数用于可视化
+    vis.filters = struct(); vis.filter_sps = sps; vis.filter_span = span;
+    for k = 1:4
+        [~, hk, tk] = pulse_shape(1, sps, types{k}, 0.35, span);
+        vis.filters.(types{k}) = struct('h', hk, 't', tk);
+    end
+    vis.ok_filters = true;
 catch e
     fprintf('[失败] 1.1 滤波器生成 | %s\n', e.message);
     fail_count = fail_count + 1;
+    vis.ok_filters = false;
 end
 
 %% 1.2 RRC发+RRC收=RC（零ISI验证）
@@ -56,9 +66,12 @@ try
 
     fprintf('[通过] 1.2 RRC+RRC=RC零ISI | 最大ISI/峰值=%.4f\n', max_isi);
     pass_count = pass_count + 1;
+    vis.rc_combined = filtered / peak_val; vis.rc_peak_pos = peak_pos;
+    vis.rc_sps = sps; vis.ok_rc = true;
 catch e
     fprintf('[失败] 1.2 RRC零ISI | %s\n', e.message);
     fail_count = fail_count + 1;
+    vis.ok_rc = false;
 end
 
 %% 1.3 脉冲成形+匹配滤波回环
@@ -83,9 +96,11 @@ try
 
     fprintf('[通过] 1.3 成形+匹配滤波回环 | 100符号, 最优偏移=%d, BER=0\n', best_d);
     pass_count = pass_count + 1;
+    vis.eye_signal = filtered; vis.eye_sps = sps; vis.ok_eye = true;
 catch e
     fprintf('[失败] 1.3 成形+匹配回环 | %s\n', e.message);
     fail_count = fail_count + 1;
+    vis.ok_eye = false;
 end
 
 %% ==================== 二、上下变频 ==================== %%
@@ -111,9 +126,12 @@ try
 
     fprintf('[通过] 2.1 上下变频回环 | fs=%dHz, fc=%dHz, 相关系数=%.4f\n', fs, fc, corr_coeff);
     pass_count = pass_count + 1;
+    vis.bb_in = baseband_in; vis.pb = passband; vis.bb_out = baseband_out;
+    vis.conv_fs = fs; vis.conv_fc = fc; vis.ok_conv = true;
 catch e
     fprintf('[失败] 2.1 上下变频回环 | %s\n', e.message);
     fail_count = fail_count + 1;
+    vis.ok_conv = false;
 end
 
 %% 2.2 通带信号为实数
@@ -257,9 +275,11 @@ try
     for k = 1:4, fprintf('%dbit=%.1fdB ', bits_list(k), sqnr_list(k)); end
     fprintf('\n');
     pass_count = pass_count + 1;
+    vis.sqnr_bits = bits_list; vis.sqnr_vals = sqnr_list; vis.ok_sqnr = true;
 catch e
     fprintf('[失败] 4.2 DA量化SQNR | %s\n', e.message);
     fail_count = fail_count + 1;
+    vis.ok_sqnr = false;
 end
 
 %% 4.3 AD截断警告
@@ -338,9 +358,16 @@ try
 
     fprintf('[通过] 5.1 QPSK全链路 | 200符号, 14bit DA/AD, BER=%.1f%%\n', best_ber*100);
     pass_count = pass_count + 1;
+    % 保存TX/RX星座点用于可视化
+    vis.qpsk_tx = symbols; vis.ok_qpsk = true;
+    % 取最优偏移下的RX符号
+    idx_best = (0:sps:length(filtered)-1) + 1;
+    idx_best = idx_best(idx_best <= length(filtered));
+    vis.qpsk_rx = filtered(idx_best(1:min(end,200)));
 catch e
     fprintf('[失败] 5.1 QPSK全链路 | %s\n', e.message);
     fail_count = fail_count + 1;
+    vis.ok_qpsk = false;
 end
 
 %% 5.2 16QAM成形+匹配（无变频，纯基带，跳过边缘）
@@ -581,6 +608,121 @@ catch e
     fprintf('[失败] 6.1 空输入 | %s\n', e.message);
     fail_count = fail_count + 1;
 end
+
+%% ==================== 可视化（独立于测试） ==================== %%
+
+% --- Figure 1: 脉冲成形滤波器 + 零ISI验证 --- %
+try
+    if isfield(vis,'ok_filters') && vis.ok_filters && isfield(vis,'ok_rc') && vis.ok_rc
+        figure('Name','脉冲成形','NumberTitle','off','Position',[50 80 1200 500]);
+
+        % 四种滤波器冲激响应
+        subplot(1,3,1);
+        types_plot = {'rc','rrc','rect','gauss'};
+        colors = {'b','r','k','m'};
+        for k = 1:4
+            fdata = vis.filters.(types_plot{k});
+            plot(fdata.t, fdata.h, colors{k}, 'LineWidth', 1.2); hold on;
+        end
+        legend('RC','RRC','Rect','Gauss','Location','best');
+        xlabel('采样点'); ylabel('幅度');
+        title('滤波器冲激响应'); grid on;
+
+        % RRC+RRC=RC 零ISI
+        subplot(1,3,2);
+        rc = vis.rc_combined; pp = vis.rc_peak_pos; sp = vis.rc_sps;
+        t_axis = (1:length(rc)) - pp;
+        plot(t_axis, real(rc), 'b', 'LineWidth', 0.8); hold on;
+        isi_idx = -5*sp:sp:5*sp;
+        isi_idx = isi_idx(isi_idx ~= 0) + pp;
+        isi_idx = isi_idx(isi_idx > 0 & isi_idx <= length(rc));
+        stem(isi_idx - pp, real(rc(isi_idx)), 'ro', 'MarkerSize', 6, 'LineWidth', 1.2);
+        stem(0, 1, 'gs', 'MarkerSize', 8, 'LineWidth', 1.5, 'MarkerFaceColor','g');
+        legend('RRC*RRC','ISI采样点','峰值');
+        xlabel('采样偏移'); ylabel('归一化幅度');
+        title('RRC+RRC=RC 零ISI验证'); grid on;
+
+        % 眼图
+        if isfield(vis,'ok_eye') && vis.ok_eye
+            subplot(1,3,3);
+            sig = real(vis.eye_signal); sp2 = vis.eye_sps;
+            num_traces = floor(length(sig) / (2*sp2)) - 1;
+            for k = 1:min(num_traces, 80)
+                seg = sig((k-1)*sp2+1 : (k+1)*sp2);
+                plot(0:length(seg)-1, seg, 'b', 'LineWidth', 0.3); hold on;
+            end
+            xlabel('采样点 (2T)'); ylabel('幅度');
+            title(sprintf('眼图 (sps=%d)', sp2)); grid on;
+        end
+    end
+catch; end
+
+% --- Figure 2: 上下变频频谱 --- %
+try
+    if isfield(vis,'ok_conv') && vis.ok_conv
+        figure('Name','上下变频频谱','NumberTitle','off','Position',[60 60 1200 450]);
+        fs_v = vis.conv_fs; N_bb = length(vis.bb_in); N_pb = length(vis.pb);
+
+        % 基带频谱
+        subplot(1,3,1);
+        f_bb = (-N_bb/2:N_bb/2-1) * fs_v / N_bb / 1000;
+        S_bb = 20*log10(abs(fftshift(fft(vis.bb_in))) / N_bb + 1e-10);
+        plot(f_bb, S_bb, 'b', 'LineWidth', 0.6);
+        xlabel('频率 (kHz)'); ylabel('dB');
+        title('基带信号频谱'); grid on; xlim([-fs_v/2000 fs_v/2000]);
+
+        % 通带频谱
+        subplot(1,3,2);
+        f_pb = (-N_pb/2:N_pb/2-1) * fs_v / N_pb / 1000;
+        S_pb = 20*log10(abs(fftshift(fft(vis.pb))) / N_pb + 1e-10);
+        plot(f_pb, S_pb, 'r', 'LineWidth', 0.6);
+        xlabel('频率 (kHz)'); ylabel('dB');
+        title(sprintf('通带频谱 (fc=%dkHz)', vis.conv_fc/1000)); grid on;
+        xlim([-fs_v/2000 fs_v/2000]);
+
+        % 恢复基带频谱
+        subplot(1,3,3);
+        N_out = length(vis.bb_out);
+        f_out = (-N_out/2:N_out/2-1) * fs_v / N_out / 1000;
+        S_out = 20*log10(abs(fftshift(fft(vis.bb_out))) / N_out + 1e-10);
+        plot(f_out, S_out, 'Color',[0 0.6 0], 'LineWidth', 0.6);
+        xlabel('频率 (kHz)'); ylabel('dB');
+        title('下变频恢复频谱'); grid on; xlim([-fs_v/2000 fs_v/2000]);
+    end
+catch; end
+
+% --- Figure 3: DA/AD量化SQNR + QPSK星座图 --- %
+try
+    has_sqnr = isfield(vis,'ok_sqnr') && vis.ok_sqnr;
+    has_qpsk = isfield(vis,'ok_qpsk') && vis.ok_qpsk;
+    if has_sqnr || has_qpsk
+        figure('Name','DA/AD与星座图','NumberTitle','off','Position',[70 50 1000 450]);
+
+        if has_sqnr
+            subplot(1,2,1);
+            bar(vis.sqnr_bits, vis.sqnr_vals, 0.5, 'FaceColor',[0.3 0.5 0.8]);
+            hold on;
+            % 理论线: SQNR = 6.02*N + 1.76
+            theory = 6.02*vis.sqnr_bits + 1.76;
+            plot(vis.sqnr_bits, theory, 'r--o', 'LineWidth', 1.5, 'MarkerSize', 6);
+            legend('实测SQNR','理论6.02N+1.76','Location','best');
+            xlabel('量化位数'); ylabel('SQNR (dB)');
+            title('DA量化信噪比'); grid on;
+        end
+
+        if has_qpsk
+            subplot(1,2,2);
+            rx_norm = vis.qpsk_rx / sqrt(mean(abs(vis.qpsk_rx).^2));
+            plot(real(rx_norm), imag(rx_norm), '.', 'Color',[0.5 0.5 0.5], 'MarkerSize', 4); hold on;
+            plot(real(vis.qpsk_tx(1:min(end,50))), imag(vis.qpsk_tx(1:min(end,50))), ...
+                 'ro', 'MarkerSize', 8, 'LineWidth', 1.5);
+            legend('RX (全链路)','TX 理想星座','Location','best');
+            xlabel('I'); ylabel('Q');
+            title('QPSK全链路星座图 (14bit DA/AD)');
+            grid on; axis equal; axis([-2 2 -2 2]);
+        end
+    end
+catch; end
 
 %% ==================== 测试汇总 ==================== %%
 fprintf('\n========================================\n');
