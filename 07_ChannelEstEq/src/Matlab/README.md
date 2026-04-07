@@ -1,6 +1,6 @@
 # 信道估计与均衡模块 (ChannelEstEq)
 
-接收链路核心模块，覆盖静态/时变信道估计、信道跟踪、均衡器和Turbo迭代软信息接口。共42个文件。
+接收链路核心模块，覆盖静态/时变信道估计、信道跟踪、均衡器和Turbo迭代软信息接口。共41个文件。
 
 ## 对外接口
 
@@ -22,7 +22,7 @@
 | 函数 | 版本 | 方法 | 说明 |
 |------|------|------|------|
 | `ch_est_bem` | **V2** | BEM基扩展(CE/DCT) | 向量化重构+自适应正则化+可选BIC |
-| `ch_est_bem_dd` | **V1** | DD-BEM判决辅助迭代 | FDE块均衡→硬判决→扩展导频→重估BEM |
+| `ch_est_bem_dd` | V1 | DD-BEM判决辅助迭代 | FDE块均衡→硬判决→扩展导频→重估BEM |
 | `ch_est_tsbl` | V2 | T-SBL时序稀疏贝叶斯 | 多快照联合稀疏+时间相关 |
 | `ch_est_sage` | V1 | SAGE/EM参数估计 | 高分辨率时延/增益/多普勒, 时延0误差 |
 
@@ -37,7 +37,7 @@
 | 函数 | 版本 | 类型 | 适用体制 | 备注 |
 |------|------|------|---------|------|
 | `eq_rls` | V1 | RLS居中延迟 | SC-TDE | 抽头数甜点=4×L_h |
-| `eq_lms` | **V1.1** | LMS自适应 | SC-TDE | **修复DD QPSK判决** |
+| `eq_lms` | **V1.1** | LMS自适应 | SC-TDE | 修复DD QPSK判决 |
 | `eq_dfe` | V3.1 | RLS-DFE | SC-TDE | 静态信道关PLL, λ=0.9995 |
 | `eq_bidirectional_dfe` | V3 | 双向DFE | SC-TDE | 需前向输出作后向伪训练 |
 | `eq_mmse_ic_fde` | V2 | **LMMSE-IC迭代** | **SC-FDE/OFDM Turbo核心** | |
@@ -45,10 +45,11 @@
 | `eq_ofdm_zf` | V1 | 频域ZF | OFDM | 噪声放大, 仅高SNR |
 | `eq_ptrm` | V1 | PTR被动时反转 | 多通道聚焦 | |
 
-### ⑤ 软信息接口
+### ⑤ 工具函数
 
 | 函数 | 功能 |
 |------|------|
+| `build_scattered_obs` | 从帧结构(训练+散布导频)构建BEM观测矩阵 |
 | `soft_demapper` | 均衡输出→LLR |
 | `soft_mapper` | LLR→软符号+方差 |
 
@@ -64,24 +65,21 @@
 
 **散布导频是精度决定性因素，BEM(DCT)+散布导频最优**
 
-### 时变均衡（RRC过采样+gen_uwa_channel+分块LMMSE-IC+Turbo BCJR）
+### 时变均衡（RRC过采样+gen_uwa_channel+散布导频BEM+Turbo BCJR）
 
-| 条件 | oracle | BEM(CE) | BEM(DCT) |
-|------|--------|---------|----------|
-| static 全SNR | 0% | 0% | 0% |
-| fd=1Hz 全SNR | 0% | 0% | 0% |
-| fd=5Hz 5dB+ | 0% | 0% | 0% |
-| fd=10Hz 5dB | 0.3% | 4.4% | **1.2%** |
+| 条件 | oracle | BEM(CE) | BEM(DCT) | DD-BEM |
+|------|--------|---------|----------|--------|
+| fd≤5Hz 5dB+ | 0% | 0% | 0% | 0% |
+| fd=10Hz 5dB | 0.3% | 4.4% | **1.2%** | 9.0% |
 
-### Turbo TDE vs FDE（同一6径信道公平对比）
+### Turbo TDE vs FDE（同一6径信道）
 
 | SNR | TDE iter6 | FDE iter1 |
 |-----|-----------|-----------|
 | 0dB | 34.6% | **21.1%** |
 | 5dB | 0.6% | **0%** |
-| 10dB | 0% | 0% |
 
-**FDE在长时延信道下全面优于TDE（5dB编码增益优势）**
+**长时延信道下FDE全面优于TDE（5dB编码增益优势）**
 
 ### 均衡器调试要点
 
@@ -97,13 +95,13 @@
 
 | 文件 | 版本 | 内容 |
 |------|------|------|
-| `test_channel_est_eq.m` | **V2** | **统一测试(24项+6图)**: 静态估计/时变估计(BEM+SAGE+Kalman+DD-BEM+散布导频)/均衡器SNR-SER/Turbo TDE-FDE/时变均衡 |
+| `test_channel_est_eq.m` | **V2** | **统一测试(24项+6图)**: 静态估计/时变估计/均衡器SNR-SER/Turbo TDE-FDE/时变均衡 |
 
 ## 依赖关系
 
 - 模块02 `siso_decode_conv`（Turbo内部）
 - 模块03 `random_interleave`（Turbo内部）
 - 模块09 `pulse_shape`/`match_filter`（RRC过采样）
-- 模块12 `turbo_equalizer_sctde`（Turbo TDE测试）
+- 模块12 `turbo_equalizer_sctde` / `turbo_equalizer_scfde_crossblock`（Turbo均衡）
 - 模块13 `gen_uwa_channel`（时变信道生成）
 - 被模块12/13调用
