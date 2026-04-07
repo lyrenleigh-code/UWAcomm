@@ -98,7 +98,6 @@
 | 文件 | 版本 | 内容 |
 |------|------|------|
 | `test_channel_est_eq.m` | **V2** | **统一测试(24项+6图)**: 静态估计/时变估计(BEM+SAGE+Kalman+DD-BEM+散布导频)/均衡器SNR-SER/Turbo TDE-FDE/时变均衡 |
-| `test_tv_eq.m` | V3 | 时变均衡专项: oracle vs BEM(CE), RRC+gen_uwa_channel+分块LMMSE-IC |
 
 ## 依赖关系
 
