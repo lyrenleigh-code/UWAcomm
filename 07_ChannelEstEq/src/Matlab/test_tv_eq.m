@@ -40,7 +40,7 @@ snr_list = [0, 5, 10, 15, 20];
 fd_list = [0, 1, 5];
 
 %% ========== 方法定义 ========== %%
-methods = {'FDE分块(orc)', 'FDE+导频+BEM', 'FDE+BEM+DD'};
+methods = {'FDE(orc短p)', 'FDE(orc长p)', 'FDE+BEM(CE)', 'FDE+BEM(CE,Q少)', 'FDE+BEM(DCT)'};
 N_methods = length(methods);
 
 fprintf('纯基带符号级（无RRC/无通带/无同步）\n');
@@ -135,17 +135,23 @@ for fi = 1:length(fd_list)
             if false
                 % placeholder
 
-            elseif contains(mname, 'FDE分块') || contains(mname, 'FDE+导频')
+            elseif contains(mname, 'FDE')
                 % === SC-FDE风格分块频域均衡 ===
                 use_orc = contains(mname, 'orc');
-                use_bem = contains(mname, 'BEM');  % BEM信道估计
+                use_bem = contains(mname, 'BEM');
 
                 % 块参数
                 if fd_hz <= 1, blk_fft=256; else, blk_fft=128; end
                 blk_cp = max(sym_delays) + 10;
 
-                % 帧内导频参数（BEM方法用）
-                pilot_len = 50;  % 每段导频50符号（短，约训练的1/10）
+                % 帧内导频参数
+                max_d = max(sym_delays);
+                if contains(mname, '短p')
+                    pilot_len = 50;  % 短导频（oracle基线，帧短→Jakes有利）
+                else
+                    pilot_useful = 100;
+                    pilot_len = max_d + pilot_useful;  % 190符号（BEM需要长导频）
+                end
                 rng(999); pilot_sym = constellation(randi(4,1,pilot_len));
 
                 % 数据编码
@@ -162,12 +168,12 @@ for fi = 1:length(fd_list)
                 sym_blk = bits2qpsk(it_blk);
 
                 % TX帧组装: [训练|数据块1|导频|数据块2|导频|...|数据块N|尾导频]
-                % 前后包围：训练(头) + 散布导频(中) + 尾导频(尾)
+                % 所有方法用同一帧结构（都有导频），确保公平对比
                 frame_parts = training;
                 blk_starts = zeros(1,N_blks);
                 pilot_positions = [];
                 for bi=1:N_blks
-                    if use_bem && bi > 1
+                    if bi > 1
                         pilot_positions(end+1) = length(frame_parts)+1;
                         frame_parts = [frame_parts, pilot_sym];
                     end
@@ -175,139 +181,161 @@ for fi = 1:length(fd_list)
                     ds_b = sym_blk((bi-1)*blk_fft+1:bi*blk_fft);
                     frame_parts = [frame_parts, ds_b(end-blk_cp+1:end), ds_b];
                 end
-                % 帧尾导频（前后包围，对应实际系统的LFM2位置）
-                if use_bem
-                    pilot_positions(end+1) = length(frame_parts)+1;
-                    frame_parts = [frame_parts, pilot_sym];
-                end
+                % 帧尾导频
+                pilot_positions(end+1) = length(frame_parts)+1;
+                frame_parts = [frame_parts, pilot_sym];
                 tx_blk = frame_parts;
                 N_tx_blk = length(tx_blk);
 
-                % 时变信道
+                % RRC过采样信道（与端到端SC-FDE一致）
+                sps = 8; rolloff = 0.35; span_rrc = 6;
+                N_samp = N_tx_blk * sps;  % 过采样总长
+
+                % RRC成形（符号→过采样基带）
+                [shaped_bb,~,~] = pulse_shape(tx_blk, sps, 'rrc', rolloff, span_rrc);
+
                 if fd_hz == 0
-                    rx_blk = conv(tx_blk, h_sym); rx_blk = rx_blk(1:N_tx_blk);
+                    % 静态：过采样域卷积
+                    h_bb = zeros(1, max_d*sps+1);
+                    for p=1:K_sparse, h_bb(sym_delays(p)*sps+1)=gains(p); end
+                    rx_shaped = conv(shaped_bb, h_bb);
+                    rx_shaped = rx_shaped(1:length(shaped_bb));
                     h_blk_paths = repmat(gains(:), 1, N_tx_blk);
                 else
+                    % 时变：过采样域Jakes逐样本卷积
                     rng(200+fi);
-                    t_b = (0:N_tx_blk-1)/sym_rate;
-                    h_blk_tv = zeros(K_sparse, N_tx_blk);
+                    N_samp_full = length(shaped_bb);
+                    t_samp = (0:N_samp_full-1)/(sym_rate*sps);
+                    h_samp_tv = zeros(K_sparse, N_samp_full);
                     for p=1:K_sparse
-                        fad=zeros(1,N_tx_blk);
+                        fad=zeros(1,N_samp_full);
                         for k=1:8
                             theta=2*pi*rand; beta=pi*k/8;
-                            fad=fad+exp(1j*(2*pi*fd_hz*cos(beta)*t_b+theta));
+                            fad=fad+exp(1j*(2*pi*fd_hz*cos(beta)*t_samp+theta));
                         end
-                        h_blk_tv(p,:) = gains(p)*fad/sqrt(8);
+                        h_samp_tv(p,:) = gains(p)*fad/sqrt(8);
                     end
-                    rx_blk = zeros(1, N_tx_blk);
-                    for n=1:N_tx_blk
+                    rx_shaped = zeros(1, N_samp_full);
+                    for n=1:N_samp_full
                         for p=1:K_sparse
-                            d=sym_delays(p);
-                            if n-d>=1, rx_blk(n)=rx_blk(n)+h_blk_tv(p,n)*tx_blk(n-d); end
+                            d_samp = sym_delays(p)*sps;
+                            if n-d_samp>=1
+                                rx_shaped(n) = rx_shaped(n) + h_samp_tv(p,n)*shaped_bb(n-d_samp);
+                            end
                         end
                     end
-                    h_blk_paths = h_blk_tv;
+                    % 符号率信道（从过采样中取每sps个点的中点）
+                    h_blk_paths = zeros(K_sparse, N_tx_blk);
+                    for si_sym=1:N_tx_blk
+                        samp_mid = (si_sym-1)*sps + round(sps/2);
+                        samp_mid = min(samp_mid, N_samp_full);
+                        h_blk_paths(:, si_sym) = h_samp_tv(:, samp_mid);
+                    end
                 end
-                % 加噪
-                sp = mean(abs(rx_blk).^2);
-                nv_blk = sp*10^(-snr_db/10);
+
+                % 加噪（过采样域）
+                sp = mean(abs(rx_shaped).^2);
+                nv_samp = sp*10^(-snr_db/10);
                 rng(300+fi*100+si);
-                rx_blk = rx_blk + sqrt(nv_blk/2)*(randn(size(rx_blk))+1j*randn(size(rx_blk)));
+                rx_shaped = rx_shaped + sqrt(nv_samp/2)*(randn(size(rx_shaped))+1j*randn(size(rx_shaped)));
+
+                % RRC匹配滤波 + 下采样
+                [rx_filt,~] = match_filter(rx_shaped, sps, 'rrc', rolloff, span_rrc);
+                % 寻找最佳采样偏移
+                best_off=0; best_pwr=0;
+                for off=0:sps-1
+                    st=rx_filt(off+1:sps:end);
+                    if length(st)>=10
+                        c_corr=abs(sum(st(1:10).*conj(tx_blk(1:10))));
+                        if c_corr>best_pwr, best_pwr=c_corr; best_off=off; end
+                    end
+                end
+                rx_blk = rx_filt(best_off+1:sps:end);
+                if length(rx_blk)>N_tx_blk, rx_blk=rx_blk(1:N_tx_blk);
+                elseif length(rx_blk)<N_tx_blk, rx_blk=[rx_blk,zeros(1,N_tx_blk-length(rx_blk))]; end
+
+                % 符号率噪声方差（从过采样换算）
+                nv_blk = nv_samp;  % RRC匹配后噪声方差近似不变
                 nv_eq = max(nv_blk, 1e-10);
 
                 % === 信道估计 ===
                 if use_bem
-                    % BEM信道估计：从训练段+帧内导频联合估计
-                    % CE-BEM基函数: b_q(n) = exp(j*2π*q*n/N), q=-Q/2:Q/2
-                    T_frame = N_tx_blk / sym_rate;
-                    Q_bem = max(5, 2*ceil(fd_hz * T_frame) + 3);  % +2余量提升频率分辨率
-                    % 诊断（仅首个SNR点打印）
-                    if si == 1
-                        fprintf('\n  [BEM] fd=%dHz: T=%.3fs, Q=%d, N_blks=%d, pilots=%d, K*Q=%d, obs~%d\n', ...
-                            fd_hz, T_frame, Q_bem, N_blks, length(pilot_positions), K_sparse*Q_bem, ...
-                            train_len + length(pilot_positions)*pilot_len);
-                    end
-                    q_range = -(Q_bem-1)/2 : (Q_bem-1)/2;
+                    % 调用ch_est_bem函数
+                    % 构建导频观测：训练段 + 帧内导频后部（所有径已知区域）
+                    obs_y_arr = []; obs_x_arr = []; obs_t_arr = [];
 
-                    % 收集所有导频观测（训练+帧内导频）
-                    % 训练段
-                    obs_y = []; obs_x = []; obs_n = [];
-                    for n=1:train_len
-                        y_n = rx_blk(n);
-                        % 观测模型: y(n) = Σ_p h_p(n)*x(n-d_p)
-                        % h_p(n) = Σ_q c_pq * b_q(n)
-                        % y(n) = Σ_p Σ_q c_pq * b_q(n) * x(n-d_p)
+                    % 训练段（n > max_delay时所有径都在训练内）
+                    for n = max_d+1 : train_len
                         x_vec = zeros(1, K_sparse);
                         for p=1:K_sparse
                             idx = n - sym_delays(p);
                             if idx >= 1, x_vec(p) = training(idx); end
                         end
-                        if any(x_vec ~= 0)
-                            obs_y(end+1) = y_n;
-                            obs_x = [obs_x; x_vec];
-                            obs_n(end+1) = n;
-                        end
+                        obs_y_arr(end+1) = rx_blk(n);
+                        obs_x_arr = [obs_x_arr; x_vec];
+                        obs_t_arr(end+1) = n;
                     end
-                    % 帧内导频段
+
+                    % 帧内导频段：只用后部 [pp+max_d : pp+pilot_len-1]
+                    % 此区间内所有径 x(n-d) 都落在导频段 [pp : pp+pilot_len-1] 内
                     for pi_idx = 1:length(pilot_positions)
                         pp = pilot_positions(pi_idx);
-                        for kk = 1:pilot_len
+                        for kk = max_d+1 : pilot_len
                             n = pp + kk - 1;
                             if n > N_tx_blk, break; end
                             x_vec = zeros(1, K_sparse);
                             for p=1:K_sparse
                                 idx = n - sym_delays(p);
-                                if idx >= 1 && idx <= N_tx_blk
-                                    x_vec(p) = tx_blk(idx);
+                                if idx >= pp && idx < pp+pilot_len
+                                    % idx在导频段内 → 已知
+                                    x_vec(p) = pilot_sym(idx - pp + 1);
+                                elseif idx >= 1 && idx <= train_len
+                                    % idx在训练段内 → 已知
+                                    x_vec(p) = training(idx);
                                 end
+                                % 其他情况x_vec(p)=0（未知，不参与该径）
                             end
                             if any(x_vec ~= 0)
-                                obs_y(end+1) = rx_blk(n);
-                                obs_x = [obs_x; x_vec];
-                                obs_n(end+1) = n;
+                                obs_y_arr(end+1) = rx_blk(n);
+                                obs_x_arr = [obs_x_arr; x_vec];
+                                obs_t_arr(end+1) = n;
                             end
                         end
                     end
 
-                    % 构建BEM观测矩阵: y = Phi * c + noise
-                    % c = [c_11,...,c_1Q, c_21,...,c_PQ] (K_sparse*Q_bem × 1)
-                    N_obs = length(obs_y);
-                    Phi_bem = zeros(N_obs, K_sparse * Q_bem);
-                    for ii = 1:N_obs
-                        n = obs_n(ii);
-                        for p = 1:K_sparse
-                            for qi = 1:Q_bem
-                                q = q_range(qi);
-                                basis = exp(1j*2*pi*q*n/N_tx_blk);
-                                col = (p-1)*Q_bem + qi;
-                                Phi_bem(ii, col) = obs_x(ii, p) * basis;
-                            end
-                        end
+                    fd_est = max(fd_hz, 0.5);
+
+                    % BEM类型和Q阶选择
+                    if contains(mname, 'DCT')
+                        bem_type = 'dct';
+                        fd_for_q = fd_est;  % 标准Q
+                    elseif contains(mname, 'Q少')
+                        bem_type = 'ce';
+                        fd_for_q = fd_est * 0.5;  % Q减半
+                    else
+                        bem_type = 'ce';
+                        fd_for_q = fd_est;  % 标准Q
                     end
 
-                    % LS估计BEM系数
-                    c_bem = (Phi_bem' * Phi_bem + nv_eq*eye(size(Phi_bem,2))) \ (Phi_bem' * obs_y(:));
+                    [h_tv_bem, ~, info_bem] = ch_est_bem(obs_y_arr(:), obs_x_arr, ...
+                        obs_t_arr(:), N_tx_blk, sym_delays, fd_for_q, sym_rate, nv_eq, bem_type);
 
-                    % 从BEM系数重构每块中点的信道 + NMSE诊断
+                    if si == 1
+                        fprintf('\n  [%s] Q=%d, obs=%d, type=%s\n', mname, info_bem.Q, info_bem.M_obs, info_bem.bem_type);
+                    end
+
+                    % 从BEM重构每块H_est + NMSE诊断
                     nmse_blks = zeros(1, N_blks);
                     for bi = 1:N_blks
                         mid = blk_starts(bi) + round(sym_per_blk/2);
-                        hm_bem = zeros(K_sparse, 1);
-                        for p = 1:K_sparse
-                            for qi = 1:Q_bem
-                                q = q_range(qi);
-                                hm_bem(p) = hm_bem(p) + c_bem((p-1)*Q_bem+qi) * exp(1j*2*pi*q*mid/N_tx_blk);
-                            end
-                        end
-                        % NMSE: BEM重构 vs 真实信道
-                        mid_clamp = min(mid, size(h_blk_paths,2));
-                        h_true_bi = h_blk_paths(:, mid_clamp);
+                        mid_clamp = min(mid, N_tx_blk);
+                        hm_bem = h_tv_bem(:, mid_clamp);  % P×1
+                        h_true_bi = h_blk_paths(:, min(mid, size(h_blk_paths,2)));
                         nmse_blks(bi) = sum(abs(hm_bem - h_true_bi).^2) / sum(abs(h_true_bi).^2);
 
-                        hn = hm_bem(:).' / sqrt(sum(abs(hm_bem).^2));
                         htd = zeros(1, blk_fft);
                         for p=1:K_sparse
-                            if sym_delays(p)+1<=blk_fft, htd(sym_delays(p)+1)=hn(p); end
+                            if sym_delays(p)+1<=blk_fft, htd(sym_delays(p)+1)=hm_bem(p); end
                         end
                         H_blks{bi} = fft(htd);
                     end
@@ -329,7 +357,7 @@ for fi = 1:length(fd_list)
                         else
                             hm = h_tvamp_blk(sym_delays+1);
                         end
-                        hn = hm(:).' / sqrt(sum(abs(hm).^2));
+                        hn = hm(:).';
                         htd = zeros(1, blk_fft);
                         for p=1:K_sparse
                             if sym_delays(p)+1<=blk_fft, htd(sym_delays(p)+1)=hn(p); end
@@ -411,19 +439,86 @@ for fi = 1:length(fd_list)
     fprintf('\n');
 end
 
-%% ========== 可视化：Kalman跟踪效果 ========== %%
-% 最后一个fd/SNR的信道跟踪结果
-if exist('h_kal','var') && exist('h_true_paths','var')
-    figure('Position',[100 300 900 400]);
-    for pp = 1:min(3, K_sparse)
-        subplot(1,3,pp);
-        plot(abs(h_true_paths(pp, T+1:end)), 'b', 'LineWidth',1); hold on;
-        plot(abs(h_kal(pp,:)), 'r--', 'LineWidth',1);
-        xlabel('符号'); ylabel('|h|');
-        title(sprintf('径%d(d=%d): 真实 vs Kalman', pp, sym_delays(pp)));
-        legend('真实','Kalman','Location','best'); grid on;
+%% ========== 可视化：BEM(CE)信道估计 vs 真实信道 ========== %%
+if exist('h_blk_paths','var') && exist('H_blks','var')
+    figure('Position',[50 50 1400 700]);
+
+    % 每块H_est频响对比（oracle vs BEM）
+    subplot(2,3,1);
+    bi_show = 1;  % 第1块
+    f_ax = (0:blk_fft-1)*sym_rate/blk_fft/1000;
+    mid1 = blk_starts(bi_show) + round(sym_per_blk/2);
+    mid1 = min(mid1, size(h_blk_paths,2));
+    h_true_b1 = h_blk_paths(:, mid1);
+    htd_true = zeros(1,blk_fft);
+    for p=1:K_sparse, if sym_delays(p)+1<=blk_fft, htd_true(sym_delays(p)+1)=h_true_b1(p); end, end
+    plot(f_ax, 20*log10(abs(fft(htd_true))+1e-10), 'k', 'LineWidth',1.5); hold on;
+    plot(f_ax, 20*log10(abs(H_blks{bi_show})+1e-10), 'b--', 'LineWidth',1);
+    xlabel('频率(kHz)'); ylabel('|H|(dB)'); grid on;
+    title(sprintf('块1频响')); legend('真实','H_{est}','Location','best');
+
+    subplot(2,3,2);
+    bi_show = round(N_blks/2);  % 中间块
+    mid2 = blk_starts(bi_show) + round(sym_per_blk/2);
+    mid2 = min(mid2, size(h_blk_paths,2));
+    h_true_b2 = h_blk_paths(:, mid2);
+    htd_true2 = zeros(1,blk_fft);
+    for p=1:K_sparse, if sym_delays(p)+1<=blk_fft, htd_true2(sym_delays(p)+1)=h_true_b2(p); end, end
+    plot(f_ax, 20*log10(abs(fft(htd_true2))+1e-10), 'k', 'LineWidth',1.5); hold on;
+    plot(f_ax, 20*log10(abs(H_blks{bi_show})+1e-10), 'b--', 'LineWidth',1);
+    xlabel('频率(kHz)'); ylabel('|H|(dB)'); grid on;
+    title(sprintf('块%d频响(中间)', bi_show)); legend('真实','H_{est}');
+
+    subplot(2,3,3);
+    bi_show = N_blks;  % 最后一块
+    mid3 = blk_starts(bi_show) + round(sym_per_blk/2);
+    mid3 = min(mid3, size(h_blk_paths,2));
+    h_true_b3 = h_blk_paths(:, mid3);
+    htd_true3 = zeros(1,blk_fft);
+    for p=1:K_sparse, if sym_delays(p)+1<=blk_fft, htd_true3(sym_delays(p)+1)=h_true_b3(p); end, end
+    plot(f_ax, 20*log10(abs(fft(htd_true3))+1e-10), 'k', 'LineWidth',1.5); hold on;
+    plot(f_ax, 20*log10(abs(H_blks{bi_show})+1e-10), 'b--', 'LineWidth',1);
+    xlabel('频率(kHz)'); ylabel('|H|(dB)'); grid on;
+    title(sprintf('块%d频响(末尾)', N_blks)); legend('真实','H_{est}');
+
+    % 各径幅度随块变化
+    subplot(2,3,4);
+    h_true_per_blk = zeros(K_sparse, N_blks);
+    h_est_per_blk = zeros(K_sparse, N_blks);
+    for bi=1:N_blks
+        mid_bi = blk_starts(bi) + round(sym_per_blk/2);
+        mid_bi = min(mid_bi, size(h_blk_paths,2));
+        h_true_per_blk(:,bi) = h_blk_paths(:, mid_bi);
+        htd_bi = ifft(H_blks{bi});
+        for p=1:K_sparse
+            if sym_delays(p)+1<=blk_fft
+                h_est_per_blk(p,bi) = htd_bi(sym_delays(p)+1);
+            end
+        end
     end
-    sgtitle(sprintf('Kalman信道跟踪 (fd=%dHz, SNR=%ddB)', fd_hz, snr_db));
+    plot(1:N_blks, abs(h_true_per_blk(1,:)), 'k-o', 'LineWidth',1.5, 'MarkerSize',4); hold on;
+    plot(1:N_blks, abs(h_est_per_blk(1,:)), 'b--s', 'LineWidth',1, 'MarkerSize',4);
+    xlabel('块序号'); ylabel('|h_1|'); grid on;
+    title('主径(d=0)逐块幅度'); legend('真实','估计','Location','best');
+
+    subplot(2,3,5);
+    plot(1:N_blks, angle(h_true_per_blk(1,:))*180/pi, 'k-o', 'LineWidth',1.5, 'MarkerSize',4); hold on;
+    plot(1:N_blks, angle(h_est_per_blk(1,:))*180/pi, 'b--s', 'LineWidth',1, 'MarkerSize',4);
+    xlabel('块序号'); ylabel('相位(°)'); grid on;
+    title('主径(d=0)逐块相位');
+
+    % 逐块NMSE
+    subplot(2,3,6);
+    nmse_per_blk = zeros(1, N_blks);
+    for bi=1:N_blks
+        nmse_per_blk(bi) = sum(abs(h_est_per_blk(:,bi)-h_true_per_blk(:,bi)).^2) / ...
+                           sum(abs(h_true_per_blk(:,bi)).^2);
+    end
+    bar(1:N_blks, 10*log10(nmse_per_blk+1e-10));
+    xlabel('块序号'); ylabel('NMSE(dB)'); grid on;
+    title('逐块H_{est} NMSE'); yline(0,'r--','0dB');
+
+    sgtitle(sprintf('BEM(CE)信道估计 vs 真实信道 (fd=%dHz, 最后SNR点)', fd_hz));
 end
 
 fprintf('完成\n');
