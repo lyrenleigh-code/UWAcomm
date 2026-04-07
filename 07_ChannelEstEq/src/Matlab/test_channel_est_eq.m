@@ -614,9 +614,7 @@ for bi=1:N_blks_tc
     x_cp = [ds(end-blk_cp_tc+1:end), ds];
     rc = conv(x_cp, h_sym_eq); rx_cp_clean_tc{bi} = rc(1:length(x_cp));
 end
-H_est_tc = fft(htd_eq, blk_fft_tc);
-[~,pm_tc] = random_interleave(zeros(1,M_tot_tc),codec.interleave_seed);
-
+H_est_tc_cell = repmat({fft(htd_eq, blk_fft_tc)}, 1, N_blks_tc);  % 静态信道各块H相同
 ber_fde = zeros(length(snr_tc_list), length(iter_list_tc));
 
 for si=1:length(snr_tc_list)
@@ -628,28 +626,8 @@ for si=1:length(snr_tc_list)
         Y_blks_tc{bi} = fft(rc_n(blk_cp_tc+1:blk_cp_tc+blk_fft_tc));
     end
     for ii=1:length(iter_list_tc)
-        n_it = iter_list_tc(ii);
-        xb_tc = cell(1,N_blks_tc); vxb_tc = ones(1,N_blks_tc);
-        for bi=1:N_blks_tc, xb_tc{bi}=zeros(1,blk_fft_tc); end
-        for titer=1:n_it
-            LLR_tc = zeros(1, M_tot_tc);
-            for bi=1:N_blks_tc
-                [xt,mu,nvt] = eq_mmse_ic_fde(Y_blks_tc{bi},H_est_tc,xb_tc{bi},vxb_tc(bi),nv_i);
-                le = soft_demapper(xt,mu,nvt,zeros(1,M_blk_tc),'qpsk');
-                LLR_tc((bi-1)*M_blk_tc+1:bi*M_blk_tc) = le;
-            end
-            ld_tc = random_deinterleave(LLR_tc, pm_tc); ld_tc = max(min(ld_tc,30),-30);
-            [~,Lpi_tc,Lpc_tc] = siso_decode_conv(ld_tc,[],codec.gen_polys,codec.constraint_len,codec.decode_mode);
-            if titer < n_it
-                Li_tc = random_interleave(Lpc_tc, codec.interleave_seed);
-                if length(Li_tc)<M_tot_tc, Li_tc=[Li_tc,zeros(1,M_tot_tc-length(Li_tc))]; else, Li_tc=Li_tc(1:M_tot_tc); end
-                for bi=1:N_blks_tc
-                    [xb_tc{bi},vr] = soft_mapper(Li_tc((bi-1)*M_blk_tc+1:bi*M_blk_tc),'qpsk');
-                    vxb_tc(bi) = max(vr, nv_i);
-                end
-            end
-        end
-        bo_tc = double(Lpi_tc>0); nc_tc = min(length(bo_tc), N_info_tc);
+        [bo_tc,~] = turbo_equalizer_scfde_crossblock(Y_blks_tc, H_est_tc_cell, iter_list_tc(ii), nv_i, codec);
+        nc_tc = min(length(bo_tc), N_info_tc);
         ber_fde(si,ii) = mean(bo_tc(1:nc_tc) ~= ib_tc(1:nc_tc));
     end
 end
@@ -753,25 +731,8 @@ for fi = 1:length(fd_list_eq)
             Y_blks_fde{bi}=fft(bs(blk_cp+1:end));
         end
 
-        % BEM导频观测
-        obs_y_f=[]; obs_x_f=[]; obs_t_f=[];
-        for n=max_d+1:train_len_eq
-            xv=zeros(1,K);
-            for p=1:K, idx=n-sym_delays(p); if idx>=1, xv(p)=tr_tv(idx); end, end
-            obs_y_f(end+1)=rx_sym_fde(n); obs_x_f=[obs_x_f;xv]; obs_t_f(end+1)=n;
-        end
-        for pi_i=1:length(pilot_pos_fde)
-            pp=pilot_pos_fde(pi_i);
-            for kk=max_d+1:pilot_len_fde
-                n=pp+kk-1; if n>N_frame_fde, break; end
-                xv=zeros(1,K);
-                for p=1:K, idx=n-sym_delays(p);
-                    if idx>=pp&&idx<pp+pilot_len_fde, xv(p)=pilot_fde(idx-pp+1);
-                    elseif idx>=1&&idx<=train_len_eq, xv(p)=tr_tv(idx); end
-                end
-                if any(xv~=0), obs_y_f(end+1)=rx_sym_fde(n); obs_x_f=[obs_x_f;xv]; obs_t_f(end+1)=n; end
-            end
-        end
+        % BEM导频观测（调用提炼函数）
+        [obs_y_f,obs_x_f,obs_t_f] = build_scattered_obs(rx_sym_fde, tr_tv, pilot_fde, pilot_pos_fde, sym_delays, train_len_eq, N_frame_fde);
         fd_est_i=max(fd_i,0.5);
         h_tv_bems = cell(1,3);  % CE, DCT, DD-BEM
         bem_types_eq = {'ce','dct'};
@@ -791,6 +752,7 @@ for fi = 1:length(fd_list_eq)
         end
 
         for mi=1:N_tv_methods  % 1=oracle, 2=CE, 3=DCT, 4=DD-BEM
+            % 构建每块H_est
             H_blks_i=cell(1,N_blks);
             for bi=1:N_blks
                 mid=blk_starts_fde(bi)+round(sym_per_blk/2);
@@ -801,29 +763,8 @@ for fi = 1:length(fd_list_eq)
                 for p=1:K, if sym_delays(p)+1<=blk_fft, htd(sym_delays(p)+1)=hm(p); end, end
                 H_blks_i{bi}=fft(htd);
             end
-            xb=cell(1,N_blks); vxb=ones(1,N_blks);
-            for bi=1:N_blks, xb{bi}=zeros(1,blk_fft); end
-            [~,pm_fde]=random_interleave(zeros(1,M_tot),codec.interleave_seed);
-            bo_d=[];
-            for titer=1:6
-                LLR_a=zeros(1,M_tot);
-                for bi=1:N_blks
-                    [xt,mu,nvt]=eq_mmse_ic_fde(Y_blks_fde{bi},H_blks_i{bi},xb{bi},vxb(bi),nv_eq_i);
-                    le=soft_demapper(xt,mu,nvt,zeros(1,M_blk),'qpsk');
-                    LLR_a((bi-1)*M_blk+1:bi*M_blk)=le;
-                end
-                ld=random_deinterleave(LLR_a,pm_fde); ld=max(min(ld,30),-30);
-                [~,Lpi,Lpc]=siso_decode_conv(ld,[],codec.gen_polys,codec.constraint_len,codec.decode_mode);
-                bo_d=double(Lpi>0);
-                if titer<6
-                    Li=random_interleave(Lpc,codec.interleave_seed);
-                    if length(Li)<M_tot, Li=[Li,zeros(1,M_tot-length(Li))]; else, Li=Li(1:M_tot); end
-                    for bi=1:N_blks
-                        [xb{bi},vr]=soft_mapper(Li((bi-1)*M_blk+1:bi*M_blk),'qpsk');
-                        vxb(bi)=max(vr,nv_eq_i);
-                    end
-                end
-            end
+            % 调用跨块Turbo均衡函数
+            [bo_d,~] = turbo_equalizer_scfde_crossblock(Y_blks_fde, H_blks_i, 6, nv_eq_i, codec);
             nc_tv=min(length(bo_d),N_info_tv);
             ber_tv(fi,si,mi)=mean(bo_d(1:nc_tv)~=ib_tv(1:nc_tv));
         end
