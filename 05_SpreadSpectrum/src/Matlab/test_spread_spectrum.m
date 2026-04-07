@@ -1,7 +1,8 @@
 %% test_spread_spectrum.m
 % 功能：扩频/解扩模块单元测试
-% 版本：V1.0.0
+% 版本：V1.1.0
 % 运行方式：>> run('test_spread_spectrum.m')
+% V1.1: 增加可视化（扩频码相关特性/DSSS波形/跳频图案）
 
 clc; close all;
 fprintf('========================================\n');
@@ -10,6 +11,7 @@ fprintf('========================================\n\n');
 
 pass_count = 0;
 fail_count = 0;
+vis = struct();  % 可视化数据收集
 
 %% ==================== 一、扩频码生成 ==================== %%
 fprintf('--- 1. 扩频码生成 ---\n\n');
@@ -29,9 +31,11 @@ try
 
     fprintf('[通过] 1.1 m序列(n=7) | L=%d, 自相关峰值=%d, 旁瓣=-1\n', L, L);
     pass_count = pass_count + 1;
+    vis.mseq_acorr = acorr; vis.mseq_L = L; vis.ok_mseq = true;
 catch e
     fprintf('[失败] 1.1 m序列 | %s\n', e.message);
     fail_count = fail_count + 1;
+    vis.ok_mseq = false;
 end
 
 %% 1.2 Gold码长度和互相关限界
@@ -50,9 +54,11 @@ try
 
     fprintf('[通过] 1.2 Gold码(n=7) | 互相关=%d, 限界=%d\n', xcorr_val, t_bound);
     pass_count = pass_count + 1;
+    vis.gold_c1 = c1; vis.gold_c2 = c2; vis.ok_gold = true;
 catch e
     fprintf('[失败] 1.2 Gold码 | %s\n', e.message);
     fail_count = fail_count + 1;
+    vis.ok_gold = false;
 end
 
 %% 1.3 Walsh-Hadamard正交性
@@ -66,9 +72,11 @@ try
 
     fprintf('[通过] 1.3 Walsh-Hadamard(16) | 16x16完全正交\n');
     pass_count = pass_count + 1;
+    vis.walsh = W; vis.ok_walsh = true;
 catch e
     fprintf('[失败] 1.3 Walsh-Hadamard | %s\n', e.message);
     fail_count = fail_count + 1;
+    vis.ok_walsh = false;
 end
 
 %% 1.4 Kasami码集大小和码长
@@ -129,9 +137,14 @@ try
     fprintf('[通过] 2.2 扩频增益 | L=%d(%.1fdB), 输入SNR≈0dB, BER=%.1f%%\n', ...
             L, 10*log10(L), ber*100);
     pass_count = pass_count + 1;
+    vis.dsss_sym_in = symbols_in(1:20); vis.dsss_spread = spread(1:20*L);
+    vis.dsss_noisy = spread(1:20*L) + noise(1:20*L);
+    vis.dsss_sym_out = sym_out(1:20); vis.dsss_code_len = L;
+    vis.ok_dsss = true;
 catch e
     fprintf('[失败] 2.2 扩频增益 | %s\n', e.message);
     fail_count = fail_count + 1;
+    vis.ok_dsss = false;
 end
 
 %% ==================== 三、CSK扩频/解扩 ==================== %%
@@ -389,9 +402,12 @@ try
 
     fprintf('[通过] 6.4 频率分散性 | %d频率均匀度偏差<20%%\n', num_freqs);
     pass_count = pass_count + 1;
+    vis.fh_pattern = pattern(1:100); vis.fh_counts = counts;
+    vis.fh_nfreqs = num_freqs; vis.ok_fh = true;
 catch e
     fprintf('[失败] 6.4 频率分散性 | %s\n', e.message);
     fail_count = fail_count + 1;
+    vis.ok_fh = false;
 end
 
 %% ==================== 七、异常输入 ==================== %%
@@ -420,6 +436,98 @@ catch e
     fprintf('[失败] 6.1 异常输入 | %s\n', e.message);
     fail_count = fail_count + 1;
 end
+
+%% ==================== 可视化（独立于测试） ==================== %%
+
+% --- Figure 1: 扩频码相关特性 --- %
+try
+    if isfield(vis,'ok_mseq') && vis.ok_mseq && isfield(vis,'ok_gold') && vis.ok_gold ...
+            && isfield(vis,'ok_walsh') && vis.ok_walsh
+        figure('Name','扩频码相关特性','NumberTitle','off','Position',[50 80 1200 400]);
+
+        % m序列自相关
+        subplot(1,3,1);
+        stem(0:vis.mseq_L-1, real(vis.mseq_acorr), 'b', 'MarkerSize', 2, 'LineWidth', 0.5);
+        xlabel('延迟 (码片)'); ylabel('自相关值');
+        title(sprintf('m序列自相关 (L=%d)', vis.mseq_L)); grid on;
+
+        % Gold码互相关
+        subplot(1,3,2);
+        xcorr_full = xcorr(vis.gold_c1, vis.gold_c2);
+        stem(-(vis.mseq_L-1):(vis.mseq_L-1), xcorr_full, 'r', 'MarkerSize', 2, 'LineWidth', 0.5);
+        xlabel('延迟 (码片)'); ylabel('互相关值');
+        title('Gold码互相关'); grid on;
+
+        % Walsh-Hadamard正交矩阵
+        subplot(1,3,3);
+        imagesc(vis.walsh * vis.walsh');
+        colorbar; axis equal tight;
+        xlabel('码索引'); ylabel('码索引');
+        title('Walsh W·W'' (应为对角)');
+    end
+catch; end
+
+% --- Figure 2: DSSS扩频/解扩波形 --- %
+try
+    if isfield(vis,'ok_dsss') && vis.ok_dsss
+        figure('Name','DSSS扩频波形','NumberTitle','off','Position',[50 50 1200 600]);
+        L = vis.dsss_code_len;
+        n_show = 5;  % 显示前5个符号
+
+        % 原始符号
+        subplot(4,1,1);
+        stairs(vis.dsss_sym_in(1:n_show), 'b', 'LineWidth', 1.2);
+        xlim([0.5 n_show+0.5]); ylim([-1.5 1.5]);
+        ylabel('幅度'); title('原始符号'); grid on;
+
+        % 扩频后信号
+        subplot(4,1,2);
+        plot(vis.dsss_spread(1:n_show*L), 'b', 'LineWidth', 0.5);
+        xlim([1 n_show*L]); ylim([-1.5 1.5]);
+        ylabel('幅度'); title(sprintf('扩频信号 (码长=%d)', L)); grid on;
+
+        % 加噪后
+        subplot(4,1,3);
+        plot(vis.dsss_noisy(1:n_show*L), 'Color',[0.6 0.3 0], 'LineWidth', 0.5);
+        xlim([1 n_show*L]); ylim([-3 3]);
+        ylabel('幅度'); title('加噪后 (SNR≈0dB)'); grid on;
+
+        % 解扩输出
+        subplot(4,1,4);
+        stem(vis.dsss_sym_out(1:n_show), 'r', 'LineWidth', 1.2, 'MarkerSize', 6);
+        hold on;
+        stairs(vis.dsss_sym_in(1:n_show), 'b--', 'LineWidth', 1);
+        xlim([0.5 n_show+0.5]);
+        legend('解扩输出','原始符号'); ylabel('幅度');
+        title('解扩恢复'); grid on;
+        xlabel('符号索引');
+    end
+catch; end
+
+% --- Figure 3: 跳频图案与频率分布 --- %
+try
+    if isfield(vis,'ok_fh') && vis.ok_fh
+        figure('Name','跳频图案','NumberTitle','off','Position',[80 60 1100 450]);
+
+        % 跳频时频图
+        subplot(1,2,1);
+        scatter(1:length(vis.fh_pattern), vis.fh_pattern, 20, vis.fh_pattern, 'filled');
+        colormap(jet); colorbar;
+        xlabel('跳数(时间)'); ylabel('频率索引');
+        title(sprintf('跳频图案 (%d频率)', vis.fh_nfreqs)); grid on;
+        ylim([-0.5 vis.fh_nfreqs-0.5]);
+
+        % 频率使用分布
+        subplot(1,2,2);
+        bar(0:vis.fh_nfreqs-1, vis.fh_counts, 'FaceColor',[0.3 0.6 0.9]);
+        hold on;
+        expected = sum(vis.fh_counts) / vis.fh_nfreqs;
+        line([-0.5 vis.fh_nfreqs-0.5], [expected expected], 'Color','r','LineStyle','--','LineWidth',1.5);
+        legend('实际次数','理想均匀','Location','best');
+        xlabel('频率索引'); ylabel('出现次数');
+        title('频率使用分布'); grid on;
+    end
+catch; end
 
 %% ==================== 测试汇总 ==================== %%
 fprintf('\n========================================\n');
