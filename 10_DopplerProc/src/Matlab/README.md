@@ -1,6 +1,6 @@
 # 多普勒估计与补偿模块 (DopplerProc)
 
-接收链路中的多普勒处理模块，分为10-1粗多普勒估计+重采样补偿（去CP前）和10-2残余CFO/ICI补偿（均衡后），共14个文件。
+接收链路中的多普勒处理模块，分为10-1粗多普勒估计+重采样补偿（去CP前）和10-2残余CFO/ICI补偿（均衡后），共15个文件。含阵列信道仿真（M阵元ULA）。
 
 ## 对外接口
 
@@ -19,6 +19,7 @@
 | `comp_cfo_rotate` | 残余CFO相位旋转补偿 | y, cfo_hz, fs | y_comp |
 | `comp_ici_matrix` | ICI矩阵补偿（OFDM高速场景） | Y_freq, alpha_res, N_fft | Y_comp |
 | `gen_doppler_channel` | 时变多普勒水声信道模型 | s, fs, alpha, paths, snr, tv | r, channel_info |
+| `gen_uwa_channel_array` | 阵列水声信道(M阵元ULA,精确空间时延) | s, fs, alpha, paths, snr, tv, array | R_array, channel_info |
 
 ## 使用示例
 
@@ -33,6 +34,11 @@
 
 % V7重采样：正alpha直接传入即可补偿压缩
 y_comp = comp_resample_spline(rx, alpha_est, fs, 'fast');
+
+% 阵列信道仿真（M阵元ULA）
+arr = struct('M', 4, 'fc', 12000, 'c', 1500, 'theta', pi/6);
+[R_array, arr_info] = gen_uwa_channel_array(tx, fs, alpha, paths, snr, tv, arr);
+% R_array: 4xN矩阵，每行为一个阵元的接收信号
 ```
 
 ## 内部函数
@@ -40,7 +46,7 @@ y_comp = comp_resample_spline(rx, alpha_est, fs, 'fast');
 辅助/测试函数（不建议外部直接调用）：
 - `cubic_spline_interp.m` — 自实现三次样条插值（Thomas算法，comp_resample_spline accurate模式的底层工具）
 - `plot_doppler_estimation.m` — 估计与补偿结果可视化四格图
-- `test_doppler.m` — 单元测试（12项，覆盖时变信道/CAF/xcorr估计/重采样精度/统一入口/CFO/异常输入）
+- `test_doppler.m` — 单元测试（V2.0: 13项，覆盖时变信道/CAF/xcorr/ZoomFFT估计/重采样/统一入口/CFO/ICI矩阵/阵列信道/异常输入 + 可视化）
 
 ## 依赖关系
 
