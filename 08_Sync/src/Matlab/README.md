@@ -71,7 +71,7 @@ corrected_symbols = info.corrected;
 
 辅助/测试函数（不建议外部直接调用）：
 - `plot_sync_spectrogram.m` — 同步信号时频谱图可视化（LFM/HFM调频信号）
-- `test_sync.m` — 单元测试（V2.0: 23项，覆盖序列生成/同步检测/CFO/细定时/帧回环/多普勒补偿/相位跟踪/异常输入）
+- `test_sync.m` — 单元测试（V2.0: 22项，覆盖序列生成/同步检测/CFO/细定时/帧回环/多普勒补偿/相位跟踪/异常输入 + 可视化）
 
 ## 依赖关系
 
