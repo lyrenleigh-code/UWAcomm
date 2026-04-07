@@ -97,9 +97,24 @@
 - 结果与SC-FDE一致（处理链路相同）
 
 ### ⏳ P3: SC-TDE — 静态通过，时变调试中
-- 静态：Turbo_DFE(31,90) + GAMP信道估计, 0dB起无误码
-- 时变：LE iter1无错误传播+TV-orc ISI消除可行(fd=5Hz=0%)
-- 待解决：Kalman跟踪精度提升 / LE iter1质量提升
+
+**P3-1: 模块07时变信道估计+均衡独立调试** ← 当前焦点
+- 测试文件：`07_ChannelEstEq/src/Matlab/test_tv_eq.m`
+- 纯基带符号级（无RRC/通带/同步），隔离均衡器性能
+- 已验证结果：
+
+| 方法 | fd=1Hz 20dB | fd=5Hz 20dB | 说明 |
+|------|------------|------------|------|
+| Turbo+orc(固定h) | 40.24% | 49.00% | 冻结快照ISI→失败 |
+| LE+TV-orc(每符号真h) | **34.98%** | **0.00%** | LE无错误传播+完美跟踪=可行 |
+| LE+Kalman | 42.14% | 49.90% | Kalman跟踪精度不足 |
+
+- 待解决：Kalman跟踪优化（自适应观测噪声/高置信度更新/分段处理）
+- 或：接受SC-TDE时变性能瓶颈，快变信道推荐SC-FDE
+
+**P3-2: SC-TDE端到端时变集成** — 阻塞于P3-1
+- 模块07均衡方案确定后，集成到端到端通带帧测试
+- 静态已通过：Turbo_DFE(31,90) + GAMP, 0dB起无误码
 
 ### ⬜ P4: OTFS
 - DD域处理（信道circshift模型）
@@ -129,15 +144,23 @@ RX: 09下变频 → 08 sync_detect(无噪声,直达径窗口50样本)
     07 eq_*/12 turbo_equalizer_* → 03解交织 → 02 BCJR → bits
 ```
 
-### 信道估计（模块07）
-- 训练序列→Toeplitz矩阵→稀疏估计(GAMP/VAMP推荐)
-- 估计结果用于：DFE权重初始化 + Turbo ISI消除
-- 静态：固定h_est, 时变：需Kalman或DD跟踪
+### 信道估计（模块07）— 端到端必须使用
+
+**重要原则：端到端仿真必须调用模块07的信道估计函数（ch_est_*），不得使用oracle真实信道（ch_info.h_time）。Oracle仅用于模块级性能基准对比。**
+
+当前状态：
+- SC-FDE/OFDM端到端：⚠️ 当前使用oracle H_est（ch_info.h_time），需改为ch_est_*估计
+- SC-TDE端到端：✅ 静态已使用GAMP估计，时变调试中
+
+信道估计方式：
+- 训练序列→Toeplitz矩阵→稀疏估计（GAMP/Turbo-VAMP推荐）
+- 估计结果用于：DFE权重初始化 + LMMSE-IC频域均衡 + Turbo ISI消除
+- 静态：固定h_est，时变：需分块估计或Kalman跟踪
 
 ### Turbo均衡
 - SC-FDE/OFDM: 跨块LMMSE-IC + DD信道更新 + BCJR (turbo_equalizer_scfde_crossblock)
 - SC-TDE: DFE(31,90) iter1 + 软ISI消除 iter2+ (turbo_equalizer_sctde V8)
-- 时变SC-TDE: LE iter1(无错误传播) + Kalman/TV ISI消除(待完善)
+- 时变SC-TDE: 分块频域均衡(LMMSE-IC) + Kalman信道跟踪(待完善)
 
 ### 多普勒补偿
 - comp_resample_spline V7: `pos=(1:N)/(1+alpha)`, 正alpha=补偿压缩
@@ -145,12 +168,24 @@ RX: 09下变频 → 08 sync_detect(无噪声,直达径窗口50样本)
 
 ---
 
+## 待办事宜
+
+| 优先级 | 任务 | 状态 | 说明 |
+|--------|------|------|------|
+| **P3-1** | **07模块时变均衡调试** | **调试中** | test_tv_eq.m: 分块FDE+Kalman跟踪 |
+| **P1/P2** | **SC-FDE/OFDM端到端改用ch_est_*估计** | **待改** | 当前用oracle,需改为GAMP/训练估计 |
+| P3-2 | SC-TDE端到端时变集成 | 阻塞于P3-1 | 07方案确定后集成 |
+| P4 | OTFS端到端 | 待P3 | DD域处理+通带 |
+| P5 | DSSS端到端 | 待P4 | 扩频+Rake |
+| P6 | FH-MFSK端到端 | 待P5 | 跳频+能量检测 |
+| — | framework v6 | 待P1-P6 | 统一架构图更新 |
+
 ## 已知问题
 
 | 问题 | 状态 | 说明 |
 |------|------|------|
-| SC-TDE时变Kalman跟踪 | **调试中** | LE软判决质量不足→Kalman偏移, 需更鲁棒方案 |
-| DFE错误传播 | 已分析 | 长时延(90sym)频选+时变→DFE数据段发散, 改用LE iter1 |
+| SC-TDE时变Kalman跟踪 | **P3-1调试中** | LE软判决质量~30%BER→Kalman偏移 |
+| DFE错误传播 | 已分析 | 90sym频选+时变→DFE发散, 已改用LE iter1 |
 | 多普勒估计精度 | 搁置 | 多径下xcorr虚假峰, 独立课题 |
 | OTFS通带实现 | 搁置 | DD域二维脉冲成形, 需专项 |
 | framework v5→v6升级 | 待完成 | P1-P6完成后统一更新 |
