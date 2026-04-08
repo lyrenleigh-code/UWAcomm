@@ -353,7 +353,6 @@ for fi = 1:size(fading_cfgs,1)
                     data_eq = zeros(1, N_dsym);
                     for n = 1:N_dsym
                         nn = T + n;
-                        % 已知位置ISI消除
                         isi_known = 0;
                         isi_unknown_pwr = 0;
                         for pp = 1:P_paths
@@ -364,18 +363,15 @@ for fi = 1:size(fading_cfgs,1)
                                 if known_map(idx)
                                     isi_known = isi_known + h_tv(pp, nn) * tx_sym(idx);
                                 else
-                                    % 未知位置ISI功率累加（建模为额外噪声）
                                     isi_unknown_pwr = isi_unknown_pwr + abs(h_tv(pp, nn))^2;
                                 end
                             end
                         end
                         h0_n = h_tv(1, nn);
                         rx_ic = rx_sym_recv(nn) - isi_known;
-                        % MMSE：主径信号 vs (AWGN噪声+残余ISI)
                         nv_total = nv_eq + isi_unknown_pwr;
                         data_eq(n) = conj(h0_n) * rx_ic / (abs(h0_n)^2 + nv_total);
                     end
-                    % 从训练段估计post-EQ噪声+残余ISI方差
                     train_eq = data_eq(1:min(T, length(data_eq)));
                     train_ref = training(1:length(train_eq));
                     nv_post = max(var(train_eq - train_ref), nv_eq * 0.1);
@@ -433,7 +429,7 @@ for fi = 1:size(fading_cfgs,1)
                             sym_delays, fd_hz, sym_rate, nv_eq, 'dct', bem_opts);
                     end
 
-                    % per-symbol ISI消除 + 全帧MMSE
+                    % per-symbol 全ISI消除 + 单抽头MMSE
                     data_eq = zeros(1, N_dsym);
                     for n = 1:N_dsym
                         nn = T + n;
@@ -451,7 +447,6 @@ for fi = 1:size(fading_cfgs,1)
                         data_eq(n) = conj(h0_n) * rx_ic / ...
                             (abs(h0_n)^2 + nv_eq / max(1 - var_x_avg, 0.01));
                     end
-                    % 从训练段估计post-EQ噪声+残余ISI方差（防高SNR时LLR过度自信）
                     train_eq = data_eq(1:min(T, length(data_eq)));
                     train_ref = training(1:length(train_eq));
                     nv_post = max(var(train_eq - train_ref), nv_eq * 0.1);
