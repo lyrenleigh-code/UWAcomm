@@ -32,7 +32,7 @@ sps = 8; sym_rate = 6000; fs = sym_rate*sps; fc = 12000;
 rolloff = 0.35; span_rrc = 6;
 codec = struct('gen_polys',[7,5], 'constraint_len',3, 'interleave_seed',7, 'decode_mode','max-log');
 n_code = 2; mem = codec.constraint_len - 1;
-turbo_iter = 6;
+turbo_iter = 10;  % P3-2优化：从6增到10次
 % DFE(31,90): num_fb覆盖max_delay=90，配合h_est初始化
 eq_params = struct('num_ff',31, 'num_fb',90, 'lambda',0.998, ...
     'pll', struct('enable',true,'Kp',0.01,'Ki',0.005));
@@ -433,7 +433,7 @@ for fi = 1:size(fading_cfgs,1)
                             sym_delays, fd_hz, sym_rate, nv_eq, 'dct', bem_opts);
                     end
 
-                    % per-symbol ISI消除 + 单抽头MMSE
+                    % per-symbol ISI消除 + 全帧MMSE
                     data_eq = zeros(1, N_dsym);
                     for n = 1:N_dsym
                         nn = T + n;
@@ -448,7 +448,6 @@ for fi = 1:size(fading_cfgs,1)
                         end
                         h0_n = h_tv(1, nn);
                         rx_ic = rx_sym_recv(nn) - isi;
-                        % MMSE单抽头（考虑软符号残余方差）
                         data_eq(n) = conj(h0_n) * rx_ic / ...
                             (abs(h0_n)^2 + nv_eq / max(1 - var_x_avg, 0.01));
                     end
