@@ -36,12 +36,21 @@ gains = gains_raw / sqrt(sum(abs(gains_raw).^2));
 
 %% ========== 帧参数 ========== %%
 bw_lfm = sym_rate * (1 + rolloff);
-lfm_dur = 0.05;
+preamble_dur = 0.05;
 f_lo = fc - bw_lfm/2;  f_hi = fc + bw_lfm/2;
-[LFM_pb, ~] = gen_lfm(fs, lfm_dur, f_lo, f_hi);
-N_lfm = length(LFM_pb);
-t_lfm = (0:N_lfm-1)/fs;
-LFM_bb = exp(1j*2*pi*(-bw_lfm/2*t_lfm + 0.5*bw_lfm/lfm_dur*t_lfm.^2));
+% 使用HFM前导码（Doppler不变性：时间压缩仅引起频移，匹配滤波峰值鲁棒）
+[HFM_pb, ~] = gen_hfm(fs, preamble_dur, f_lo, f_hi);
+N_preamble = length(HFM_pb);
+t_pre = (0:N_preamble-1)/fs;
+% HFM基带版本：从通带相位中减去载频
+f0 = f_lo; f1 = f_hi; T_pre = preamble_dur;
+if abs(f1-f0) < 1e-6
+    phase_hfm = 2*pi*f0*t_pre;
+else
+    k_hfm = f0*f1*T_pre/(f1-f0);
+    phase_hfm = -2*pi*k_hfm*log(1 - (f1-f0)/f1*t_pre/T_pre);
+end
+HFM_bb = exp(1j*(phase_hfm - 2*pi*fc*t_pre));
 guard_samp = max(sym_delays) * sps + 80;
 
 snr_list = [5, 10, 15, 20];
@@ -52,7 +61,7 @@ fading_cfgs = {
 };
 
 fprintf('通带: fs=%dHz, fc=%dHz, LFM=%.0f~%.0fHz\n', fs, fc, f_lo, f_hi);
-fprintf('帧: [LFM_pb|guard|blocks(RRC→UC)|guard|LFM_pb] 全实数\n');
+fprintf('帧: [HFM_pb|guard|blocks(RRC→UC)|guard|HFM_pb] 全实数\n');
 fprintf('同步: 无噪声信号检测(per fading), 多普勒: 已知alpha补偿(-alpha)\n\n');
 
 ber_matrix = zeros(size(fading_cfgs,1), length(snr_list));
@@ -95,14 +104,14 @@ for fi = 1:size(fading_cfgs,1)
 
     % 功率归一化
     data_rms = sqrt(mean(data_pb.^2));
-    lfm_scale = data_rms / sqrt(mean(LFM_pb.^2));
-    LFM_pb_n = LFM_pb * lfm_scale;
-    LFM_bb_n = LFM_bb * lfm_scale;
+    lfm_scale = data_rms / sqrt(mean(HFM_pb.^2));
+    HFM_pb_n = HFM_pb * lfm_scale;
+    HFM_bb_n = HFM_bb * lfm_scale;
 
     % 帧组装
-    frame_bb = [LFM_bb_n, zeros(1,guard_samp), shaped_bb, zeros(1,guard_samp), LFM_bb_n];
-    data_offset = N_lfm + guard_samp;
-    T_v = (N_lfm + guard_samp + N_shaped + guard_samp) / fs;
+    frame_bb = [HFM_bb_n, zeros(1,guard_samp), shaped_bb, zeros(1,guard_samp), HFM_bb_n];
+    data_offset = N_preamble + guard_samp;
+    T_v = (N_preamble + guard_samp + N_shaped + guard_samp) / fs;
 
     %% ===== 信道（固定，不随SNR变）===== %%
     ch_params = struct('fs',fs,'delay_profile','custom',...
@@ -130,12 +139,21 @@ for fi = 1:size(fading_cfgs,1)
         % 1. 下变频（有噪声信号）
         [bb_raw,~] = downconvert(rx_pb, fs, fc, bw_lfm);
 
-        % 2. 多普勒估计（有噪声信号）
+        % 2. 多普勒估计（有噪声信号，CAF二维搜索——两级精度）
         alpha_est = 0;
         if abs(dop_rate) > 1e-10
             try
-                [atmp,~,~] = est_doppler_xcorr(bb_raw, LFM_bb_n, T_v, fs, fc);
-                if ~isempty(atmp) && isfinite(atmp), alpha_est = atmp; end
+                alpha_max = 0.005;
+                % 粗搜索
+                [a_coarse, ~, ~] = est_doppler_caf(bb_raw, HFM_bb_n, fs, [-alpha_max, alpha_max], 5e-5);
+                % 细搜索（粗结果附近±2步长）
+                [a_fine, ~, ~] = est_doppler_caf(bb_raw, HFM_bb_n, fs, ...
+                    [a_coarse-1e-4, a_coarse+1e-4], 1e-5);
+                if ~isempty(a_fine) && isfinite(a_fine)
+                    % CAF在基带信号上估计的alpha与通带约定反号
+                    % 原因：下变频后信号的时间压缩在基带表现为扩展
+                    alpha_est = -a_fine;
+                end
             catch; end
         end
 
@@ -147,7 +165,7 @@ for fi = 1:size(fading_cfgs,1)
         end
 
         % 4. 同步检测（有噪声+补偿后信号，首达径检测）
-        [~, ~, corr_noisy] = sync_detect(bb_comp, LFM_bb_n, 0.3);
+        [~, ~, corr_noisy] = sync_detect(bb_comp, HFM_bb_n, 0.3);
         dw = min(50, round(length(corr_noisy)/2));
         [max_peak, max_pos] = max(corr_noisy(1:dw));
         first_idx = find(corr_noisy(1:dw) > 0.6*max_peak, 1, 'first');
