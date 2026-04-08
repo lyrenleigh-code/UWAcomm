@@ -2,18 +2,202 @@
 
 打散突发错误以提升信道编码纠错效果，覆盖块交织、随机交织和卷积交织三种方案，广泛用于Turbo迭代回环。
 
-## 对外接口
+## 对外接口列表
 
 其他模块/端到端应调用的函数：
 
-| 函数 | 功能 | 输入 | 输出 |
-|------|------|------|------|
-| random_interleave | 基于seed的伪随机置换交织 | data, seed | interleaved, perm |
-| random_deinterleave | 随机交织逆操作 | data, perm | deinterleaved |
-| block_interleave | 块交织（按行写入、按列读出） | data, num_rows, num_cols | interleaved, num_rows, num_cols, pad_len |
-| block_deinterleave | 块解交织（逆操作） | data, num_rows, num_cols, pad_len | deinterleaved |
-| conv_interleave | 卷积交织（延迟递增移位寄存器） | data, num_branches, branch_delay | interleaved, num_branches, branch_delay |
-| conv_deinterleave | 卷积解交织（互补延迟） | data, num_branches, branch_delay | deinterleaved |
+### random_interleave
+
+**功能**：基于伪随机置换对数据序列进行交织（Turbo均衡中最常用）
+
+| 参数方向 | 参数名 | 类型 | 含义 | 默认值 |
+|---------|--------|------|------|--------|
+| 输入 | data | 1xN 数值数组 | 待交织的数据序列 | 无（必填） |
+| 输入 | seed | 非负整数 | 随机种子（编解码须一致） | 0 |
+| 输出 | interleaved | 1xN 数组 | 交织后的数据序列（= data(perm)） | — |
+| 输出 | perm | 1xN 数组 | 置换索引，需传递给random_deinterleave | — |
+
+### random_deinterleave
+
+**功能**：随机交织的逆操作
+
+| 参数方向 | 参数名 | 类型 | 含义 | 默认值 |
+|---------|--------|------|------|--------|
+| 输入 | data | 1xN 数值数组 | 待解交织的数据序列 | 无（必填） |
+| 输入 | perm | 1xN 数组 | 置换索引（由random_interleave生成） | 无（必填） |
+| 输出 | deinterleaved | 1xN 数组 | 解交织后的数据序列 | — |
+
+### block_interleave
+
+**功能**：块交织器——按行写入矩阵、按列读出，将突发错误打散
+
+| 参数方向 | 参数名 | 类型 | 含义 | 默认值 |
+|---------|--------|------|------|--------|
+| 输入 | data | 1xN 数值数组 | 待交织的数据序列 | 无（必填） |
+| 输入 | num_rows | 正整数 | 交织矩阵行数 | 自动（ceil(sqrt(N))） |
+| 输入 | num_cols | 正整数 | 交织矩阵列数 | 自动（ceil(N/num_rows)） |
+| 输出 | interleaved | 1x(num_rows*num_cols) 数组 | 交织后的数据序列 | — |
+| 输出 | num_rows | 正整数 | 实际行数（供解交织用） | — |
+| 输出 | num_cols | 正整数 | 实际列数（供解交织用） | — |
+| 输出 | pad_len | 非负整数 | 补零个数（供解交织截断用） | — |
+
+### block_deinterleave
+
+**功能**：块解交织器——按列写入矩阵、按行读出
+
+| 参数方向 | 参数名 | 类型 | 含义 | 默认值 |
+|---------|--------|------|------|--------|
+| 输入 | data | 1xM 数组 | 待解交织的数据（M=num_rows*num_cols） | 无（必填） |
+| 输入 | num_rows | 正整数 | 交织矩阵行数（须与交织时一致） | 无（必填） |
+| 输入 | num_cols | 正整数 | 交织矩阵列数（须与交织时一致） | 无（必填） |
+| 输入 | pad_len | 非负整数 | 交织时补零个数 | 0 |
+| 输出 | deinterleaved | 1xN 数组 | 解交织后的数据（N=M-pad_len） | — |
+
+### conv_interleave
+
+**功能**：卷积交织器——基于延迟递增的移位寄存器组，适合流式处理
+
+| 参数方向 | 参数名 | 类型 | 含义 | 默认值 |
+|---------|--------|------|------|--------|
+| 输入 | data | 1xN 数值数组 | 待交织的数据序列 | 无（必填） |
+| 输入 | num_branches | 正整数(>=2) | 支路数B | 6 |
+| 输入 | branch_delay | 正整数 | 支路延迟增量M（第i支路延迟=(i-1)*M） | 12 |
+| 输出 | interleaved | 1xN 数组 | 交织后的数据序列 | — |
+| 输出 | num_branches | 正整数 | 实际支路数（供解交织用） | — |
+| 输出 | branch_delay | 正整数 | 实际延迟增量（供解交织用） | — |
+
+### conv_deinterleave
+
+**功能**：卷积解交织器——延迟互补
+
+| 参数方向 | 参数名 | 类型 | 含义 | 默认值 |
+|---------|--------|------|------|--------|
+| 输入 | data | 1xN 数值数组 | 待解交织的数据序列 | 无（必填） |
+| 输入 | num_branches | 正整数 | 支路数（须与交织时一致） | 无（必填） |
+| 输入 | branch_delay | 正整数 | 延迟增量（须与交织时一致） | 无（必填） |
+| 输出 | deinterleaved | 1xN 数组 | 解交织后的数据序列 | — |
+
+## 内部函数接口列表
+
+以下为辅助函数，不建议外部直接调用：
+
+### plot_burst_scatter.m
+
+**功能**：突发错误打散效果可视化，交织前后错误位置分布对比
+
+| 参数方向 | 参数名 | 类型 | 含义 | 默认值 |
+|---------|--------|------|------|--------|
+| 输入 | error_before | 1xN 逻辑/0-1数组 | 交织前错误位置（1=错误） | 无（必填） |
+| 输入 | error_after | 1xN 逻辑/0-1数组 | 交织后错误位置 | 无（必填） |
+| 输入 | title_str | 字符串 | 图标题 | 'Burst Error Scatter' |
+
+### max_consecutive（plot_burst_scatter.m内部）
+
+**功能**：计算二值序列中最大连续1的长度
+
+### test_interleaving.m
+
+**功能**：交织/解交织模块单元测试（19项）
+
+## 核心算法技术描述
+
+### 块交织
+
+**算法原理**：将输入数据按行写入 R x C 矩阵，再按列读出。长度为B的突发错误在输出中被分散到B个不同位置，相邻错误间隔至少R个符号。
+
+**关键公式**：
+
+写入位置（按行）：
+
+```
+matrix(floor((i-1)/C)+1, mod(i-1,C)+1) = data(i),  i = 1,...,N
+```
+
+读出位置（按列）：
+
+```
+interleaved(k) = matrix(:) 按列展开,  k = 1,...,R*C
+```
+
+交织深度 = num_rows，突发长度B的错误被分散为间隔至少R的单个错误。
+
+不足 R*C 个数据时末尾补零，解交织后截断。
+
+**参数选择依据**：
+- num_rows（交织深度）：应大于预期最大突发错误长度
+- num_cols：自动计算或手动指定
+- 未指定时取近似方阵：num_rows = ceil(sqrt(N))
+
+**适用条件与局限性**：
+- 适用：突发错误信道，错误长度已知或有上界
+- 局限：引入R*C-N个补零开销；固定交织模式可能被特定错误模式穿透
+
+### 随机交织
+
+**算法原理**：使用伪随机数生成器产生1:N的随机置换，将数据按此置换重排。解交织使用逆置换恢复。
+
+**关键公式**：
+
+交织：
+
+```
+interleaved(k) = data(perm(k)),  k = 1,...,N
+```
+
+逆置换：
+
+```
+deperm(perm(k)) = k,  k = 1,...,N
+deinterleaved(k) = data_intlv(deperm(k))
+```
+
+**参数选择依据**：
+- seed：同一seed和数据长度始终产生相同置换，编解码须一致
+- 内部保存/恢复rng状态，不污染全局随机序列
+
+**适用条件与局限性**：
+- 适用：Turbo码/Turbo均衡中的交织器（随机交织对迭代译码性能最优）
+- 适用：比特交织编码调制(BICM)
+- 局限：需传递perm索引或seed，接收端须完全一致
+- 支持任意数据类型（整数、浮点LLR软值等）
+
+### 卷积交织
+
+**算法原理**：B路移位寄存器组，第i支路(i=0,...,B-1)延迟为i*M个符号。输入符号按轮转分配到各支路。解交织器使用互补延迟：第i支路延迟为(B-1-i)*M。
+
+**关键公式**：
+
+交织器第i支路延迟：
+
+```
+D_intlv(i) = i * M,  i = 0, 1, ..., B-1
+```
+
+解交织器第i支路延迟：
+
+```
+D_deintlv(i) = (B-1-i) * M
+```
+
+总固定延迟（交织+解交织）：
+
+```
+D_total = (B-1) * M = 常数
+```
+
+有效数据起始位置（跳过零值过渡段）：
+
+```
+valid_start = (B-1) * M * B + 1
+```
+
+**参数选择依据**：
+- num_branches(B)：越大交织深度越深，但过渡段延迟越长
+- branch_delay(M)：最小突发错误打散间隔为M
+
+**适用条件与局限性**：
+- 适用：流式传输场景（无需等整块数据到齐）
+- 局限：前端输出包含零值过渡段，需跳过；总延迟为(B-1)*M*B个样本
 
 ## 使用示例
 
@@ -26,13 +210,12 @@ deintlv = random_deinterleave(intlv, perm);
 %% 块交织
 [intlv, nr, nc, pl] = block_interleave(data, 3, 4);
 deintlv = block_deinterleave(intlv, nr, nc, pl);
+
+%% 卷积交织
+[intlv, B, M] = conv_interleave(data, 4, 3);
+deintlv = conv_deinterleave(intlv, B, M);
+% 注意：交织+解交织引入固定延迟，有效段需偏移
 ```
-
-## 内部函数
-
-辅助/测试函数（不建议外部直接调用）：
-- plot_burst_scatter.m -- 突发错误打散效果可视化
-- test_interleaving.m -- 单元测试（19项），覆盖块交织、随机交织、卷积交织、异常输入和Turbo码集成
 
 ## 依赖关系
 
@@ -41,3 +224,31 @@ deintlv = block_deinterleave(intlv, nr, nc, pl);
 - 被Turbo均衡迭代回环调用（交织/解交织外信息）
 - 上游：模块02（信道编码）输出的编码比特流
 - 下游：模块04（符号映射）接收交织后比特流
+- test_interleaving.m 依赖模块02路径（Turbo集成验证）
+
+## 测试覆盖 (test_interleaving.m V1.0.0, 19项)
+
+| 编号 | 测试名称 | 断言条件 | 说明 |
+|------|---------|---------|------|
+| 1.1 | 指定行列(3x4)回环 | isequal(deintlv, data), pl==0, intlv==[1 5 9 2 6 10 3 7 11 4 8 12] | 交织顺序和解交织均正确 |
+| 1.2 | 自动尺寸(100元素) | isequal(deintlv, data), nr*nc>=100 | 自动计算矩阵尺寸 |
+| 1.3 | 仅指定行数=5 | isequal(deintlv, data), nr==5 | 列数自动计算 |
+| 1.4 | 补零交织 | isequal(deintlv, data), pl==2 | 10元素填4x3矩阵补2零 |
+| 1.5 | 突发错误打散 | 交织后最大连续错误 < 6 | 6位突发错误被分散 |
+| 2.1 | 随机交织回环 | isequal(deintlv, data), ~isequal(intlv, data) | 解交织还原，交织后不同于原始 |
+| 2.2 | seed确定性 | 同seed同结果, 不同seed不同结果 | 伪随机置换的确定性 |
+| 2.3 | 全局rng保护 | 调用前后rand(1,5)相同 | 不污染全局随机状态 |
+| 2.4 | 置换有效性 | length(perm)==200, sort(perm)==1:200 | 置换为1:N的有效排列 |
+| 2.5 | 软值交织 | max(abs(deintlv - data)) < 1e-12 | 浮点精度无损失 |
+| 3.1 | 卷积交织回环 | 有效段 isequal(deintlv_valid, data_valid) | B=4,M=3，跳过过渡段后一致 |
+| 3.2 | 第1支路直通 | intlv(1:B:end) == data(1:B:end) | 第1支路延迟为0 |
+| 3.3 | 大数据量(5000) | 有效段解交织一致 | B=4,M=6，5000元素 |
+| 3.4 | 数据长度保持 | length(intlv)==50 | 卷积交织不改变数据长度 |
+| 4.1 | 空输入拒绝 | 6个函数对[]均报错 | 全部交织/解交织函数 |
+| 4.2 | 参数不匹配拒绝 | 块长度错误报错, 置换长度错误报错 | 2种不匹配均被捕获 |
+| 5.1 | Turbo码集成验证 | isequal(decoded, msg) | 更新交织模块后Turbo码回环正确 |
+
+## 可视化说明
+
+- **plot_burst_scatter.m**：生成2子图figure，上图为交织前错误位置分布（红色stem），下图为交织后错误位置分布（蓝色stem），标题含错误数和最大连续错误长度
+- test_interleaving.m 无独立figure输出（纯数值验证测试）
