@@ -190,7 +190,17 @@ for fi = 1:size(fading_cfgs,1)
     end
     [~, ~, corr_clean] = sync_detect(bb_clean_comp, LFM_bb_n, 0.3);
     dw = min(50, round(length(corr_clean)/2));
-    [sync_peak_clean, sync_pos_fixed] = max(corr_clean(1:dw));
+    [max_peak, max_pos] = max(corr_clean(1:dw));
+    % 首达径检测：找第一个超过最强峰60%的位置（避免锁定多径回波）
+    first_thresh = 0.6 * max_peak;
+    first_idx = find(corr_clean(1:dw) > first_thresh, 1, 'first');
+    if ~isempty(first_idx)
+        sync_pos_fixed = first_idx;
+        sync_peak_clean = corr_clean(first_idx);
+    else
+        sync_pos_fixed = max_pos;
+        sync_peak_clean = max_peak;
+    end
 
     % 多普勒估计（无噪声）
     alpha_est_clean = 0;
@@ -214,7 +224,7 @@ for fi = 1:size(fading_cfgs,1)
         rng(300+fi*1000+si*100);
         rx_pb = rx_pb_clean + sqrt(noise_var)*randn(size(rx_pb_clean));
 
-        % 下变频 + 多普勒补偿
+        % 下变频 + 多普勒重采样补偿
         [bb_raw,~] = downconvert(rx_pb, fs, fc, bw_lfm);
         if abs(dop_rate) > 1e-10
             bb_comp = comp_resample_spline(bb_raw, dop_rate, fs, 'fast');
@@ -250,6 +260,14 @@ for fi = 1:size(fading_cfgs,1)
         N_dsym = N_tx - T;
         nv_eq = max(noise_var, 1e-10);
         P_paths = length(sym_delays);
+
+        % 残余CFO补偿（符号率，不影响sync）
+        % 重采样去时间压缩后，基带仍残留 alpha*fc Hz 频偏
+        if abs(dop_rate) > 1e-10
+            cfo_res_hz = dop_rate * fc;  % 残余CFO (Hz)
+            t_sym_vec = (0:length(rx_sym_recv)-1) / sym_rate;
+            rx_sym_recv = rx_sym_recv .* exp(-1j*2*pi*cfo_res_hz*t_sym_vec);
+        end
 
         if strcmpi(ftype, 'static')
             %% === 静态：GAMP估计 + 标准Turbo（不变）===
