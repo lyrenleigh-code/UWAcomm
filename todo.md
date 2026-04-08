@@ -14,7 +14,7 @@
 | MATLAB函数文件 | 173个 |
 | 代码总行数 | 20,662行 |
 | 文档文件(md+html) | 27个 |
-| Git提交数 | 150次 |
+| Git提交数 | 156次 |
 | 模块数 | 13个（12个算法模块 + 1个集成模块） |
 
 ---
@@ -35,7 +35,7 @@
 | 10 多普勒处理 | `10_DopplerProc/` | 15 | ✅ comp_resample V7, gen_uwa_channel_array V1.0, 13项测试+可视化(V2.0) |
 | 11 阵列预处理 | `11_ArrayProc/` | 8 | ✅ |
 | 12 Turbo迭代调度 | `12_IterativeProc/` | 7 | ✅ V8(DFE iter1)+跨块版本 |
-| 13 端到端仿真 | `13_SourceCode/` | 12 | P1+P2完成, P3调试中 |
+| 13 端到端仿真 | `13_SourceCode/` | 12 | P1+P2+P3完成(static+fd1Hz 0%, fd5Hz 5-15%) |
 
 ---
 
@@ -161,15 +161,16 @@
 
 ### ✅ P1: SC-FDE — 完成
 ### ✅ P2: OFDM — 完成
-### ⏳ P3: SC-TDE — 静态通过，时变方案确定
+### ✅ P3: SC-TDE — 静态+时变均通过
 
 **P3-1: 模块07时变均衡验证** — ✅ 已完成
 - BEM(CE/DCT)+散布导频+RRC+分块LMMSE-IC → fd≤5Hz 5dB+ 0%BER
 - DD-BEM新增，低fd下额外2-8dB NMSE增益
 
-**P3-2: SC-TDE端到端时变集成** — 待做
-- 方案：BEM(DCT)信道估计 + RRC过采样 + 分块LMMSE-IC
-- 注意：长时延信道下DFE不适用，推荐FDE方式
+**P3-2: SC-TDE端到端时变集成** — ✅ V4.2完成
+- 方案：BEM(DCT)+散布导频+MMSE ISI消除(TDE方案)
+- 关键修复：首达径sync检测+残余CFO补偿+MMSE(ISI建模为噪声)
+- static: 0% | fd=1Hz: 0% | fd=5Hz: 15/11/7/5% @5/10/15/20dB
 
 ### ⬜ P4: OTFS — 待P3
 ### ⬜ P5: DSSS — 待P4
@@ -202,8 +203,8 @@
 
 | 优先级 | 任务 | 状态 | 说明 |
 |--------|------|------|------|
-| **P3-2** | **SC-TDE端到端时变集成** | **待做** | BEM(DCT)+RRC+LMMSE-IC |
 | **P1/P2** | **SC-FDE/OFDM端到端改用BEM估计** | **待改** | 当前用oracle,需改为ch_est_bem |
+| P3-2 | fd=5Hz低SNR优化 | 可选 | 增Turbo迭代/iter2+ MMSE精化/导频密度调整 |
 | 07 | 测试运行速度优化 | 待优化 | 4fd×7SNR×4方法=112次Turbo，需减少或并行化 |
 | 07 | fd=10Hz BER非单调问题 | 待分析 | oracle也非零→接近系统ICI极限 |
 | P4 | OTFS端到端 | 待P3 | DD域处理+通带 |
