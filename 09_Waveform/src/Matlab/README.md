@@ -118,45 +118,34 @@
 #### 1a. 升余弦滤波器（RC）
 
 **关键公式**:
-```
-h_RC(t) = sinc(t/T) * cos(pi*beta*t/T) / (1 - (2*beta*t/T)^2)
+$$h_{\text{RC}}(t) = \text{sinc}\!\left(\frac{t}{T}\right) \cdot \frac{\cos\!\left(\frac{\pi \beta t}{T}\right)}{1 - \left(\frac{2\beta t}{T}\right)^2}$$
 
-其中:
-  T     = 符号周期
-  beta  = 滚降系数 (0~1)
-  带宽  = (1+beta) / (2T)
-```
+其中: $T$ = 符号周期，$\beta$ = 滚降系数 (0~1)，带宽 $= (1+\beta)/(2T)$。
 
 **特性**: 在整数符号间隔处满足Nyquist零ISI条件 h(nT)=0 (n!=0)。
 
 #### 1b. 根升余弦滤波器（RRC）
 
 **关键公式**:
-```
-h_RRC(0)              = 1 - beta + 4*beta/pi
-h_RRC(+/-1/(4*beta))  = (beta/sqrt(2)) * [(1+2/pi)*sin(pi/(4*beta)) + (1-2/pi)*cos(pi/(4*beta))]
-h_RRC(t) = [sin(pi*t*(1-beta)) + 4*beta*t*cos(pi*t*(1+beta))]
-           / [pi*t*(1-(4*beta*t)^2)]
-```
+$$h_{\text{RRC}}(0) = 1 - \beta + \frac{4\beta}{\pi}$$
+
+$$h_{\text{RRC}}\!\left(\pm\frac{1}{4\beta}\right) = \frac{\beta}{\sqrt{2}} \left[\left(1+\frac{2}{\pi}\right)\sin\!\left(\frac{\pi}{4\beta}\right) + \left(1-\frac{2}{\pi}\right)\cos\!\left(\frac{\pi}{4\beta}\right)\right]$$
+
+$$h_{\text{RRC}}(t) = \frac{\sin\!\left(\pi t(1-\beta)\right) + 4\beta t \cos\!\left(\pi t(1+\beta)\right)}{\pi t \left(1 - (4\beta t)^2\right)}$$
 
 **关键性质**: RRC发 + RRC收（匹配滤波）= RC，级联后满足零ISI条件。单独的RRC不满足零ISI。
 
 #### 1c. 矩形脉冲（rect）
 
-```
-h(t) = 1,  |t| <= T/2
-       0,  otherwise
-```
+$$h(t) = \begin{cases} 1, & |t| \le T/2 \\ 0, & \text{otherwise} \end{cases}$$
 
 最简单的零阶保持成形，带宽无限大（sinc频谱），ISI最差。
 
 #### 1d. 高斯脉冲（gauss）
 
-```
-h(t) = sqrt(2*pi) * alpha * exp(-2*(pi*alpha*t)^2)
+$$h(t) = \sqrt{2\pi}\;\alpha \cdot \exp\!\left(-2(\pi \alpha t)^2\right)$$
 
-alpha = sqrt(ln2 / 2) / BT
-```
+$$\alpha = \frac{\sqrt{\ln 2 / 2}}{BT}$$
 
 **参数选择**: BT积越小带宽越窄但ISI越大。GMSK用BT=0.3，典型语音FSK用BT=0.5。
 
@@ -172,15 +161,13 @@ alpha = sqrt(ln2 / 2) / BT
 **原理**: 接收端使用发端脉冲成形滤波器的时间反转共轭作为匹配滤波器，最大化输出SNR。
 
 **关键公式**:
-```
-h_MF(t) = conj(h_TX(-t))
+$$h_{\text{MF}}(t) = h_{\text{TX}}^*(-t)$$
 
-对于实数对称滤波器（RC/RRC/rect/gauss）:
-  h_MF = h_TX（自身即为匹配）
+对于实数对称滤波器（RC/RRC/rect/gauss）: $h_{\text{MF}} = h_{\text{TX}}$（自身即为匹配）。
 
-RRC发 + RRC收 = RC:
-  h_RC(t) = (h_RRC * h_RRC)(t)  (卷积)
-```
+**RRC发 + RRC收 = RC:**
+
+$$h_{\text{RC}}(t) = (h_{\text{RRC}} * h_{\text{RRC}})(t) \quad \text{(卷积)}$$
 
 **最优采样点**: 匹配滤波后在 `delay + n*sps` 处下采样，`delay = span*sps/2`（两次'same'卷积时自动对齐）。
 
@@ -191,12 +178,9 @@ RRC发 + RRC收 = RC:
 **原理**: 将复基带信号调制到通带载波频率，输出实信号。
 
 **关键公式**:
-```
-s(t) = Re{x(t) * exp(j*2*pi*fc*t)}
-     = I(t)*cos(2*pi*fc*t) - Q(t)*sin(2*pi*fc*t)
+$$s(t) = \mathrm{Re}\!\left\{x(t) \cdot e^{j 2\pi f_c t}\right\} = I(t)\cos(2\pi f_c t) - Q(t)\sin(2\pi f_c t)$$
 
-其中: I(t) = Re{x(t)}, Q(t) = Im{x(t)}
-```
+其中: $I(t) = \mathrm{Re}\{x(t)\}$, $Q(t) = \mathrm{Im}\{x(t)\}$。
 
 **参数选择**: 采样率须满足Nyquist条件 fs >= 2*(fc + B/2)，B为基带信号带宽。水声典型: fs=48000Hz, fc=8000~16000Hz。
 
@@ -207,11 +191,11 @@ s(t) = Re{x(t) * exp(j*2*pi*fc*t)}
 **原理**: 通带信号与本振正交混频后低通滤波，恢复复基带。
 
 **关键公式**:
-```
-I(t) = LPF{ 2 * s(t) * cos(2*pi*fc*t) }
-Q(t) = LPF{ -2 * s(t) * sin(2*pi*fc*t) }
-x(t) = I(t) + j*Q(t)
-```
+$$I(t) = \text{LPF}\!\left\{2 \cdot s(t) \cdot \cos(2\pi f_c t)\right\}$$
+
+$$Q(t) = \text{LPF}\!\left\{-2 \cdot s(t) \cdot \sin(2\pi f_c t)\right\}$$
+
+$$x(t) = I(t) + j\,Q(t)$$
 
 乘以2补偿正交混频的幅度衰减。LPF为自适应阶数FIR滤波器（阶数 = min(64, floor(N/4)*2)），截止频率默认fc/2。
 

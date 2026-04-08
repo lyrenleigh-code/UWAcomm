@@ -113,27 +113,27 @@
 
 PAM电平（K级）：
 
-```
-levels = -(K-1), -(K-3), ..., (K-3), (K-1)
-```
+$$
+\text{levels} = -(K-1), -(K-3), \ldots, (K-3), (K-1)
+$$
 
 方形QAM星座点（K = sqrt(M)）：
 
-```
-s = (I_level + j * Q_level) / sqrt(E[|s|^2])
-```
+$$
+s = (I_{level} + j \cdot Q_{level}) / \sqrt{E[|s|^2]}
+$$
 
 功率归一化：
 
-```
-s_norm = s / sqrt(mean(|s|^2))
-```
+$$
+s_{norm} = s / \sqrt{\text{mean}(|s|^2)}
+$$
 
 Gray码生成（反射二进制码）：
 
-```
-gray(n) = n XOR (n >> 1)
-```
+$$
+\text{gray}(n) = n \oplus (n \gg 1)
+$$
 
 Gray映射保证相邻星座点（最小欧氏距离）仅差1个比特，最小化高SNR下的BER。
 
@@ -160,9 +160,9 @@ Gray映射保证相邻星座点（最小欧氏距离）仅差1个比特，最小
 
 Max-Log-MAP近似LLR：
 
-```
-LLR_k = (1/sigma^2) * (min_{s: b_k=0} |y - s|^2 - min_{s: b_k=1} |y - s|^2)
-```
+$$
+LLR_k = \frac{1}{\sigma^2} \left( \min_{s: b_k=0} |y - s|^2 - \min_{s: b_k=1} |y - s|^2 \right)
+$$
 
 其中 y 为接收符号，s 为参考星座点，b_k 为第k个比特位，sigma^2 为噪声方差。
 
@@ -170,10 +170,12 @@ LLR > 0 表示比特1更可能，LLR < 0 表示比特0更可能。|LLR|越大表
 
 硬判决（最小欧氏距离）：
 
-```
-s_hat = argmin_s |y - s|^2
-bits = bit_map(s_hat)
-```
+$$
+\hat{s} = \arg\min_s |y - s|^2
+$$
+$$
+\text{bits} = \text{bit\_map}(\hat{s})
+$$
 
 **参数选择依据**：
 - noise_var：须准确估计，过大导致LLR偏软（置信度低），过小导致LLR过度自信
@@ -192,21 +194,21 @@ bits = bit_map(s_hat)
 
 每符号比特数：
 
-```
-bps = log2(M)
-```
+$$
+bps = \log_2(M)
+$$
 
 Gray码映射：
 
-```
-freq_index = gray_code(bit_group_decimal)
-```
+$$
+\text{freq\_index} = \text{gray\_code}(\text{bit\_group\_decimal})
+$$
 
 频谱效率：
 
-```
-eta = log2(M) / M  (bit/s/Hz)
-```
+$$
+\eta = \log_2(M) / M \quad \text{(bit/s/Hz)}
+$$
 
 **参数选择依据**：
 - M=2: 1 bit/符号，最简单，频谱效率低

@@ -154,10 +154,9 @@ Turbo均衡迭代收敛可视化（BER/MSE曲线+星座图对比）。
 
 均衡器（MMSE-IC）：
 
-```
-G_k = σ²_x · H_k* / (σ²_x · |H_k|² + σ²_w)
-x̃ = x̄ + IFFT(G · (Y - H · X̄))
-```
+$$G_k = \frac{\sigma_x^2 \cdot H_k^*}{\sigma_x^2 \cdot |H_k|^2 + \sigma_w^2}$$
+
+$$\tilde{x} = \bar{x} + \text{IFFT}\bigl(G \cdot (Y - H \cdot \bar{X})\bigr)$$
 
 其中 `x̄` 为上次迭代译码反馈的软符号先验（soft_mapper输出），首次迭代 `x̄=0`。
 
@@ -197,11 +196,11 @@ x̃ = x̄ + IFFT(G · (Y - H · X̄))
 
 **原理：** 编码一次后分块均衡，各块LLR拼接后做一次跨块BCJR译码，编码增益更充分。
 
-```
-多块均衡: Y_1,...,Y_K → LMMSE-IC各块 → LLR_1,...,LLR_K
-跨块译码: [LLR_1,...,LLR_K] → BCJR → 后验LLR → 反馈各块
-DD信道更新: iter≥2时用软符号重估各块H_est
-```
+$$Y_1, \ldots, Y_K \xrightarrow{\text{LMMSE-IC}} \text{LLR}_1, \ldots, \text{LLR}_K$$
+
+$$[\text{LLR}_1, \ldots, \text{LLR}_K] \xrightarrow{\text{BCJR}} \text{后验LLR} \rightarrow \text{反馈各块}$$
+
+$$\text{DD信道更新: iter} \geq 2 \text{ 时用软符号重估各块 } \hat{H}_{\text{est}}$$
 
 **适用条件：** 多块传输、一次编码的场景（SC-FDE/OFDM端到端测试）。
 
@@ -214,9 +213,7 @@ DD信道更新: iter≥2时用软符号重估各块H_est
 
 DD域信道模型：
 
-```
-Y[k,l] = Σ_p h_p · X[(k-k_p) mod N, (l-l_p) mod M] + W[k,l]
-```
+$$Y[k,l] = \sum_p h_p \cdot X\bigl[(k - k_p) \bmod N,\; (l - l_p) \bmod M\bigr] + W[k,l]$$
 
 其中 (k_p, l_p) 为第p径的多普勒索引和时延索引。
 

@@ -203,18 +203,24 @@
 
 **关键公式**：
 
-```
-序列长度: L = 2^n - 1
-反馈: feedback = XOR(state[tap_1], state[tap_2], ..., state[tap_k])
-移位: state = [feedback, state(1:end-1)]
-```
+$$
+L = 2^n - 1
+$$
+$$
+\text{feedback} = \text{XOR}(\text{state}[\text{tap}_1], \text{state}[\text{tap}_2], \ldots, \text{state}[\text{tap}_k])
+$$
+$$
+\text{state} = [\text{feedback}, \text{state}(1:\text{end}-1)]
+$$
 
 **自相关性质**（双极性映射后 c = 2*seq - 1）：
 
-```
-R(0) = L (峰值)
-R(tau) = -1, tau != 0 (旁瓣恒为-1)
-```
+$$
+R(0) = L \quad \text{(峰值)}
+$$
+$$
+R(\tau) = -1, \quad \tau \neq 0 \quad \text{(旁瓣恒为-1)}
+$$
 
 **参数选择**：degree=2~15，预置本原多项式覆盖。degree越大码长越长，扩频增益越高。
 
@@ -226,12 +232,15 @@ R(tau) = -1, tau != 0 (旁瓣恒为-1)
 
 **关键公式**：
 
-```
-Gold(shift) = seq1 XOR circshift(seq2, shift)
-码族大小: 2^n + 1 个码字
-互相关限界: |R_cross| <= t(n), t(n) = 2^((n+1)/2) + 1 (n为奇数)
-                                t(n) = 2^((n+2)/2) + 1 (n为偶数)
-```
+$$
+\text{Gold}(\text{shift}) = \text{seq1} \oplus \text{circshift}(\text{seq2}, \text{shift})
+$$
+$$
+\text{码族大小}: 2^n + 1 \text{ 个码字}
+$$
+$$
+|R_{cross}| \leq t(n), \quad t(n) = \begin{cases} 2^{(n+1)/2} + 1 & n\text{为奇数} \\ 2^{(n+2)/2} + 1 & n\text{为偶数} \end{cases}
+$$
 
 **参数选择**：预置优选对覆盖degree=5/6/7/9/10/11。shift=0~L-1选择不同码字。
 
@@ -243,13 +252,18 @@ Gold(shift) = seq1 XOR circshift(seq2, shift)
 
 **关键公式**：
 
-```
-抽取因子: q = 2^(n/2) + 1
-短序列长度: 2^(n/2) - 1
-码字数: 2^(n/2) + 1
-互相关峰值: <= 2^(n/2) + 1（优于Gold码的t(n)）
-Kasami(k) = m_seq XOR circshift(short_repeated, k)
-```
+$$
+q = 2^{n/2} + 1 \quad \text{(抽取因子)}
+$$
+$$
+\text{短序列长度} = 2^{n/2} - 1, \quad \text{码字数} = 2^{n/2} + 1
+$$
+$$
+\text{互相关峰值} \leq 2^{n/2} + 1 \quad \text{(优于Gold码的} t(n) \text{)}
+$$
+$$
+\text{Kasami}(k) = m\_seq \oplus \text{circshift}(\text{short\_repeated}, k)
+$$
 
 **适用条件**：degree须为偶数(>=4)。码族比Gold码小，但互相关性能更优。适合对干扰抑制要求更高的场景。
 
@@ -259,12 +273,15 @@ Kasami(k) = m_seq XOR circshift(short_repeated, k)
 
 **关键公式**：
 
-```
+$$
 H(1) = [1]
-H(2N) = [H(N)  H(N); H(N) -H(N)]
-正交性: W * W' = N * I
-码集大小 = 码长 = N
-```
+$$
+$$
+H(2N) = \begin{bmatrix} H(N) & H(N) \\ H(N) & -H(N) \end{bmatrix}
+$$
+$$
+W \cdot W^T = N \cdot I, \quad \text{码集大小} = \text{码长} = N
+$$
 
 **适用条件**：要求严格同步（零延迟完全正交），适合DS-CDMA同步多址。非零延迟时互相关不受控，不适合异步场景。
 
@@ -274,12 +291,18 @@ H(2N) = [H(N)  H(N); H(N) -H(N)]
 
 **关键公式**：
 
-```
-扩频: spread(n, l) = symbol(n) * code(l), l = 1,...,L
-解扩: symbol_hat(n) = (1/L) * sum_{l=1}^{L} received(n,l) * code(l)
-扩频增益: G = L, 即 10*log10(L) dB
-输出带宽 = 输入带宽 * L
-```
+$$
+\text{扩频}: \text{spread}(n, l) = \text{symbol}(n) \cdot \text{code}(l), \quad l = 1,\ldots,L
+$$
+$$
+\text{解扩}: \hat{\text{symbol}}(n) = \frac{1}{L} \sum_{l=1}^{L} \text{received}(n,l) \cdot \text{code}(l)
+$$
+$$
+\text{扩频增益}: G = L, \quad \text{即 } 10 \cdot \log_{10}(L) \text{ dB}
+$$
+$$
+\text{输出带宽} = \text{输入带宽} \times L
+$$
 
 **适用条件**：抗窄带干扰、抗截获（低功率密度）。性能取决于码的自相关特性。多用户时需码集互相关受控。
 
@@ -289,12 +312,18 @@ H(2N) = [H(N)  H(N); H(N) -H(N)]
 
 **关键公式**：
 
-```
-移位量表: shift_k = k * floor(L/M), k = 0, 1, ..., M-1
-扩频: spread = circshift(base_code, -shift_k), k由比特组决定
-解扩: k_hat = argmax_k |sum(received .* circshift(base_code, -shift_k))|
-每符号传输比特数: log2(M)
-```
+$$
+\text{shift}_k = k \cdot \lfloor L/M \rfloor, \quad k = 0, 1, \ldots, M-1
+$$
+$$
+\text{spread} = \text{circshift}(\text{base\_code}, -\text{shift}_k), \quad k\text{由比特组决定}
+$$
+$$
+\hat{k} = \arg\max_k \left| \sum(\text{received} \cdot \text{circshift}(\text{base\_code}, -\text{shift}_k)) \right|
+$$
+$$
+\text{每符号传输比特数} = \log_2(M)
+$$
 
 **适用条件**：基于m序列时效果最佳（因自相关旁瓣为-1）。码长L应远大于M以保证移位间距足够。水声CSK常用于低速高可靠场景。
 
@@ -304,12 +333,18 @@ H(2N) = [H(N)  H(N); H(N) -H(N)]
 
 **关键公式**：
 
-```
-传输速率: log2(M)/L (bit/chip)
-符号索引: idx = bi2de(bit_group)
-扩频: spread = code_set(idx, :)
-解扩: idx_hat = argmax_k |sum(received .* code_set(k,:)) / L|
-```
+$$
+\text{传输速率} = \log_2(M)/L \quad \text{(bit/chip)}
+$$
+$$
+\text{idx} = \text{bi2de}(\text{bit\_group})
+$$
+$$
+\text{spread} = \text{code\_set}(\text{idx}, :)
+$$
+$$
+\hat{\text{idx}} = \arg\max_k \left| \sum(\text{received} \cdot \text{code\_set}(k,:)) / L \right|
+$$
 
 **适用条件**：通常使用Walsh-Hadamard码保证码字正交。相比DSSS的1/L bit/chip，M-ary通过码字选择提高速率。M越大速率越高但抗噪声能力下降。
 
@@ -319,16 +354,21 @@ H(2N) = [H(N)  H(N); H(N) -H(N)]
 
 **关键公式**：
 
-```
-差分相关: diff(n) = corr(n) * conj(corr(n-1))
-判决: decision(n) = sign(Re{diff(n)})
-```
+$$
+\text{diff}(n) = \text{corr}(n) \cdot \text{conj}(\text{corr}(n-1))
+$$
+$$
+\text{decision}(n) = \text{sign}(\text{Re}\{\text{diff}(n)\})
+$$
 
 当载波相位 phi 在相邻符号间近似不变时：
-```
-corr(n) = s(n) * e^{j*phi}, corr(n-1) = s(n-1) * e^{j*phi}
-diff(n) = s(n)*s(n-1) * |e^{j*phi}|^2 = s(n)*s(n-1)  (相位消除)
-```
+
+$$
+\text{corr}(n) = s(n) \cdot e^{j\phi}, \quad \text{corr}(n-1) = s(n-1) \cdot e^{j\phi}
+$$
+$$
+\text{diff}(n) = s(n) \cdot s(n-1) \cdot |e^{j\phi}|^2 = s(n) \cdot s(n-1) \quad \text{(相位消除)}
+$$
 
 **适用条件**：低载波相位波动场景。性能损失约1-3 dB（相比相干检测），但无需载波相位估计。需发端做差分预编码。
 
@@ -338,13 +378,18 @@ diff(n) = s(n)*s(n-1) * |e^{j*phi}|^2 = s(n)*s(n-1)  (相位消除)
 
 **关键公式**：
 
-```
-d1(n) = corr(n) * conj(corr(n-1))
-d2(n) = corr(n-1) * conj(corr(n-2))
-E_sum = |d1 + d2|^2
-E_diff = |d1 - d2|^2
-decision = sign(E_sum - E_diff)
-```
+$$
+d_1(n) = \text{corr}(n) \cdot \text{conj}(\text{corr}(n-1))
+$$
+$$
+d_2(n) = \text{corr}(n-1) \cdot \text{conj}(\text{corr}(n-2))
+$$
+$$
+E_{sum} = |d_1 + d_2|^2, \quad E_{diff} = |d_1 - d_2|^2
+$$
+$$
+\text{decision} = \text{sign}(E_{sum} - E_{diff})
+$$
 
 **适用条件**：需至少3个连续符号，输出长度=N-2。在快速相位波动下比DCD更鲁棒。性能损失约2-4 dB，但可工作于相干检测完全失效的场景。
 
@@ -354,11 +399,15 @@ decision = sign(E_sum - E_diff)
 
 **关键公式**：
 
-```
-跳频: hopped = mod(freq_index + pattern, num_freqs)
-去跳频: freq_index = mod(hopped - pattern, num_freqs)
-图案生成: pattern = randi([0, num_freqs-1], 1, num_hops) (seed固定)
-```
+$$
+\text{hopped} = \bmod(\text{freq\_index} + \text{pattern}, \text{num\_freqs})
+$$
+$$
+\text{freq\_index} = \bmod(\text{hopped} - \text{pattern}, \text{num\_freqs})
+$$
+$$
+\text{pattern} = \text{randi}([0, \text{num\_freqs}-1], 1, \text{num\_hops}) \quad \text{(seed固定)}
+$$
 
 **适用条件**：抗窄带干扰（干扰仅影响部分跳频时隙）。要求收发端跳频图案完全一致（相同seed和参数）。常与MFSK联合使用(FH-MFSK)。
 

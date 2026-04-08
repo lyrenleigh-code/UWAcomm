@@ -322,9 +322,7 @@ ICI矩阵补偿（10-2，OFDM高速场景）。
 
 **原理：** 在时延-多普勒二维平面上搜索使模糊函数最大化的参数对 (tau, alpha)。
 
-```
-CAF(τ, α) = |Σ_n r[n] · p*[round(n/(1+α) - τ·fs)]|²
-```
+$$\text{CAF}(\tau, \alpha) = \left|\sum_n r[n] \cdot p^*\left[\text{round}\left(\frac{n}{1+\alpha} - \tau f_s\right)\right]\right|^2$$
 
 - 对每个候选α，将前导码做时间伸缩后与接收信号互相关，找峰值位置作为tau估计
 - 复杂度 `O(N_alpha × N × log(N))`，建议两级搜索（粗1e-3 + 细1e-5）
@@ -335,10 +333,9 @@ CAF(τ, α) = |Σ_n r[n] · p*[round(n/(1+α) - τ·fs)]|²
 
 **原理：** 利用前后两段已知导频序列的互相关峰位置差（幅度估计）和相位差（精细估计）联合求解α。
 
-```
-粗估计（幅度）：α_coarse = (Δn/fs - T_v) / T_v
-精细估计（相位）：α_phase = angle(R₂·R₁*) / (2π·fc·T_v)
-```
+$$\alpha_{\text{coarse}} = \frac{\Delta n / f_s - T_v}{T_v}$$
+
+$$\alpha_{\text{phase}} = \frac{\angle(R_2 \cdot R_1^*)}{2\pi f_c T_v}$$
 
 其中R₁、R₂为前后导频的互相关复峰值，T_v为发送间隔。相位估计存在2π模糊，用粗估计解模糊。
 
@@ -349,10 +346,9 @@ CAF(τ, α) = |Σ_n r[n] · p*[round(n/(1+α) - τ·fs)]|²
 
 **原理：** 利用OFDM的CP与数据尾部相同的结构特性。
 
-```
-R(m) = Σ_n r[n+m] · r*[n+m+N]
-α_coarse = Δn_peak / N_fft
-```
+$$R(m) = \sum_n r[n+m] \cdot r^*[n+m+N]$$
+
+$$\alpha_{\text{coarse}} = \frac{\Delta n_{\text{peak}}}{N_{\text{fft}}}$$
 
 CP段与对应数据尾段的自相关峰位置偏移量反映多普勒伸缩。支持抛物线插值精化到亚样本精度。
 
@@ -363,9 +359,7 @@ CP段与对应数据尾段的自相关峰位置偏移量反映多普勒伸缩。
 
 **原理：** 匹配滤波后在载频附近做高分辨率FFT，从频移推算α。
 
-```
-α = (f_est - fc) / fc
-```
+$$\alpha = \frac{f_{\text{est}} - f_c}{f_c}$$
 
 Zoom-FFT通过频移+低通+降采样+FFT实现频率细化，分辨率提高zoom_factor倍。
 
@@ -391,9 +385,7 @@ V7改动：正alpha直接传入即可补偿压缩，无需取负。
 
 ### 7. CFO相位旋转补偿（comp_cfo_rotate）
 
-```
-y_comp(n) = y(n) · exp(-j·2π·cfo·n/fs)
-```
+$$y_{\text{comp}}(n) = y(n) \cdot \exp\left(-j 2\pi \frac{f_{\text{cfo}} \cdot n}{f_s}\right)$$
 
 逐样本乘以补偿相位，消除残余载波频偏。
 
@@ -401,10 +393,9 @@ y_comp(n) = y(n) · exp(-j·2π·cfo·n/fs)
 
 **原理：** 宽带多普勒导致OFDM子载波间干扰（ICI），建模为矩阵D乘法。
 
-```
-D_{k,l}(α) = (1/N) Σ_n exp(j2π(l - k(1+α))n/N)
-Y_comp = (D'D + σ²I)^{-1} D' Y    (正则化MMSE求逆)
-```
+$$D_{k,l}(\alpha) = \frac{1}{N} \sum_n \exp\left(j 2\pi \frac{(l - k(1+\alpha)) n}{N}\right)$$
+
+$$Y_{\text{comp}} = (D^H D + \sigma^2 I)^{-1} D^H Y \quad \text{(正则化MMSE求逆)}$$
 
 - 计算量 O(N^2)，仅在高速场景（|alpha|>1e-4）需要
 - |alpha|<1e-6时跳过补偿直接返回
@@ -413,9 +404,7 @@ Y_comp = (D'D + σ²I)^{-1} D' Y    (正则化MMSE求逆)
 
 **原理：** M阵元ULA，每阵元的空间时延为：
 
-```
-τ_m = (m-1) · d · cos(θ) / c
-```
+$$\tau_m = \frac{(m-1) \cdot d \cdot \cos\theta}{c}$$
 
 其中d为阵元间距，theta为入射角，c为声速。tau_m叠加到各径时延后，逐阵元独立调用gen_doppler_channel。保持浮点精度，不四舍五入为整数样点。
 

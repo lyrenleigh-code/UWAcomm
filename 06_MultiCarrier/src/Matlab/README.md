@@ -217,18 +217,17 @@ DD域符号经ISFFT+Heisenberg变换生成时域信号。
 
 **关键公式**：
 
-```
-调制(IFFT):
-  x(n) = (1/sqrt(N)) * sum_{k=0}^{N-1} X(k) * exp(j*2*pi*k*n/N), n=0,...,N-1
-  (代码实现: x = ifft(X, N) * sqrt(N))
+$$
+x(n) = \frac{1}{\sqrt{N}} \sum_{k=0}^{N-1} X(k) \cdot e^{j 2\pi k n / N}, \quad n=0,\ldots,N-1
+$$
 
-CP插入: x_cp = [x(N-cp_len+1:N), x(1:N)]
-ZP插入: x_zp = [x(1:N), zeros(1, cp_len)]
+CP插入: $x_{cp} = [x(N-cp\_len+1:N), x(1:N)]$
+
+ZP插入: $x_{zp} = [x(1:N), \text{zeros}(1, cp\_len)]$
 
 解调(FFT):
-  CP模式: 丢弃前cp_len样本 -> X = fft(x, N) / sqrt(N)
-  ZP模式: overlap-add(尾部cp_len叠加到头部) -> X = fft(x, N) / sqrt(N)
-```
+- CP模式: 丢弃前cp\_len样本 -> $X = \text{fft}(x, N) / \sqrt{N}$
+- ZP模式: overlap-add(尾部cp\_len叠加到头部) -> $X = \text{fft}(x, N) / \sqrt{N}$
 
 **参数选择**：
 - N取2的幂以利用FFT效率。水声典型值: N=64~1024
@@ -243,20 +242,25 @@ ZP插入: x_zp = [x(1:N), zeros(1, cp_len)]
 
 **导频模式**：
 
-```
-梳状(comb_K): 每K个子载波插1个导频，所有OFDM符号导频位置相同
-  pilot_indices = 1:K:N
-  适合时变信道（每符号都有导频可跟踪信道变化）
+**梳状(comb\_K):** 每K个子载波插1个导频，所有OFDM符号导频位置相同
 
-离散(scattered_K): 每K个子载波插1个导频，每个OFDM符号偏移S位
-  pilot_indices_s = mod(base_indices - 1 + (s-1)*S, N) + 1
-  适合时频双选信道（导频覆盖全时频域）
+$$
+\text{pilot\_indices} = 1:K:N
+$$
 
-块状(block): 首个OFDM符号全部为导频
-  适合频选但时不变信道
+适合时变信道（每符号都有导频可跟踪信道变化）
 
-自定义: 用户指定导频子载波索引数组
-```
+**离散(scattered\_K):** 每K个子载波插1个导频，每个OFDM符号偏移S位
+
+$$
+\text{pilot\_indices}_s = \bmod(\text{base\_indices} - 1 + (s-1) \cdot S, N) + 1
+$$
+
+适合时频双选信道（导频覆盖全时频域）
+
+**块状(block):** 首个OFDM符号全部为导频，适合频选但时不变信道
+
+**自定义:** 用户指定导频子载波索引数组
 
 **频谱效率**：
 - comb_4: 数据子载波占比 = (N - N/4) / N = 75%
@@ -270,11 +274,11 @@ ZP插入: x_zp = [x(1:N), zeros(1, cp_len)]
 
 **关键公式**：
 
-```
-发端: [CP | data_block], CP = data_block(end-cp_len+1:end)
-收端: 去CP -> FFT -> Y(k) = H(k)*X(k) + W(k)
-MMSE均衡: X_hat(k) = H*(k) / (|H(k)|^2 + sigma^2) * Y(k)
-```
+$$\text{发端: } [\text{CP} \mid \text{data\_block}], \quad \text{CP} = \text{data\_block}(\text{end}-\text{cp\_len}+1:\text{end})$$
+
+$$\text{收端: 去CP} \to \text{FFT} \to Y(k) = H(k) X(k) + W(k)$$
+
+$$\hat{X}(k) = \frac{H^*(k)}{|H(k)|^2 + \sigma^2} \cdot Y(k)$$
 
 **参数选择**：
 - block_size: 与OFDM的N对应，通常取2的幂
@@ -288,28 +292,29 @@ MMSE均衡: X_hat(k) = H*(k) / (|H(k)|^2 + sigma^2) * Y(k)
 
 **DFT方法关键公式**：
 
-```
-ISFFT (DD -> TF):
-  X_tf[n,m] = (1/sqrt(N)) * sum_{k=0}^{N-1} x_dd[k,m] * exp(j*2*pi*n*k/N)
-  (实现: 对每列做N点IFFT * sqrt(N))
+**ISFFT (DD -> TF):**
 
-Heisenberg变换 (TF -> 时域):
-  对每个时隙n: s_n = IFFT(X_tf[n,:]) * sqrt(M)  (M点IFFT)
-  s = [s_1, s_2, ..., s_N]  (拼接)
+$$X_{\text{tf}}[n,m] = \frac{1}{\sqrt{N}} \sum_{k=0}^{N-1} x_{\text{dd}}[k,m] \cdot e^{j 2\pi n k / N}$$
 
-整帧CP: signal = [s(end-cp_len+1:end), s]
+（实现: 对每列做N点IFFT * sqrt(N)）
 
-解调逆过程:
-  去CP -> Wigner变换(行FFT/sqrt(M)) -> SFFT(列FFT/sqrt(N)) -> DD域符号
-```
+**Heisenberg变换 (TF -> 时域):**
+
+$$s_n = \text{IFFT}(X_{\text{tf}}[n,:]) \cdot \sqrt{M} \quad \text{(M点IFFT)}$$
+
+$$s = [s_1, s_2, \ldots, s_N] \quad \text{(拼接)}$$
+
+**整帧CP:** $\text{signal} = [s(\text{end}-\text{cp\_len}+1:\text{end}),\; s]$
+
+**解调逆过程:** 去CP -> Wigner变换(行FFT/$\sqrt{M}$) -> SFFT(列FFT/$\sqrt{N}$) -> DD域符号
 
 **Zak域方法**：
 
-```
-调制: s_matrix = ifft2(x_dd) * sqrt(N*M)  (二维IFFT一步完成)
-解调: dd_symbols = fft2(r_matrix) / sqrt(N*M)  (二维FFT一步完成)
-DFT方法和Zak方法数学等价，输出一致
-```
+$$\text{调制: } S = \text{ifft2}(X_{\text{dd}}) \cdot \sqrt{NM} \quad \text{(二维IFFT一步完成)}$$
+
+$$\text{解调: } X_{\text{dd}} = \text{fft2}(R) / \sqrt{NM} \quad \text{(二维FFT一步完成)}$$
+
+DFT方法和Zak方法数学等价，输出一致。
 
 **参数选择**：
 - N: 多普勒分辨率相关，N越大分辨率越高
@@ -333,29 +338,27 @@ DFT方法和Zak方法数学等价，输出一致
 
 **impulse模式关键公式**：
 
-```
-导频位置: dd_frame(pilot_k, pilot_l) = pilot_value
-保护区: (2*guard_k+1) x (2*guard_l+1) 矩形区域(周期边界)
-可用数据格点: N*M - 保护区面积
-```
+$$\text{dd\_frame}(\text{pilot\_k},\; \text{pilot\_l}) = \text{pilot\_value}$$
+
+$$\text{保护区: } (2 \cdot \text{guard\_k} + 1) \times (2 \cdot \text{guard\_l} + 1) \text{ 矩形区域（周期边界）}$$
+
+$$\text{可用数据格点: } N \times M - \text{保护区面积}$$
 
 **adaptive模式**：
 
-```
-保护区大小 = (信道扩展 + 1) x 2:
-  guard_l_adapt = max_delay_spread + 1
-  guard_k_adapt = max_doppler_spread + 1
-大扩展信道 -> 大保护区 -> 少数据格点
-小扩展信道 -> 小保护区 -> 多数据格点
-```
+$$\text{guard\_l\_adapt} = \text{max\_delay\_spread} + 1$$
+
+$$\text{guard\_k\_adapt} = \text{max\_doppler\_spread} + 1$$
+
+大扩展信道 -> 大保护区 -> 少数据格点；小扩展信道 -> 小保护区 -> 多数据格点。
 
 **superimposed模式**：
 
-```
-dd_frame = data_matrix + pilot_pattern
-pilot_pattern = BPSK(+-1) * sqrt(pilot_power)  (seed=0固定)
-收端需迭代: 先粗估信道 -> 消除数据干扰 -> 精估信道
-```
+$$\text{dd\_frame} = \text{data\_matrix} + \text{pilot\_pattern}$$
+
+$$\text{pilot\_pattern} = \text{BPSK}(\pm 1) \cdot \sqrt{\text{pilot\_power}} \quad \text{(seed=0固定)}$$
+
+收端需迭代: 先粗估信道 -> 消除数据干扰 -> 精估信道。
 
 ### 6. PAPR计算与抑制
 
@@ -363,18 +366,17 @@ pilot_pattern = BPSK(+-1) * sqrt(pilot_power)  (seed=0固定)
 
 **关键公式**：
 
-```
-PAPR = max(|s(t)|^2) / mean(|s(t)|^2)
-PAPR_dB = 10 * log10(PAPR)
+$$\text{PAPR} = \frac{\max |s(t)|^2}{\mathrm{mean}(|s(t)|^2)}, \quad \text{PAPR}_{\text{dB}} = 10 \log_{10}(\text{PAPR})$$
 
-硬限幅:
-  threshold = sqrt(avg_power * 10^(target_papr/10))
-  clipped(n) = threshold * exp(j*angle(s(n))), if |s(n)| > threshold
-               s(n),                            otherwise
+**硬限幅:**
 
-限幅+滤波: 硬限幅后3阶移动平均滤波减少带外辐射
-幅度缩放: scale = min(threshold / |s(n)|, 1); clipped = s * scale
-```
+$$\text{threshold} = \sqrt{P_{\text{avg}} \cdot 10^{\text{target\_papr}/10}}$$
+
+$$\text{clipped}(n) = \begin{cases} \text{threshold} \cdot e^{j \angle s(n)}, & |s(n)| > \text{threshold} \\ s(n), & \text{otherwise} \end{cases}$$
+
+**限幅+滤波:** 硬限幅后3阶移动平均滤波减少带外辐射
+
+**幅度缩放:** $\text{scale} = \min(\text{threshold} / |s(n)|,\; 1)$; $\text{clipped} = s \cdot \text{scale}$
 
 **参数选择**：
 - target_papr_db: 通常6~8dB，与功放特性相关

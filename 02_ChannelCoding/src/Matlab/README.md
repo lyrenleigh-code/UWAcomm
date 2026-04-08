@@ -197,15 +197,15 @@
 
 编码：
 
-```
-c = m * G (mod 2),  G = [I_k | P],  H = [P' | I_r]
-```
+$$
+c = m \cdot G \pmod{2}, \quad G = [I_k \mid P], \quad H = [P^T \mid I_r]
+$$
 
 伴随式译码：
 
-```
-s = H * r^T (mod 2)
-```
+$$
+s = H \cdot r^T \pmod{2}
+$$
 
 s=0表示无错误；s非零时，s对应H中某列的位置即为错误位。
 
@@ -223,22 +223,24 @@ s=0表示无错误；s非零时，s对应H中某列的位置即为错误位。
 
 编码器输出（第i个生成多项式）：
 
-```
-c_i(t) = sum_{j=0}^{K-1} g_i(j) * u(t-j)  (mod 2)
-```
+$$
+c_i(t) = \sum_{j=0}^{K-1} g_i(j) \cdot u(t-j) \pmod{2}
+$$
 
 Viterbi前向递推（加-比-选ACS）：
 
-```
-M(s, t) = min_{s'->s} [M(s', t-1) + BM(s'->s, t)]
-```
+$$
+M(s, t) = \min_{s' \to s} \left[ M(s', t-1) + BM(s' \to s, t) \right]
+$$
 
 其中BM为分支度量：硬判决用汉明距离，软判决用欧氏距离。
 
-```
-BM_hard = sum(c_expected XOR c_received)
-BM_soft = sum((c_received - c_expected_bpsk)^2)
-```
+$$
+BM_{hard} = \sum(c_{expected} \oplus c_{received})
+$$
+$$
+BM_{soft} = \sum(c_{received} - c_{expected\_bpsk})^2
+$$
 
 尾比特截断：编码器末尾追加K-1个零比特使状态归零，确保回溯从状态0开始。
 
@@ -258,40 +260,39 @@ BM_soft = sum((c_received - c_expected_bpsk)^2)
 
 分支度量（对数域）：
 
-```
-gamma(t, s->s') = (2u-1)*La/2 + sum_i (2c_i-1)*Lc_i/2
-```
+$$
+\gamma(t, s \to s') = (2u-1) \cdot L_a/2 + \sum_i (2c_i-1) \cdot L_{c_i}/2
+$$
 
 前向递推：
 
-```
-alpha(s, t+1) = max*_{s': s'->s} [alpha(s', t) + gamma(t, s'->s)]
-```
+$$
+\alpha(s, t+1) = \max^*_{s': s' \to s} \left[ \alpha(s', t) + \gamma(t, s' \to s) \right]
+$$
 
 后向递推：
 
-```
-beta(s, t) = max*_{s': s->s'} [beta(s', t+1) + gamma(t, s->s')]
-```
+$$
+\beta(s, t) = \max^*_{s': s \to s'} \left[ \beta(s', t+1) + \gamma(t, s \to s') \right]
+$$
 
 后验LLR：
 
-```
-L_post(t) = max*_{(s,s'):u=1} [alpha(s,t) + gamma + beta(s',t+1)]
-          - max*_{(s,s'):u=0} [alpha(s,t) + gamma + beta(s',t+1)]
-```
+$$
+L_{post}(t) = \max^*_{(s,s'):u=1} \left[ \alpha(s,t) + \gamma + \beta(s',t+1) \right] - \max^*_{(s,s'):u=0} \left[ \alpha(s,t) + \gamma + \beta(s',t+1) \right]
+$$
 
 外信息：
 
-```
-L_ext = L_post - L_prior
-```
+$$
+L_{ext} = L_{post} - L_{prior}
+$$
 
 Jacobian对数（Log-MAP）：
 
-```
-max*(a, b) = max(a, b) + log(1 + exp(-|a - b|))
-```
+$$
+\max^*(a, b) = \max(a, b) + \log(1 + e^{-|a - b|})
+$$
 
 **适用条件与局限性**：
 - Max-Log-MAP比真Log-MAP损失约0.2~0.5dB，但计算量减半
@@ -306,25 +307,29 @@ max*(a, b) = max(a, b) + log(1 + exp(-|a - b|))
 
 RSC编码器（反馈/前馈结构）：
 
-```
-fb_bit(t) = u(t) XOR sum(state * fb_poly[2:end])  (mod 2)
-parity(t) = sum([fb_bit, state] * ff_poly)  (mod 2)
-```
+$$
+fb\_bit(t) = u(t) \oplus \sum(\text{state} \cdot fb\_poly[2:\text{end}]) \pmod{2}
+$$
+$$
+parity(t) = \sum([fb\_bit, \text{state}] \cdot ff\_poly) \pmod{2}
+$$
 
 默认分量码：K=4, 反馈多项式=15(八进制,=1+D+D^2+D^3), 前馈=13(八进制,=1+D^2+D^3)
 
 信道可靠度：
 
-```
-Lc = 4 * R * Eb/N0,  R = 1/3
-```
+$$
+L_c = 4 \cdot R \cdot E_b/N_0, \quad R = 1/3
+$$
 
 迭代译码：
 
-```
-La_dec1 = Le_dec2 经解交织
-La_dec2 = Le_dec1 经交织
-```
+$$
+L_{a,dec1} = L_{e,dec2} \text{ 经解交织}
+$$
+$$
+L_{a,dec2} = L_{e,dec1} \text{ 经交织}
+$$
 
 **参数选择依据**：
 - 迭代次数：6~8次通常收敛，更多次增益边际递减
@@ -343,24 +348,26 @@ La_dec2 = Le_dec1 经交织
 
 校验节点更新（Min-Sum）：
 
-```
-mc->v = alpha * prod(sign(mv'->c)) * min(|mv'->c|),  v' != v
-```
+$$
+m_{c \to v} = \alpha \cdot \prod \text{sign}(m_{v' \to c}) \cdot \min(|m_{v' \to c}|), \quad v' \neq v
+$$
 
 其中alpha=0.75为缩放因子。
 
 变量节点更新：
 
-```
-L(v) = L_ch(v) + sum_{c in N(v)} mc->v
-mv->c = L(v) - mc->v
-```
+$$
+L(v) = L_{ch}(v) + \sum_{c \in N(v)} m_{c \to v}
+$$
+$$
+m_{v \to c} = L(v) - m_{c \to v}
+$$
 
 初始LLR（BPSK）：
 
-```
-L_ch = 2 * y / sigma^2
-```
+$$
+L_{ch} = 2y / \sigma^2
+$$
 
 提前终止：当 H * c_hat = 0 (mod 2) 时停止迭代。
 

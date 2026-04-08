@@ -80,21 +80,21 @@
 
 信源熵（理论最低平均码长下界）：
 
-```
-H = -sum_{i=1}^{K} p_i * log2(p_i)
-```
+$$
+H = -\sum_{i=1}^{K} p_i \cdot \log_2(p_i)
+$$
 
 Huffman编码保证平均码长 L_avg 满足：
 
-```
-H <= L_avg < H + 1
-```
+$$
+H \leq L_{avg} < H + 1
+$$
 
 压缩比计算：
 
-```
-compress_ratio = (ceil(log2(max(symbol)+1)) * N) / total_coded_bits
-```
+$$
+\text{compress\_ratio} = \frac{\lceil \log_2(\max(\text{symbol})+1) \rceil \times N}{\text{total\_coded\_bits}}
+$$
 
 **构建过程**：
 1. 统计各符号出现频率，计算概率
@@ -116,39 +116,39 @@ compress_ratio = (ceil(log2(max(symbol)+1)) * N) / total_coded_bits
 
 量化步长：
 
-```
-delta = (xmax - xmin) / L,  L = 2^num_bits
-```
+$$
+\delta = (x_{max} - x_{min}) / L, \quad L = 2^{\text{num\_bits}}
+$$
 
 量化索引：
 
-```
-index = floor((x - xmin) / delta),  index in [0, L-1]
-```
+$$
+\text{index} = \lfloor (x - x_{min}) / \delta \rfloor, \quad \text{index} \in [0, L-1]
+$$
 
 量化电平（中点量化策略）：
 
-```
-level_k = xmin + (k + 0.5) * delta,  k = 0, 1, ..., L-1
-```
+$$
+\text{level}_k = x_{min} + (k + 0.5) \cdot \delta, \quad k = 0, 1, \ldots, L-1
+$$
 
 反量化重建：
 
-```
-x_hat = xmin + (index + 0.5) * delta
-```
+$$
+\hat{x} = x_{min} + (\text{index} + 0.5) \cdot \delta
+$$
 
 量化噪声功率（均匀分布输入信号时）：
 
-```
-sigma_q^2 = delta^2 / 12
-```
+$$
+\sigma_q^2 = \delta^2 / 12
+$$
 
 信号量化信噪比(SQNR)：
 
-```
-SQNR(dB) ≈ 6.02 * num_bits + 1.76  (对满量程正弦信号)
-```
+$$
+\text{SQNR(dB)} \approx 6.02 \times \text{num\_bits} + 1.76 \quad \text{(对满量程正弦信号)}
+$$
 
 **参数选择依据**：
 - num_bits：8bit适合一般语音/数据，12~16bit用于高精度信号

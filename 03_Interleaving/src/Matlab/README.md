@@ -109,15 +109,15 @@
 
 写入位置（按行）：
 
-```
-matrix(floor((i-1)/C)+1, mod(i-1,C)+1) = data(i),  i = 1,...,N
-```
+$$
+\text{matrix}(\lfloor(i-1)/C\rfloor+1, \bmod(i-1,C)+1) = \text{data}(i), \quad i = 1,\ldots,N
+$$
 
 读出位置（按列）：
 
-```
-interleaved(k) = matrix(:) 按列展开,  k = 1,...,R*C
-```
+$$
+\text{interleaved}(k) = \text{matrix}(:) \text{ 按列展开}, \quad k = 1,\ldots,R \times C
+$$
 
 交织深度 = num_rows，突发长度B的错误被分散为间隔至少R的单个错误。
 
@@ -140,16 +140,18 @@ interleaved(k) = matrix(:) 按列展开,  k = 1,...,R*C
 
 交织：
 
-```
-interleaved(k) = data(perm(k)),  k = 1,...,N
-```
+$$
+\text{interleaved}(k) = \text{data}(\text{perm}(k)), \quad k = 1,\ldots,N
+$$
 
 逆置换：
 
-```
-deperm(perm(k)) = k,  k = 1,...,N
-deinterleaved(k) = data_intlv(deperm(k))
-```
+$$
+\text{deperm}(\text{perm}(k)) = k, \quad k = 1,\ldots,N
+$$
+$$
+\text{deinterleaved}(k) = \text{data\_intlv}(\text{deperm}(k))
+$$
 
 **参数选择依据**：
 - seed：同一seed和数据长度始终产生相同置换，编解码须一致
@@ -169,27 +171,27 @@ deinterleaved(k) = data_intlv(deperm(k))
 
 交织器第i支路延迟：
 
-```
-D_intlv(i) = i * M,  i = 0, 1, ..., B-1
-```
+$$
+D_{intlv}(i) = i \cdot M, \quad i = 0, 1, \ldots, B-1
+$$
 
 解交织器第i支路延迟：
 
-```
-D_deintlv(i) = (B-1-i) * M
-```
+$$
+D_{deintlv}(i) = (B-1-i) \cdot M
+$$
 
 总固定延迟（交织+解交织）：
 
-```
-D_total = (B-1) * M = 常数
-```
+$$
+D_{total} = (B-1) \cdot M = \text{常数}
+$$
 
 有效数据起始位置（跳过零值过渡段）：
 
-```
-valid_start = (B-1) * M * B + 1
-```
+$$
+\text{valid\_start} = (B-1) \cdot M \cdot B + 1
+$$
 
 **参数选择依据**：
 - num_branches(B)：越大交织深度越深，但过渡段延迟越长

@@ -250,13 +250,13 @@
 **原理**: 接收信号 r(n) 与已知前导码 s(n) 做滑动归一化互相关，检测相关峰超过门限的位置。
 
 **关键公式**:
-```
-C(k) = |sum_{n=0}^{L-1} r(n+k) * conj(s(n))| / sqrt(E_r(k) * E_s)
+$$C(k) = \frac{\left|\sum_{n=0}^{L-1} r(n+k) \cdot s^*(n)\right|}{\sqrt{E_r(k) \cdot E_s}}$$
 
 其中:
-  E_r(k) = sum_{n=0}^{L-1} |r(n+k)|^2  (接收段能量)
-  E_s    = sum_{n=0}^{L-1} |s(n)|^2      (前导码能量)
-```
+
+$$E_r(k) = \sum_{n=0}^{L-1} |r(n+k)|^2 \quad \text{(接收段能量)}$$
+
+$$E_s = \sum_{n=0}^{L-1} |s(n)|^2 \quad \text{(前导码能量)}$$
 
 **参数选择**: 门限threshold通常取0.3~0.7，高SNR取高值减少误检，低SNR取低值提高检出率。多峰超限时返回最大峰位置。
 
@@ -267,13 +267,9 @@ C(k) = |sum_{n=0}^{L-1} r(n+k) * conj(s(n))| / sqrt(E_r(k) * E_s)
 **原理**: 对候选多普勒频移网格逐一补偿后做互相关，取所有频移中的最大相关值。
 
 **关键公式**:
-```
-C(k) = max_f |sum_{n=0}^{L-1} r(n+k) * conj(s(n)) * exp(-j*2*pi*f*n*Ts)|^2
-       / sqrt(E_r(k) * E_s)
+$$C(k) = \frac{\max_f \left|\sum_{n=0}^{L-1} r(n+k) \cdot s^*(n) \cdot e^{-j 2\pi f n T_s}\right|^2}{\sqrt{E_r(k) \cdot E_s}}$$
 
-fd_grid = linspace(-fd_max, fd_max, num_fd)
-Ts = 1/fs
-```
+$$f_d\text{\_grid} = \text{linspace}(-f_{d,\max},\; f_{d,\max},\; N_{fd}), \quad T_s = 1/f_s$$
 
 **参数选择**: fd_max根据运动速度估算（水声典型: v*fc/c），num_fd取奇数（含零频偏），推荐21~51。网格过密增加计算量，过疏漏检。
 
@@ -286,11 +282,9 @@ Ts = 1/fs
 **原理**: 将前导码分为前后两半，分别互相关后取相位差。
 
 **关键公式**:
-```
-corr1 = sum_{n=0}^{L/2-1} r(n) * conj(s(n))
-corr2 = sum_{n=L/2}^{L-1} r(n) * conj(s(n))
-cfo_hz = angle(corr2 * conj(corr1)) / (2*pi * (L/2)/fs)
-```
+$$\text{corr}_1 = \sum_{n=0}^{L/2-1} r(n) \cdot s^*(n), \quad \text{corr}_2 = \sum_{n=L/2}^{L-1} r(n) \cdot s^*(n)$$
+
+$$f_{\text{cfo}} = \frac{\angle(\text{corr}_2 \cdot \text{corr}_1^*)}{2\pi \cdot (L/2) / f_s}$$
 
 **适用条件**: 需要已知前导码，估计范围受限于 |cfo| < fs/(2*L)。简单高效，适合粗估。
 
@@ -299,10 +293,9 @@ cfo_hz = angle(corr2 * conj(corr1)) / (2*pi * (L/2)/fs)
 **原理**: 利用前导码的双重复结构 [A, A]，前后半段自相关提取频偏信息。
 
 **关键公式**:
-```
-P = sum_{n=0}^{L/2-1} r(n + L/2) * conj(r(n))
-cfo_hz = angle(P) * fs / (2*pi * L/2)
-```
+$$P = \sum_{n=0}^{L/2-1} r(n + L/2) \cdot r^*(n)$$
+
+$$f_{\text{cfo}} = \frac{\angle(P) \cdot f_s}{2\pi \cdot L/2}$$
 
 **参数选择**: 前导码须为严格重复结构。估计范围 |cfo| < fs/L。
 
@@ -319,26 +312,20 @@ cfo_hz = angle(P) * fs / (2*pi * L/2)
 **原理**: 利用相邻采样点和中间点的关系估计定时误差，不需要数据判决。
 
 **关键公式**:
-```
-e(k) = Re{y(kT + T/2) * [conj(y(kT)) - conj(y((k+1)T))]}
-```
+$$e(k) = \mathrm{Re}\!\left\{y(kT + T/2) \cdot \left[y^*(kT) - y^*((k+1)T)\right]\right\}$$
 
 **适用条件**: 需sps>=2，适合突发传输。收敛速度中等。
 
 #### 4b. Mueller-Muller TED（数据辅助）
 
 **关键公式**:
-```
-e(k) = Re{d*(k-1)*y(k) - d*(k)*y(k-1)}
-```
+$$e(k) = \mathrm{Re}\!\left\{d^*(k-1) \cdot y(k) - d^*(k) \cdot y(k-1)\right\}$$
 其中 d(k) 为硬判决符号。收敛后精度高于Gardner。
 
 #### 4c. 超前滞后门TED
 
 **关键公式**:
-```
-e(k) = |y(kT + delta)|^2 - |y(kT - delta)|^2,  delta = 1 sample
-```
+$$e(k) = |y(kT + \delta)|^2 - |y(kT - \delta)|^2, \quad \delta = 1 \text{ sample}$$
 
 简单实现，但需较高过采样率。
 
@@ -351,15 +338,13 @@ e(k) = |y(kT + delta)|^2 - |y(kT - delta)|^2,  delta = 1 sample
 **原理**: 经典二阶反馈环路，通过PI控制器跟踪慢变相位偏移。
 
 **关键公式**:
-```
-鉴相器:    e_phi(n) = Im{y(n) * conj(a_hat(n)) * exp(-j*phi_hat(n))}
-环路滤波:  phi_hat(n+1) = phi_hat(n) + alpha1*e + alpha2*sum(e)
+$$e_\varphi(n) = \mathrm{Im}\!\left\{y(n) \cdot \hat{a}^*(n) \cdot e^{-j\hat{\varphi}(n)}\right\} \quad \text{(鉴相器)}$$
 
-环路系数从Bn和zeta推导:
-  theta_n = Bn / (zeta + 1/(4*zeta))
-  alpha1  = 4*zeta*theta_n / (1 + 2*zeta*theta_n + theta_n^2)
-  alpha2  = 4*theta_n^2 / (1 + 2*zeta*theta_n + theta_n^2)
-```
+$$\hat{\varphi}(n+1) = \hat{\varphi}(n) + \alpha_1 e + \alpha_2 \sum e \quad \text{(环路滤波)}$$
+
+环路系数从 $B_n$ 和 $\zeta$ 推导:
+
+$$\theta_n = \frac{B_n}{\zeta + 1/(4\zeta)}, \quad \alpha_1 = \frac{4\zeta \theta_n}{1 + 2\zeta \theta_n + \theta_n^2}, \quad \alpha_2 = \frac{4\theta_n^2}{1 + 2\zeta \theta_n + \theta_n^2}$$
 
 **参数选择**: Bn越大跟踪越快但噪声越大。慢时变推荐 Bn=0.01~0.02，快变可增大至0.05。zeta=1/sqrt(2)为临界阻尼。
 
@@ -370,9 +355,7 @@ e(k) = |y(kT + delta)|^2 - |y(kT - delta)|^2,  delta = 1 sample
 **原理**: 一阶LMS式更新，利用判决符号和接收符号的相位差。
 
 **关键公式**:
-```
-phi_hat(n) = phi_hat(n-1) + mu * Im{y(n) * conj(a_hat(n))}
-```
+$$\hat{\varphi}(n) = \hat{\varphi}(n-1) + \mu \cdot \mathrm{Im}\!\left\{y(n) \cdot \hat{a}^*(n)\right\}$$
 
 **参数选择**: mu为步长，典型0.01~0.05。mu越大收敛越快但稳态抖动越大。
 
@@ -383,21 +366,25 @@ phi_hat(n) = phi_hat(n-1) + mu * Im{y(n) * conj(a_hat(n))}
 **原理**: 三阶状态空间模型，同时估计相位、频偏和频偏变化率，对加速度型相位变化最优。
 
 **关键公式**:
-```
-状态: x = [phi, delta_f, delta_delta_f]^T
-转移矩阵: A = [1,  2*pi*Ts,  2*pi*Ts^2/2;
-                0,  1,         Ts;
-                0,  0,         1]
-观测矩阵: C = [1, 0, 0]
-过程噪声: Q = diag([q_phase, q_freq, q_frate])
-观测噪声: R = r_obs
+**状态向量:** $\mathbf{x} = [\varphi,\; \Delta f,\; \Delta\dot{f}]^T$
 
-预测:  x_pred = A*x,  P_pred = A*P*A' + Q
-观测:  z = angle(y(n) * conj(d_hat(n)))  (硬判决后提取相位)
-更新:  K = P_pred*C' / (C*P_pred*C' + R)
-       x = x_pred + K * (z - C*x_pred)  (innovation相位回卷到[-pi,pi])
-       P = (I - K*C) * P_pred
-```
+$$\mathbf{A} = \begin{bmatrix} 1 & 2\pi T_s & 2\pi T_s^2/2 \\ 0 & 1 & T_s \\ 0 & 0 & 1 \end{bmatrix}, \quad \mathbf{C} = [1,\; 0,\; 0]$$
+
+$$\mathbf{Q} = \text{diag}(q_\varphi,\; q_f,\; q_{\dot{f}}), \quad R = r_{\text{obs}}$$
+
+**预测:**
+
+$$\mathbf{x}_{\text{pred}} = \mathbf{A} \mathbf{x}, \quad \mathbf{P}_{\text{pred}} = \mathbf{A} \mathbf{P} \mathbf{A}^T + \mathbf{Q}$$
+
+**观测:** $z = \angle(y(n) \cdot \hat{d}^*(n))$ （硬判决后提取相位）
+
+**更新:**
+
+$$\mathbf{K} = \frac{\mathbf{P}_{\text{pred}} \mathbf{C}^T}{\mathbf{C} \mathbf{P}_{\text{pred}} \mathbf{C}^T + R}, \quad \mathbf{x} = \mathbf{x}_{\text{pred}} + \mathbf{K} (z - \mathbf{C} \mathbf{x}_{\text{pred}})$$
+
+$$\mathbf{P} = (\mathbf{I} - \mathbf{K} \mathbf{C}) \mathbf{P}_{\text{pred}}$$
+
+（innovation相位回卷到$[-\pi, \pi]$）
 
 **参数选择**: q_phase/q_freq/q_frate反映相位变化的激烈程度，越大跟踪越快但越不平滑。r_obs反映观测信噪比。高SNR时 r_obs取小值（如0.01），低SNR取大值（如1.0）。
 

@@ -170,9 +170,7 @@ ch_params字段：
 
 **时变衰落（Jakes模型）：**
 
-```
-h_p(t) = g_p · Σ_{k=1}^{K} cos(2π·fd·cos(φ_k)·t + θ_k) / sqrt(K)
-```
+$$h_p(t) = g_p \cdot \frac{1}{\sqrt{K}} \sum_{k=1}^{K} \cos\bigl(2\pi f_d \cos(\varphi_k) t + \theta_k\bigr)$$
 
 其中fd为最大多普勒频移，phi_k为均匀分布的到达角。static模式下增益不随时间变化。
 

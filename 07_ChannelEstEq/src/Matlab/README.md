@@ -188,12 +188,13 @@
 
 将联合后验 `p(h|y)` 分解为因子图上的消息传递，通过高斯近似将复杂度从指数降至线性。支持非高斯先验（如稀疏先验），每次迭代在观测节点和变量节点间交替传递均值/方差消息。
 
-```
-关键公式：
-  hat_p(n) = sum_m |Phi(m,n)|^2 * tau_p(m)        % 方差传播
-  hat_r(n) = hat_x(n) + hat_p(n) * sum_m Phi*(m,n) * s(m)  % 均值更新
-  hat_x(n) = g_in(hat_r(n), hat_p(n))              % 先验去噪函数
-```
+**关键公式：**
+
+$$\hat{p}(n) = \sum_m |\Phi(m,n)|^2 \cdot \tau_p(m) \quad \text{(方差传播)}$$
+
+$$\hat{r}(n) = \hat{x}(n) + \hat{p}(n) \sum_m \Phi^*(m,n) \cdot s(m) \quad \text{(均值更新)}$$
+
+$$\hat{x}(n) = g_{\text{in}}(\hat{r}(n),\; \hat{p}(n)) \quad \text{(先验去噪函数)}$$
 
 参数规则：`max_iter` 50~100次足够；`noise_var` 需提供或自动估计。局限：测量矩阵非i.i.d.时收敛不保证，此时用VAMP/Turbo-VAMP。
 
@@ -201,13 +202,15 @@
 
 将时变信道 `h(n,p)` 展开为 Q+1 个基函数的线性组合 `h(n,p) = sum_q c(q,p)*b_q(n)`，将连续时变问题转化为有限维参数估计。基函数数 `Q = 2*ceil(fd*N/sym_rate)` 由多普勒扩展决定。
 
-```
-关键公式：
-  h(n,p) = sum_{q=0}^{Q} c(q,p) * b_q(n)
-  CE基：b_q(n) = exp(j*2*pi*q*n/N)
-  DCT基：b_q(n) = cos(pi*q*(2n+1)/(2N))
-  最小二乘：c = (B^H * B + lambda*I)^{-1} * B^H * y_obs
-```
+**关键公式：**
+
+$$h(n,p) = \sum_{q=0}^{Q} c(q,p) \cdot b_q(n)$$
+
+$$\text{CE基：} b_q(n) = e^{j 2\pi q n / N}$$
+
+$$\text{DCT基：} b_q(n) = \cos\!\left(\frac{\pi q (2n+1)}{2N}\right)$$
+
+$$\text{最小二乘：} \mathbf{c} = (\mathbf{B}^H \mathbf{B} + \lambda \mathbf{I})^{-1} \mathbf{B}^H \mathbf{y}_{\text{obs}}$$
 
 参数规则：DCT基在有限长帧下频谱泄漏小于CE，推荐优先用DCT；`fd_est` 过小会截断基函数导致建模误差，过大则过参数化。局限：仅适用于块级慢变信道，快变时需配合散布导频。
 
@@ -215,13 +218,15 @@
 
 Turbo迭代核心。每次迭代利用译码器反馈的软符号做干扰消除后，用MMSE滤波器对残余信号均衡。随迭代进行，软信息精度提高，干扰消除更完全，形成正反馈。
 
-```
-关键公式（频域，每子载波k）：
-  G(k) = H*(k) * var_x / (|H(k)|^2 * var_x + noise_var)
-  x_tilde = IFFT{ G .* (Y - H.*FFT(x_bar)) } + x_bar
-  mu = mean(G .* H)    % 等效增益
-  nv_tilde = mu * (1 - mu)  % 等效噪声方差
-```
+**关键公式（频域，每子载波k）：**
+
+$$G(k) = \frac{H^*(k) \cdot \sigma_x^2}{|H(k)|^2 \cdot \sigma_x^2 + \sigma_w^2}$$
+
+$$\tilde{x} = \text{IFFT}\!\left\{G \cdot \left(Y - H \cdot \text{FFT}(\bar{x})\right)\right\} + \bar{x}$$
+
+$$\mu = \mathrm{mean}(G \cdot H) \quad \text{(等效增益)}$$
+
+$$\tilde{\nu} = \mu (1 - \mu) \quad \text{(等效噪声方差)}$$
 
 参数规则：首次迭代 `x_bar=0, var_x=1`（无先验），后续由 `soft_mapper` 提供；`var_x` 需下限截断 `max(var_x, noise_var)` 防止数值不稳定。局限：假设信道块内不变，时变信道需先做BEM估计再分块FDE。
 
@@ -229,13 +234,13 @@ Turbo迭代核心。每次迭代利用译码器反馈的软符号做干扰消除
 
 前馈滤波器补偿ISI，反馈滤波器利用已判决符号消除拖尾ISI。RLS自适应更新权重，收敛速度远快于LMS。错误传播是DFE固有问题，双向DFE(BiDFE)通过前向+后向联合判决缓解。
 
-```
-关键公式：
-  d(n) = w_ff^H * y(n) - w_fb^H * x_hat(n-1:-1:n-Nfb)
-  e(n) = x_ref(n) - d(n)
-  RLS更新：P(n) = (P(n-1) - k*y^H*P(n-1)) / lambda
-  k = P(n-1)*y / (lambda + y^H*P(n-1)*y)
-```
+**关键公式：**
+
+$$d(n) = \mathbf{w}_{\text{ff}}^H \mathbf{y}(n) - \mathbf{w}_{\text{fb}}^H \hat{\mathbf{x}}(n-1:-1:n-N_{\text{fb}})$$
+
+$$e(n) = x_{\text{ref}}(n) - d(n)$$
+
+$$\text{RLS更新：} \mathbf{k} = \frac{\mathbf{P}(n-1) \mathbf{y}}{\lambda + \mathbf{y}^H \mathbf{P}(n-1) \mathbf{y}}, \quad \mathbf{P}(n) = \frac{\mathbf{P}(n-1) - \mathbf{k} \mathbf{y}^H \mathbf{P}(n-1)}{\lambda}$$
 
 参数规则：前馈阶数最优 = 4x信道长度；`lambda=0.9995` 防长序列遗忘；静态信道必须关PLL（`pll.enable=false`），否则发散。局限：错误传播在低SNR下严重，长时延扩展信道下不如FDE。
 
@@ -243,14 +248,15 @@ Turbo迭代核心。每次迭代利用译码器反馈的软符号做干扰消除
 
 将各径信道增益建模为AR(1)过程 `h(n+1) = alpha*h(n) + w(n)`，用Kalman滤波器逐符号更新。仅跟踪已知时延位置的径（稀疏），计算量 O(P^2) 而非 O(N^2)。
 
-```
-关键公式：
-  预测：h_pred = alpha * h(n), P_pred = alpha^2 * P(n) + Q
-  更新：K = P_pred * a^H / (a * P_pred * a^H + noise_var)
-  h(n+1) = h_pred + K * (y(n) - a * h_pred)
-  其中 a = x_ref(n-delays) 为观测向量
-  alpha = J_0(2*pi*fd/fs) 即零阶贝塞尔函数
-```
+**关键公式：**
+
+$$\text{预测：} \mathbf{h}_{\text{pred}} = \alpha \cdot \mathbf{h}(n), \quad \mathbf{P}_{\text{pred}} = \alpha^2 \mathbf{P}(n) + \mathbf{Q}$$
+
+$$\text{更新：} \mathbf{K} = \frac{\mathbf{P}_{\text{pred}} \mathbf{a}^H}{\mathbf{a} \mathbf{P}_{\text{pred}} \mathbf{a}^H + \sigma_w^2}$$
+
+$$\mathbf{h}(n+1) = \mathbf{h}_{\text{pred}} + \mathbf{K} \cdot (y(n) - \mathbf{a} \cdot \mathbf{h}_{\text{pred}})$$
+
+其中 $\mathbf{a} = x_{\text{ref}}(n - \text{delays})$ 为观测向量，$\alpha = J_0(2\pi f_d / f_s)$ 即零阶贝塞尔函数。
 
 参数规则：`alpha` 由多普勒频率自动计算；`K_target=5%` 修剪弱径防止维数膨胀。局限：需已知多径时延结构（由GAMP/OMP/SAGE预估），对突变信道响应滞后。
 
@@ -258,13 +264,15 @@ Turbo迭代核心。每次迭代利用译码器反馈的软符号做干扰消除
 
 在DD域因子图上做高斯近似BP。每个观测节点 `Y(k,l)` 连接到 P 条路径对应的数据节点，消息在观测-数据节点间迭代传递。支持先验软信息输入实现Turbo迭代。
 
-```
-关键公式（观测节点m到数据节点n的消息）：
-  mu_{m->n} = (Y(m) - sum_{n'!=n} h_{n'} * mu_{n'->m}) / h_n
-  sigma^2_{m->n} = (noise_var + sum_{n'!=n} |h_{n'}|^2 * v_{n'->m}) / |h_n|^2
-  数据节点合并：mu_n = var_n * sum_m (h*_m * mu_{m->n} / sigma^2_{m->n})
-  var_n = 1 / (1/var_prior + sum_m |h_m|^2 / sigma^2_{m->n})
-```
+**关键公式（观测节点m到数据节点n的消息）：**
+
+$$\mu_{m \to n} = \frac{Y(m) - \sum_{n' \neq n} h_{n'} \cdot \mu_{n' \to m}}{h_n}$$
+
+$$\sigma^2_{m \to n} = \frac{\sigma_w^2 + \sum_{n' \neq n} |h_{n'}|^2 \cdot v_{n' \to m}}{|h_n|^2}$$
+
+**数据节点合并：**
+
+$$\mu_n = v_n \sum_m \frac{h_m^* \cdot \mu_{m \to n}}{\sigma^2_{m \to n}}, \quad v_n = \left(\frac{1}{v_{\text{prior}}} + \sum_m \frac{|h_m|^2}{\sigma^2_{m \to n}}\right)^{-1}$$
 
 参数规则：`max_iter=10` 通常足够收敛；复杂度 `O(iter*P*NM*Q)`，简化版用MMSE近似降至 `O(P*NM)`。局限：路径数P增大时因子图环路加长，BP近似精度下降。
 
