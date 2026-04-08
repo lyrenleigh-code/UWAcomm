@@ -205,6 +205,19 @@ $$\hat{h} = (\Phi^H \Phi + \lambda I)^{-1} \Phi^H y$$
 | fd=5Hz低SNR BER | 优化中 | 5dB:15%, 需更好的iter1初始化或增加导频密度 |
 | OTFS通带实现 | 搁置 | DD域二维脉冲成形, 需专项 |
 
+## 项目进度概览
+
+| 体制 | 状态 | 说明 |
+|------|------|------|
+| **SC-TDE** | ✅ P3完成 | static 0%, fd=1Hz 0%, fd=5Hz 5-15% |
+| **SC-FDE** | ✅ P1完成 | static 0%, 时变待改BEM |
+| **OFDM** | ✅ P2完成 | static 0%, 时变待改BEM |
+| **OTFS** | ⬜ P4待做 | DD域处理+通带 |
+| **DSSS** | ⬜ P5待做 | 扩频+Rake |
+| **FH-MFSK** | ⬜ P6待做 | 跳频+能量检测 |
+
+**统计**: 173个MATLAB文件, 20865行代码, 167次提交, 13个模块README含完整算法推导+LaTeX公式+断言表
+
 ## Language & Conventions
 
 - 主要语言：MATLAB（.m 文件）
@@ -212,7 +225,8 @@ $$\hat{h} = (\Phi^H \Phi + \lambda I)^{-1} \Phi^H y$$
 - 完整中文注释头（功能、版本、输入/输出参数、备注）
 - 函数内部按章节分割：`%% 1. 入参解析 → 2. 参数校验 → 3~N. 核心算法`
 - 参数校验使用中文错误提示
-- 每个模块含 `test_*.m` 单元测试和 `README.md` 文档
+- 每个模块含 `test_*.m` 单元测试（含可视化）和 `README.md` 文档（含$$LaTeX$$公式）
+- Git分支策略：`feat/xxx` 分支开发 → 合并到 `master`
 
 ## Cross-Module Dependencies
 
