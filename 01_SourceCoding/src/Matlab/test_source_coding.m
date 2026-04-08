@@ -42,7 +42,7 @@ try
     symbols_out = huffman_decode(bitstream, codebook, length(symbols_in));
 
     assert(isequal(symbols_out, symbols_in), '单一符号解码失败');
-    assert(length(codebook) == 1, '单一符号码本应只有1个条目');
+    assert(isscalar(codebook), '单一符号码本应只有1个条目');
 
     fprintf('[通过] 1.2 单一符号序列 | 码字=''%s''\n', codebook(1).code);
     pass_count = pass_count + 1;
