@@ -370,7 +370,10 @@ for fi = 1:size(fading_cfgs,1)
                             data_eq(n) = rx_ic;
                         end
                     end
-                    nv_post = nv_eq / max(mean(abs(h_tv(1, T+1:end)).^2), 1e-6);
+                    % 从训练段估计post-EQ噪声+残余ISI方差（防高SNR时LLR过度自信）
+                    train_eq = data_eq(1:min(T, length(data_eq)));
+                    train_ref = training(1:length(train_eq));
+                    nv_post = max(var(train_eq - train_ref), nv_eq * 0.1);
                 else
                     % --- iter2+: 软符号全ISI消除 + MMSE + BEM重估计 --- %
 
@@ -444,7 +447,10 @@ for fi = 1:size(fading_cfgs,1)
                         data_eq(n) = conj(h0_n) * rx_ic / ...
                             (abs(h0_n)^2 + nv_eq / max(1 - var_x_avg, 0.01));
                     end
-                    nv_post = nv_eq / max(mean(abs(h_tv(1, T+1:end)).^2), 1e-6);
+                    % 从训练段估计post-EQ噪声+残余ISI方差（防高SNR时LLR过度自信）
+                    train_eq = data_eq(1:min(T, length(data_eq)));
+                    train_ref = training(1:length(train_eq));
+                    nv_post = max(var(train_eq - train_ref), nv_eq * 0.1);
                 end
 
                 % 提取数据位置LLR（排除导频）
