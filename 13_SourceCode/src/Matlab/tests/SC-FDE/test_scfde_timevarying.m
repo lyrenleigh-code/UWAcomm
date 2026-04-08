@@ -124,7 +124,10 @@ for fi = 1:size(fading_cfgs,1)
     [~, ~, corr_clean] = sync_detect(bb_clean_comp, LFM_bb_n, 0.3);
     % 强制直达径：只在前50样本(~6符号)内搜索，确保找到直达径而非反射径
     dw = min(50, round(length(corr_clean)/2));
-    [sync_peak_clean, sync_pos_fixed] = max(corr_clean(1:dw));
+    [max_peak, max_pos] = max(corr_clean(1:dw));
+    first_idx = find(corr_clean(1:dw) > 0.6*max_peak, 1, 'first');
+    if ~isempty(first_idx), sync_pos_fixed=first_idx; sync_peak_clean=corr_clean(first_idx);
+    else, sync_pos_fixed=max_pos; sync_peak_clean=max_peak; end
     sync_offset_samp = sync_pos_fixed - 1;
     sync_offset_sym = round(sync_offset_samp / sps);  % 整数符号偏移
 
@@ -138,23 +141,108 @@ for fi = 1:size(fading_cfgs,1)
         end
     end
 
-    % 预计算oracle H_est（整数循环移位 + 分数相位斜坡）
-    sync_offset_sym_frac = sync_offset_samp/sps - sync_offset_sym;  % 分数残差
+    % --- P1改造：BEM(DCT)信道估计替代oracle --- %
+    % 先从无噪声信号提取符号级数据用于BEM估计（与SNR无关）
+    sync_offset_sym_frac = sync_offset_samp/sps - sync_offset_sym;
     phase_ramp_frac = exp(+1j*2*pi*sync_offset_sym_frac*(0:blk_fft-1)/blk_fft);
-    H_est_blocks = cell(1, N_blocks);
-    for bi = 1:N_blocks
-        blk_mid_samp = sync_pos_fixed + data_offset + (bi-1)*sym_per_block*sps + round(sym_per_block*sps/2);
-        blk_mid_samp = max(1, min(blk_mid_samp, size(ch_info.h_time,2)));
-        h_mid = ch_info.h_time(:, blk_mid_samp);
-        h_norm = h_mid.' / sqrt(sum(abs(h_mid).^2));
+
+    ds_clean = sync_pos_fixed + data_offset;
+    de_clean = ds_clean + N_shaped - 1;
+    if de_clean > length(bb_clean_comp)
+        rx_data_clean = [bb_clean_comp(ds_clean:end), zeros(1, de_clean-length(bb_clean_comp))];
+    else
+        rx_data_clean = bb_clean_comp(ds_clean:de_clean);
+    end
+    [rx_filt_clean,~] = match_filter(rx_data_clean, sps, 'rrc', rolloff, span);
+    N_total_sym = N_blocks * sym_per_block;
+    best_off_c = 0; best_pwr_c = 0;
+    for off=0:sps-1
+        idx=off+1:sps:length(rx_filt_clean);
+        n_c=min(length(idx),N_total_sym);
+        if n_c>=10, c=abs(sum(rx_filt_clean(idx(1:10)).*conj(all_cp_data(1:10))));
+        if c>best_pwr_c, best_pwr_c=c; best_off_c=off; end, end
+    end
+    rx_sym_clean = rx_filt_clean(best_off_c+1:sps:end);
+    if length(rx_sym_clean)>N_total_sym, rx_sym_clean=rx_sym_clean(1:N_total_sym);
+    elseif length(rx_sym_clean)<N_total_sym, rx_sym_clean=[rx_sym_clean,zeros(1,N_total_sym-length(rx_sym_clean))]; end
+
+    L_h = max(sym_delays) + 1;
+    K_sparse = length(sym_delays);
+    nv_init = 0.01;
+
+    if strcmpi(ftype, 'static')
+        % 静态：GAMP稀疏估计（用无噪声第1块CP段）
+        usable = blk_cp;
+        T_mat = zeros(usable, L_h);
+        tx_blk1 = all_cp_data(1:sym_per_block);
+        for col = 1:L_h
+            for row = col:usable, T_mat(row, col) = tx_blk1(row - col + 1); end
+        end
+        y_train = rx_sym_clean(1:usable).';
+        [h_gamp_vec, ~] = ch_est_gamp(y_train, T_mat, L_h, 50, nv_init);
+        h_td_est = zeros(1, blk_fft);
         eff_delays = mod(sym_delays - sync_offset_sym, blk_fft);
-        h_td = zeros(1, blk_fft);
-        for p=1:length(sym_delays), h_td(eff_delays(p)+1) = h_td(eff_delays(p)+1) + h_norm(p); end
-        H_est_blocks{bi} = fft(h_td) .* phase_ramp_frac;
+        for p = 1:length(sym_delays)
+            if sym_delays(p)+1 <= L_h
+                h_td_est(eff_delays(p)+1) = h_gamp_vec(sym_delays(p)+1);
+            end
+        end
+        H_est_blocks = cell(1, N_blocks);
+        for bi = 1:N_blocks
+            H_est_blocks{bi} = fft(h_td_est) .* phase_ramp_frac;
+        end
+    else
+        % 时变：BEM(DCT)跨块估计
+        % 构建全帧观测（每块CP段作为导频观测）
+        N_sym_total = N_blocks * sym_per_block;
+        obs_y = []; obs_x = []; obs_n = [];
+        for bi = 1:N_blocks
+            blk_start = (bi-1)*sym_per_block;
+            % CP段：已知符号（CP = 数据尾部的拷贝）
+            for kk = max(sym_delays)+1 : blk_cp
+                n = blk_start + kk;  % 帧内符号位置
+                x_vec = zeros(1, K_sparse);
+                for pp = 1:K_sparse
+                    idx = n - sym_delays(pp);
+                    if idx >= 1 && idx <= N_sym_total
+                        x_vec(pp) = all_cp_data(idx);
+                    end
+                end
+                if any(x_vec ~= 0) && n <= length(rx_sym_clean)
+                    obs_y(end+1) = rx_sym_clean(n);
+                    obs_x = [obs_x; x_vec];
+                    obs_n(end+1) = n;
+                end
+            end
+        end
+
+        bem_opts = struct('Q_mode', 'auto', 'lambda_scale', 1.0);
+        [h_tv_bem, ~, bem_info] = ch_est_bem(obs_y(:), obs_x, obs_n(:), N_sym_total, ...
+            sym_delays, fd_hz, sym_rate, nv_init, 'dct', bem_opts);
+
+        if si_print == 0
+            fprintf('\n  [BEM] Q=%d, obs=%d, nmse=%.1fdB | ', ...
+                bem_info.Q, length(obs_y), bem_info.nmse_residual);
+            si_print = 1;
+        end
+
+        % 每块取中间时刻的BEM CIR → FFT → H_est
+        H_est_blocks = cell(1, N_blocks);
+        eff_delays = mod(sym_delays - sync_offset_sym, blk_fft);
+        for bi = 1:N_blocks
+            blk_mid = (bi-1)*sym_per_block + round(sym_per_block/2);
+            blk_mid = max(1, min(blk_mid, N_sym_total));
+            h_td_est = zeros(1, blk_fft);
+            for p = 1:K_sparse
+                h_td_est(eff_delays(p)+1) = h_tv_bem(p, blk_mid);
+            end
+            H_est_blocks{bi} = fft(h_td_est) .* phase_ramp_frac;
+        end
     end
 
     sync_info_matrix(fi,:) = [sync_pos_fixed, sync_peak_clean];
-    H_est_blocks_save{fi} = H_est_blocks{1};  % 保存block1的H_est用于输出
+    H_est_blocks_save{fi} = H_est_blocks{1};
+    si_print = 0;  % BEM诊断只打印一次
     fprintf('%-8s |', fname);
 
     %% ===== SNR循环：只变噪声 ===== %%
@@ -208,7 +296,7 @@ for fi = 1:size(fading_cfgs,1)
         nv_eq = max(noise_var, 1e-10);
         x_bar_blks = cell(1,N_blocks);
         var_x_blks = ones(1,N_blocks);
-        H_cur_blocks = H_est_blocks;  % iter1用oracle，后续DD更新
+        H_cur_blocks = H_est_blocks;  % iter1用BEM/GAMP估计，后续DD更新
         for bi=1:N_blocks, x_bar_blks{bi}=zeros(1,blk_fft); end
         La_dec_info = [];
         bits_decoded = [];
