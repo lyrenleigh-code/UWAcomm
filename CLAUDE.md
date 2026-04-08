@@ -62,7 +62,11 @@ UWAcomm/
 - 调试中发现模块函数缺陷（如eq_dfe的h_est未使用），应修复模块本身而非绕过
 - **信道估计规则**：端到端测试**必须调用模块07的ch_est_*函数**（如ch_est_gamp）从接收信号估计信道。**Oracle（ch_info.h_time真实信道）只能作为性能对比基准，不能作为最终结果**。最终提交的端到端BER曲线必须基于估计信道
 - 当前SC-FDE/OFDM端到端仍使用oracle H_est，属**待修正项**
-- **每次提交同步更新笔记**：每次git commit后，必须同步更新 `D:\Obsidian\workspace\UWAcomm\` 对应的Obsidian笔记文件，记录本次变更内容、测试结果和关键发现
+- **每次提交同步更新笔记**：每次git commit后，必须同步更新Obsidian笔记，记录本次变更内容、测试结果和关键发现。笔记存放规则：
+  - 路径：`D:\Obsidian\workspace\UWAcomm\{模块名}\`，如 `08_Sync\`、`13_SourceCode\`
+  - 模块文件夹不存在时**直接新建**
+  - 文件命名：`{日期}_{主题}.md`，如 `2026-04-08_P3-2_SC-TDE时变BEM集成.md`
+  - 跨模块变更放在主要涉及的模块文件夹下
 - **模块更新必须同步README**：每次新增、修改或删除模块内的函数文件时，必须同步更新该模块的 `src/Matlab/README.md`（详见下方README要求）
 
 ### 3. MATLAB测试调试流程（详见模块08 sync调试经验）
