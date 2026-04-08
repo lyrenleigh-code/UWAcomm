@@ -11,10 +11,10 @@
 
 | 指标 | 数值 |
 |------|------|
-| MATLAB函数文件 | 172个 |
-| 代码总行数 | 20,118行 |
-| 文档文件(md+html) | 28个 |
-| Git提交数 | 141次 |
+| MATLAB函数文件 | 173个 |
+| 代码总行数 | 20,662行 |
+| 文档文件(md+html) | 27个 |
+| Git提交数 | 150次 |
 | 模块数 | 13个（12个算法模块 + 1个集成模块） |
 
 ---
@@ -27,12 +27,12 @@
 | 02 信道编解码 | `02_ChannelCoding/` | 12 | ✅ 含SISO(BCJR max-log/log-map/sova) |
 | 03 交织/解交织 | `03_Interleaving/` | 8 | ✅ |
 | 04 符号映射/判决 | `04_Modulation/` | 6 | ✅ |
-| 05 扩频/解扩 | `05_SpreadSpectrum/` | 17 | ✅ |
+| 05 扩频/解扩 | `05_SpreadSpectrum/` | 17 | ✅ 18项测试+可视化(V1.1) |
 | 06 多载波+CP | `06_MultiCarrier/` | 15 | ✅ |
 | 07 信道估计与均衡 | `07_ChannelEstEq/` | 42 | ✅ 统一测试V2(24项), BEM V2+DD-BEM |
 | 08 同步+帧组装 | `08_Sync/` | 18 | ✅ 三层同步(帧/符号/位), phase_track V1.0, sync_detect V2.0(多普勒补偿), 22项测试 |
-| 09 脉冲成形/变频 | `09_Waveform/` | 9 | ✅ |
-| 10 多普勒处理 | `10_DopplerProc/` | 14 | ✅ comp_resample V7(正alpha) |
+| 09 脉冲成形/变频 | `09_Waveform/` | 9 | ✅ 19项测试+可视化(V1.1) |
+| 10 多普勒处理 | `10_DopplerProc/` | 15 | ✅ comp_resample V7, gen_uwa_channel_array V1.0, 13项测试+可视化(V2.0) |
 | 11 阵列预处理 | `11_ArrayProc/` | 8 | ✅ |
 | 12 Turbo迭代调度 | `12_IterativeProc/` | 7 | ✅ V8(DFE iter1)+跨块版本 |
 | 13 端到端仿真 | `13_SourceCode/` | 12 | P1+P2完成, P3调试中 |
