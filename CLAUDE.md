@@ -6,9 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 UWAcomm — 水声通信（Underwater Acoustic Communication）算法仿真项目。MATLAB开发，覆盖6种通信体制：SC-TDE / SC-FDE / DSSS / OFDM / OTFS / FH-MFSK + 阵列增强接收。
 
-框架参考：`framework/framework_v5.html`（待升级v6）
+框架参考：`framework/framework_v6.html`
+同步技术框架：`08_Sync/sync_framework.html` + `08_Sync/sync_documentation.md`
+多普勒技术规范：`10_DopplerProc/UWA_Doppler_MATLAB_Spec.md`
 开发进度：`todo.md`
-调试记录：`D:\Obsidian\workspace\UWAcomm\端到端帧组装调试笔记.md`
+调试记录：`D:\Obsidian\workspace\UWAcomm\{模块名}\` (按模块分文件夹)
 
 ## Directory Structure
 
@@ -45,15 +47,22 @@ UWAcomm/
 |------|---------|------------|------------------|
 | 02 信道编解码 | 卷积编码 + SISO(BCJR)译码 | `conv_encode`, `siso_decode_conv`, `sova_decode_conv` | TX编码, RX译码 |
 | 03 交织 | 随机交织/解交织 | `random_interleave`, `random_deinterleave` | TX交织, RX解交织, Turbo迭代环 |
-| 07 静态信道估计 | LS/MMSE/OMP/SBL/GAMP/VAMP/Turbo-VAMP | `ch_est_ls`, `ch_est_mmse`, `ch_est_omp`, `ch_est_sbl`, `ch_est_gamp`, `ch_est_vamp`, `ch_est_turbo_vamp` | **RX信道估计（从训练序列）** |
-| 07 时变信道估计 | T-SBL/SAGE/BEM（待开发） | `ch_est_tsbl`⬜, `ch_est_sage`⬜, `ch_est_bem`⬜ | **RX时变信道估计** |
-| 07 信道跟踪 | Kalman/RLS（待开发） | `ch_track_kalman`⬜, `ch_track_rls`⬜ | **RX逐符号信道跟踪** |
-| 07 均衡 | RLS-DFE/双向DFE/MMSE-IC/频域MMSE | `eq_dfe`, `eq_bidirectional_dfe`, `eq_mmse_ic_fde`, `eq_linear_rls` | RX均衡 |
-| 07 软信息 | LLR↔符号映射 | `soft_demapper`, `soft_mapper` | Turbo迭代中的软信息交换 |
-| 08 同步 | LFM/HFM/ZC/Barker生成 + 帧同步检测 | `gen_lfm`, `sync_detect` | TX前导生成, RX帧同步 |
-| 09 波形 | RRC成形/匹配 + 上下变频 | `pulse_shape`, `match_filter`, `upconvert`, `downconvert` | TX成形+上变频, RX下变频+匹配 |
-| 10 多普勒 | 估计(xcorr/CAF/CP/ZoomFFT) + 补偿(spline/farrow) | `est_doppler_xcorr`, `comp_resample_spline`, `doppler_coarse_compensate` | RX多普勒估计+补偿 |
-| 12 Turbo迭代 | 4体制Turbo均衡调度 | `turbo_equalizer_scfde`, `turbo_equalizer_sctde`, `turbo_equalizer_ofdm`, `turbo_equalizer_otfs` | RX迭代均衡+译码 |
+| 07 静态信道估计 | LS/MMSE/OMP/SBL/GAMP/AMP/VAMP/Turbo-VAMP/Turbo-AMP | `ch_est_ls`, `ch_est_mmse`, `ch_est_omp`, `ch_est_sbl`, `ch_est_gamp`, `ch_est_amp`, `ch_est_vamp`, `ch_est_turbo_vamp`, `ch_est_turbo_amp` | **RX静态信道估计** |
+| 07 时变信道估计 | ✅ BEM(CE/DCT)/DD-BEM/T-SBL/SAGE | `ch_est_bem`✅, `ch_est_bem_dd`✅, `ch_est_tsbl`✅, `ch_est_sage`✅ | **RX时变信道估计（P3-2核心）** |
+| 07 OTFS估计 | DD域导频估计 | `ch_est_otfs_dd` | OTFS信道估计 |
+| 07 信道跟踪 | ✅ Kalman AR(1) | `ch_track_kalman`✅ | RX逐符号信道跟踪 |
+| 07 均衡(TDE) | RLS/LMS/DFE/BiDFE/线性RLS | `eq_rls`, `eq_lms`, `eq_dfe`, `eq_bidirectional_dfe`, `eq_linear_rls` | SC-TDE均衡 |
+| 07 均衡(FDE) | MMSE-FDE/MMSE-IC/ZF/时变FDE/BEM-Turbo-FDE | `eq_mmse_fde`, `eq_mmse_ic_fde`, `eq_ofdm_zf`, `eq_mmse_tv_fde`, `eq_bem_turbo_fde` | SC-FDE/OFDM均衡 |
+| 07 均衡(OTFS) | MP消息传递/简化MP | `eq_otfs_mp`, `eq_otfs_mp_simplified` | OTFS均衡 |
+| 07 软信息 | LLR↔符号映射 + ISI消除 | `soft_demapper`, `soft_mapper`, `llr_to_symbol`, `symbol_to_llr`, `interference_cancel` | Turbo迭代软信息交换 |
+| 08 同步(L1帧) | LFM/HFM/ZC/Barker + 帧检测(**V2含多普勒补偿**) | `gen_lfm`, `gen_hfm`, `gen_zc_seq`, `gen_barker`, `sync_detect`(V2) | TX前导生成, RX帧同步 |
+| 08 同步(L2符号) | Gardner/MM/超前滞后 TED | `timing_fine`, `cfo_estimate` | 符号定时+CFO估计 |
+| 08 同步(L3位) | ✅ PLL/DFPT/Kalman相位跟踪 | `phase_track`✅ | 位同步/相位跟踪 |
+| 08 帧结构 | 4体制帧组装/解析 | `frame_assemble_sctde`, `frame_parse_sctde`, `..._scfde`, `..._ofdm`, `..._otfs` | 帧组装+解析 |
+| 09 波形 | RRC成形/匹配 + 上下变频 + FSK + DA/AD | `pulse_shape`, `match_filter`, `upconvert`, `downconvert`, `gen_fsk_waveform`, `da_convert`, `ad_convert` | TX成形+上变频, RX下变频+匹配 |
+| 10 多普勒 | 估计(xcorr/CAF/CP/ZoomFFT) + 补偿(spline/farrow/CFO/ICI) | `est_doppler_xcorr`, `est_doppler_caf`, `est_doppler_zoomfft`, `comp_resample_spline`, `comp_cfo_rotate`, `comp_ici_matrix`, `doppler_coarse_compensate` | RX多普勒估计+补偿 |
+| 10 阵列信道 | ✅ M阵元ULA信道 | `gen_uwa_channel_array`✅ | 阵列信道仿真 |
+| 12 Turbo迭代 | 4体制Turbo均衡调度+跨块 | `turbo_equalizer_scfde`, `turbo_equalizer_sctde`, `turbo_equalizer_ofdm`, `turbo_equalizer_otfs`, `turbo_equalizer_scfde_crossblock` | RX迭代均衡+译码 |
 | 13 信道仿真 | 多径+Jakes+多普勒 | `gen_uwa_channel` | 信道仿真 |
 
 ### 2. 调试规则
@@ -123,14 +132,15 @@ diary off;
 7. **测试覆盖**：测试文件名、版本、测试项数，并逐条列出每个用例的**编号、名称、断言条件、说明**（格式见上方测试调试流程中的示例表格）
 8. **可视化说明**：测试生成的figure列表及其展示内容（如"Figure 1: 扩频码自相关/互相关/正交矩阵"）
 
-## 端到端信号流（V3最终版）
+## 端到端信号流（V4 — P3-2更新）
 
 ```
 === TX ===
 02 conv_encode → 03 random_interleave → QPSK映射
+[时变] 插入散布导频(簇长140, 间隔300) → 混合帧[训练|导频+数据交替]
 09 pulse_shape(RRC) → 09 upconvert → 通带实数
 08 gen_lfm(通带实LFM) → 功率归一化
-08 帧组装: [LFM_pb | guard | data_pb | guard | LFM_pb]  全实数
+帧组装: [LFM_pb | guard | data_pb | guard | LFM_pb]  全实数
 
 === 信道仿真 ===
 等效基带帧 → 13 gen_uwa_channel(多径+Jakes+多普勒)
@@ -138,11 +148,12 @@ diary off;
 
 === RX ===
 09 downconvert → 复基带
-08 sync_detect(基带LFM参考, 直达径窗口50样本)
-10 est_doppler_xcorr(前后LFM) → 10 comp_resample_spline(alpha)
-提取数据段 → 09 match_filter(RRC)
-07 ch_est_*(训练序列→信道估计)  ← 必须调用模块07
-07 eq_dfe(h_est初始化) 或 12 turbo_equalizer_*(h_est用于ISI消除)
+10 comp_resample_spline(alpha) → 残余CFO补偿(alpha*fc Hz)
+08 sync_detect(基带LFM参考, **首达径检测**>60%最强峰)
+提取数据段 → 09 match_filter(RRC) → 训练序列相关对齐
+[静态] 07 ch_est_gamp(Toeplitz) → 12 turbo_equalizer_sctde(DFE+BCJR)
+[时变] 07 ch_est_bem('dct',训练+散布导频) → per-symbol MMSE ISI消除
+        iter2+: BCJR软符号 → DD-BEM重估计 → 全ISI消除+MMSE → BCJR
 03 random_deinterleave → 02 siso_decode_conv → bits_out
 ```
 
@@ -154,33 +165,41 @@ diary off;
 - 信道在**等效基带**施加（复增益×复信号=正确）
 - 通带闭环: 基带→upconvert→实噪声→downconvert
 
-### 同步检测
+### 同步检测（P3-2更新）
 - 无噪声信号上做一次(per fading config)
-- 直达径窗口(50样本内搜索), 避免误检反射径/LFM2
-- sync偏移→有效时延调整(整数循环移位+分数相位斜坡)
+- **首达径检测**：取第一个超过最强峰60%的位置（防多径回波锁定，P3-2关键修复）
+- 训练序列相关对齐：用完整训练序列做符号级对齐搜索
 
 ### 信道估计
-- 训练序列构建Toeplitz矩阵: `T_mat(col:end, col) = training(1:end-col+1)'`
-- 调用模块07: `ch_est_omp(y_obs, T_mat, L_h, K)` 等
-- 估计结果用于: DFE权重初始化 + Turbo ISI消除
+- **静态**：训练序列构建Toeplitz → `ch_est_gamp` 或 `ch_est_omp` 等
+- **时变(P3-2)**：`ch_est_bem('dct')` 散布导频BEM时变估计，输出h_tv(P×N_tx)每径每时刻增益
+  - 导频参数：簇长=max_delay+50, 间隔300, 有效观测~610个
+  - 自动Q选择：Q = max(5, 2*ceil(fd*T_frame)+3)
+  - iter2+ DD-BEM重估计：BCJR软符号扩展观测集(置信度>0.5门控)
 
-### 多普勒补偿
-- `comp_resample_spline` V7: 传 **正alpha**（函数内部已改为pos=(1:N)/(1+α)，正alpha=补偿压缩）
+### 多普勒补偿（P3-2更新）
+- `comp_resample_spline` V7: 正alpha直接传入（内部pos=(1:N)/(1+α)）
+- **残余CFO补偿**：重采样后基带仍残留alpha*fc Hz频偏，须在符号率上去除
 - 信道seed不依赖SNR索引（同一信道，只变噪声）
 
-### Turbo均衡（SC-TDE）
-- iter 1: DFE(31,90) + h_est初始化 → LLR → BCJR
-- iter 2+: 软ISI消除 conv(x_bar, h_est) → 单抽头ZF → LLR → BCJR
-- 跨块Turbo（SC-FDE/OFDM）: LMMSE-IC + DD信道更新 + BCJR
+### Turbo均衡（SC-TDE，P3-2 V4.2）
+- **静态**：GAMP估计 → turbo_equalizer_sctde(DFE+BCJR) → 0%BER
+- **时变**：BEM(DCT) per-symbol MMSE ISI消除 + Turbo BCJR
+  - iter 1: 已知位置ISI精确消除 + 未知位置ISI功率建模为噪声 → MMSE单抽头
+  - iter 2+: BCJR软符号 → DD-BEM重估计 → 全ISI消除 + MMSE
+  - nv_post: 从训练段实测（防高SNR时LLR过度自信）
+- **SC-FDE/OFDM跨块Turbo**: LMMSE-IC + DD信道更新 + BCJR
 
 ## 已知问题
 
 | 问题 | 状态 | 说明 |
 |------|------|------|
 | eq_dfe h_est初始化 | 已修复 | V3.1: 匹配滤波初始化前馈+ISI消除初始化反馈 |
-| comp_resample_spline方向 | **已修复** | V7: 内部改为pos=(1:N)/(1+alpha)，正alpha直接传入 |
-| est_doppler_xcorr搜索越界 | 已绕过 | xcorr全局max命中LFM2, fallback到已知alpha |
-| 多普勒估计精度 | 搁置 | 多径下虚假峰问题, 独立课题 |
+| comp_resample_spline方向 | 已修复 | V7: 内部改为pos=(1:N)/(1+alpha)，正alpha直接传入 |
+| 残余CFO未补偿 | **已修复(P3-2)** | 重采样后alpha*fc Hz频偏须在符号率上去除 |
+| sync多径锁定 | **已修复(P3-2)** | 首达径检测(>60%最强峰)替代最强径检测 |
+| SC-FDE/OFDM用oracle | **待修正** | P1/P2需改为ch_est_bem |
+| fd=5Hz低SNR BER | 优化中 | 5dB:15%, 需更好的iter1初始化或增加导频密度 |
 | OTFS通带实现 | 搁置 | DD域二维脉冲成形, 需专项 |
 
 ## Language & Conventions
@@ -201,7 +220,10 @@ addpath(fullfile(proj_root, '07_ChannelEstEq', 'src', 'Matlab'));
 
 ## Reference Materials
 
-- `framework/framework_v5.html` — 系统框架图
+- `framework/framework_v6.html` — 系统框架图（6种体制+阵列）
+- `08_Sync/sync_framework.html` — 三层同步技术框架（帧/符号/位同步）
+- `08_Sync/sync_documentation.md` — 同步技术文档（时变信道下）
+- `10_DopplerProc/UWA_Doppler_MATLAB_Spec.md` — 多普勒估计补偿规范v2.0
 - `12_IterativeProc/turbo_equalizer_implementation.md` — Turbo均衡实现方案
 - `refrence/` — 哈工程殷敬伟课题组学位论文 + Turbo_VAMP参考实现
 - `D:\ProjectTask\Turbo Equalization/` — SC-TDE工程参考
