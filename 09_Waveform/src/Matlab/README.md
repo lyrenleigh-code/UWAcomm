@@ -208,13 +208,13 @@ $$x(t) = I(t) + j\,Q(t)$$
 **原理**: 将频率索引映射为对应频率的正弦波段，相位在符号边界连续（CPFSK）。
 
 **关键公式**:
-```
-第k个频率: f_k = f0 + k * freq_spacing,  k = 0, ..., M-1
-波形段:    waveform_s(t) = cos(2*pi*f_k*t + phi_s)
-相位连续:  phi_{s+1} = phi_s + 2*pi*f_k * T_sym  (mod 2*pi)
+$$f_k = f_0 + k \cdot \Delta f, \quad k = 0, \ldots, M-1$$
 
-正交条件:  freq_spacing >= 1 / sym_duration
-```
+$$\text{waveform}_s(t) = \cos(2\pi f_k t + \varphi_s)$$
+
+$$\varphi_{s+1} = \varphi_s + 2\pi f_k T_{\text{sym}} \pmod{2\pi} \quad \text{(相位连续)}$$
+
+$$\text{正交条件: } \Delta f \ge 1 / T_{\text{sym}}$$
 
 **参数选择**: spacing=1/dur为最小正交间隔（最大频谱效率）。spacing越大频率隔离越好但带宽越大。最高频率须满足 f0+(M-1)*spacing < fs/2。
 
@@ -227,24 +227,20 @@ $$x(t) = I(t) + j\,Q(t)$$
 **原理**: 将浮点信号均匀量化为有限精度，模拟DAC行为。
 
 **关键公式**:
-```
-量化级数:    L = 2^num_bits
-量化步长:    delta = 2*peak / L  (自动适配信号幅度)
-量化:        q(n) = round(x(n)/delta) * delta
-量化噪声功率: sigma_q^2 = delta^2 / 12
-SQNR:        SQNR = 6.02*num_bits + 1.76 dB  (满量程正弦输入)
-```
+$$L = 2^{N_{\text{bits}}}, \quad \Delta = \frac{2 \cdot \text{peak}}{L} \quad \text{(自动适配信号幅度)}$$
+
+$$q(n) = \text{round}\!\left(\frac{x(n)}{\Delta}\right) \cdot \Delta$$
+
+$$\sigma_q^2 = \frac{\Delta^2}{12}, \quad \text{SQNR} = 6.02 \cdot N_{\text{bits}} + 1.76 \;\text{dB} \quad \text{(满量程正弦输入)}$$
 
 #### 6b. AD转换（ad_convert）
 
 **原理**: 模拟ADC行为，含满量程截断和均匀量化。
 
 **关键公式**:
-```
-截断:  x_clip(n) = max(min(x(n), full_scale), -full_scale)
-量化:  同DA转换
-ENOB:  ≈ num_bits - 1（考虑符号位）
-```
+$$x_{\text{clip}}(n) = \max\!\left(\min\!\left(x(n),\; \text{full\_scale}\right),\; -\text{full\_scale}\right)$$
+
+量化同DA转换。$\text{ENOB} \approx N_{\text{bits}} - 1$（考虑符号位）。
 
 **参数选择**: full_scale应略大于信号峰值（默认+10%余量），防止截断失真。num_bits水声典型14~16bit。复数信号需分别对I/Q分量调用。
 
