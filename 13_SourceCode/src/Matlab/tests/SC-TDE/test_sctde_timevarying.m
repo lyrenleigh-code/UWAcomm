@@ -349,28 +349,33 @@ for fi = 1:size(fading_cfgs,1)
             for titer = 1:turbo_iter
 
                 if titer == 1
-                    % --- iter1: 仅已知位置ISI消除 + 单抽头ZF --- %
+                    % --- iter1: 已知位置ISI消除 + MMSE单抽头（ISI建模为噪声）--- %
                     data_eq = zeros(1, N_dsym);
                     for n = 1:N_dsym
                         nn = T + n;
-                        isi = 0;
+                        % 已知位置ISI消除
+                        isi_known = 0;
+                        isi_unknown_pwr = 0;
                         for pp = 1:P_paths
                             d = sym_delays(pp);
                             if d == 0, continue; end
                             idx = nn - d;
-                            if idx >= 1 && idx <= N_tx && known_map(idx)
-                                isi = isi + h_tv(pp, nn) * tx_sym(idx);
+                            if idx >= 1 && idx <= N_tx
+                                if known_map(idx)
+                                    isi_known = isi_known + h_tv(pp, nn) * tx_sym(idx);
+                                else
+                                    % 未知位置ISI功率累加（建模为额外噪声）
+                                    isi_unknown_pwr = isi_unknown_pwr + abs(h_tv(pp, nn))^2;
+                                end
                             end
                         end
                         h0_n = h_tv(1, nn);
-                        rx_ic = rx_sym_recv(nn) - isi;
-                        if abs(h0_n) > 1e-6
-                            data_eq(n) = rx_ic / h0_n;
-                        else
-                            data_eq(n) = rx_ic;
-                        end
+                        rx_ic = rx_sym_recv(nn) - isi_known;
+                        % MMSE：主径信号 vs (AWGN噪声+残余ISI)
+                        nv_total = nv_eq + isi_unknown_pwr;
+                        data_eq(n) = conj(h0_n) * rx_ic / (abs(h0_n)^2 + nv_total);
                     end
-                    % 从训练段估计post-EQ噪声+残余ISI方差（防高SNR时LLR过度自信）
+                    % 从训练段估计post-EQ噪声+残余ISI方差
                     train_eq = data_eq(1:min(T, length(data_eq)));
                     train_ref = training(1:length(train_eq));
                     nv_post = max(var(train_eq - train_ref), nv_eq * 0.1);
