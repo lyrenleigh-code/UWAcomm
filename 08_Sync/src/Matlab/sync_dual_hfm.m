@@ -1,6 +1,6 @@
 function [tau_est, alpha_est, qual, info] = sync_dual_hfm(r, hfm_pos, hfm_neg, fs, params)
 % 功能：双HFM帧同步——正负扫频HFM偏置对消，联合估计无偏时延和多普勒因子
-% 版本：V1.0.0
+% 版本：V1.1.0 — 修正α估计公式，加入帧间隔多普勒压缩修正项
 % 输入：
 %   r        - 接收信号 (1xN 复数/实数)
 %   hfm_pos  - HFM+本地模板（正扫频, f0<f1）(1xL)
@@ -92,15 +92,22 @@ delta_neg = parabola_interp(corr_neg, n_peak_neg);
 tau_pos_precise = n_peak_pos + delta_pos;  % 精确采样点位置(1-based)
 tau_neg_precise = n_peak_neg + delta_neg;
 
-%% ========== 6. 联合估计（偏置对消）========== %%
+%% ========== 6. 联合估计（偏置对消 + 帧间隔压缩修正）========== %%
 % 串联形式：HFM+在前，HFM-在后，间隔frame_gap采样点
-% τ_neg - τ_pos = frame_gap + L + 2*α*S_bias*fs (标称间距 + 偏置差)
-% α = (τ_neg - τ_pos - frame_gap - L) / (2 * S_bias * fs)
-% τ_true = τ_pos + α*S_bias*fs (用HFM+位置+偏置修正)
+% 考虑多普勒对帧间隔的压缩效应：
+%   τ_neg - τ_pos = G/(1+α) + 2*α*S_bias*fs
+%   一阶近似：  ≈ G + α*(2*S_bias*fs - G)
+%   故：α ≈ (τ_neg - τ_pos - G) / (2*S_bias*fs - G)
 %
 % 并联形式(frame_gap=0, L=0): 退化为 (τ++τ-)/2
-nominal_gap = params.frame_gap + L;  % HFM+头到HFM-头的标称距离
-alpha_est = (tau_neg_precise - tau_pos_precise - nominal_gap) / (2 * params.S_bias * fs);
+nominal_gap = params.frame_gap + L;  % HFM+头到HFM-头的标称距离(G)
+denom = 2 * params.S_bias * fs - nominal_gap;
+if abs(denom) < 1e-6
+    % 退化情况：nominal_gap ≈ 2*S_bias*fs，无法估计α
+    alpha_est = 0;
+else
+    alpha_est = (tau_neg_precise - tau_pos_precise - nominal_gap) / denom;
+end
 tau_est = round(tau_pos_precise + alpha_est * params.S_bias * fs);
 
 %% ========== 7. 同步质量评估 ========== %%
