@@ -76,6 +76,45 @@
 | `cfo_hz` | 输出 | 实数 | 频偏估计值 (Hz) | -- |
 | `cfo_norm` | 输出 | 实数 | 归一化频偏（相对于采样率） | -- |
 
+#### `sync_dual_hfm` -- 双HFM帧同步（偏置对消+多普勒联合估计, V1.0）
+
+| 参数 | 方向 | 类型 | 含义 | 默认值 |
+|------|------|------|------|--------|
+| `r` | 输入 | 1xN 复数/实数 | 接收信号 | 无 |
+| `hfm_pos` | 输入 | 1xL 复数 | HFM+模板（正扫频） | 无 |
+| `hfm_neg` | 输入 | 1xL 复数 | HFM-模板（负扫频） | 无 |
+| `fs` | 输入 | 正实数 | 采样率 (Hz) | 无 |
+| `params.S_bias` | 输入 | 正实数 | 偏置灵敏度 T·f̄/B (秒) | **必须** |
+| `params.alpha_max` | 输入 | 正实数 | 预期最大\|α\| | 0.01 |
+| `params.sep_samples` | 输入 | 正整数 | HFM+/HFM-最小间隔(采样点) | L |
+| `params.frame_gap` | 输入 | 非负整数 | HFM+尾到HFM-头标称间距(采样点) | 0 |
+| `tau_est` | 输出 | 整数 | 无偏帧起始位置 (1-based) | -- |
+| `alpha_est` | 输出 | 实数 | 多普勒因子估计 | -- |
+| `qual` | 输出 | 正实数 | 同步质量(峰值/噪底比) | -- |
+| `info` | 输出 | struct | 详细信息(tau_pos/neg, peak_pos/neg, corr_pos/neg) | -- |
+
+**核心算法**：正负HFM偏置方向相反，串联形式公式：
+
+$$\hat{\alpha} = \frac{\hat{\tau}_{-} - \hat{\tau}_{+} - L - \text{gap}}{2 \cdot S_{bias} \cdot f_s}$$
+
+$$\hat{\tau}_{true} = \hat{\tau}_{+} + \hat{\alpha} \cdot S_{bias} \cdot f_s$$
+
+**性能**：定时偏差=0样本，α精度~10⁻⁷（15m/s时），RMSE≈5.5×10⁻⁵
+
+#### `velocity_spectrum` -- 速度谱扫描法多普勒估计（V1.0）
+
+| 参数 | 方向 | 类型 | 含义 | 默认值 |
+|------|------|------|------|--------|
+| `r` | 输入 | 1xN | 接收信号 | 无 |
+| `hfm_pos` | 输入 | 1xL | HFM+模板 | 无 |
+| `hfm_neg` | 输入 | 1xL | HFM-模板 | 无 |
+| `fs` | 输入 | 正实数 | 采样率 | 无 |
+| `params.alpha_range` | 输入 | 1x2 | 搜索范围 | [-0.01, 0.01] |
+| `params.alpha_step` | 输入 | 正实数 | 步长 | 1e-4 |
+| `params.S_bias` | 输入 | 正实数 | 偏置灵敏度 | **必须** |
+| `alpha_est` | 输出 | 实数 | 多普勒因子 | -- |
+| `V_spectrum` | 输出 | 1xN_α | 速度谱 | -- |
+
 ### Layer 2: 符号同步（中粒度，us量级）
 
 #### `timing_fine` -- 细定时同步（Gardner/Mueller-Muller/超前滞后 TED）
@@ -116,6 +155,24 @@
 | `info` | 输出 | struct | 附加信息 | -- |
 | `info.phase_error` | 输出 | 1xN 数组 | 相位误差序列 | -- |
 | `info.corrected` | 输出 | 1xN 复数数组 | 相位补偿后符号 | -- |
+
+#### `pll_carrier_sync` -- DD-PLL载波同步（V1.0）
+
+| 参数 | 方向 | 类型 | 含义 | 默认值 |
+|------|------|------|------|--------|
+| `r` | 输入 | 1xN 复数 | 均衡后符号序列 | 无 |
+| `mod_order` | 输入 | 整数 | 调制阶数(2/4) | 4 |
+| `Kp` | 输入 | 正实数 | PI比例增益 | 0.01 |
+| `Ki` | 输入 | 正实数 | PI积分增益 | 0.005 |
+| `r_pll` | 输出 | 1xN 复数 | 相位补偿后符号 | -- |
+| `phi_track` | 输出 | 1xN 实数 | 相位跟踪轨迹(rad) | -- |
+| `info.phase_error` | 输出 | 1xN 实数 | 逐符号相位误差 | -- |
+
+**核心算法**：二阶PI环路滤波器，逐符号判决导向相位跟踪
+
+$$e[n] = \text{Im}(r_{pll}[n] \cdot \hat{x}^*[n])$$
+
+$$\phi[n+1] = \phi[n] + K_p \cdot e[n] + K_i \sum e$$
 
 ### 帧组装/解析
 
@@ -438,7 +495,7 @@ corrected_symbols = info.corrected;
 - 模块08的 `timing_fine` 测试依赖模块09 (Waveform) 的 `pulse_shape`/`match_filter`
 - CP插入/去除统一在模块06 (MultiCarrier) 中处理，本模块不处理CP
 
-## 测试覆盖 (test_sync.m V2.0, 22项)
+## 测试覆盖 (test_sync.m V3.0, 25项)
 
 | 编号 | 测试名称 | 断言条件 | 说明 |
 |------|---------|---------|------|
@@ -463,7 +520,10 @@ corrected_symbols = info.corrected;
 | 7.3 | Kalman联合跟踪 | `~isempty(freq_est)`, `phase_err_rms < 0.5` | 线性频偏斜率5Hz/s，收敛后RMS<0.5rad |
 | 7.4 | 三种相位跟踪方法 | `all_ok == true`（三种方法输出均非空） | pll/dfpt/kalman全部可运行 |
 | 7.5 | BPSK PLL | `abs(est_phase_tail - phase_offset) < 0.15` | BPSK恒定相偏pi/6，估计偏差<0.15rad |
-| 8.1 | 异常输入拒绝 | `caught == 7`（7项异常全部报错） | 空信号/非法Barker/非法ZC/缺参数等 |
+| 8.1 | 双HFM消偏帧同步 | `abs(tau_err_dual) < 20` 全6速度点 | LFM偏差+400/HFM+偏差-36/双HFM偏差=0@15m/s |
+| 8.2 | 多普勒估计RMSE vs SNR | `alpha_rmse(end) < 5e-3` | α=0.003, 20次蒙特卡洛, RMSE≈5.5e-5 |
+| 8.3 | PLL载波同步 | `err_after < err_before` | CFO=3Hz, MSE改善25.2dB |
+| 9.1 | 异常输入拒绝 | `caught == 9`（9项异常全部报错） | 含sync_dual_hfm/pll_carrier_sync |
 
 ## 可视化说明
 
@@ -471,5 +531,6 @@ corrected_symbols = info.corrected;
 
 | Figure | 名称 | 内容 |
 |--------|------|------|
-| Figure 1 | 多普勒补偿同步对比 | 左: LFM同步 (fd=30Hz)，标准互相关 vs 多普勒补偿，标注真实位置；右: ZC同步 (fd=40Hz)，同样对比 |
-| Figure 2 | 相位跟踪结果 | 3x3子图: (1)PLL相位跟踪曲线 (2)PLL误差 (3)PLL星座图(补偿前/后)；(4)DFPT相位跟踪 (5)DFPT误差 (6)DFPT星座图；(7)Kalman相位跟踪 (8)Kalman频偏估计 (9)Kalman星座图 |
+| Figure 1 | 多普勒补偿同步对比 | 左: LFM同步 (fd=30Hz)，标准互相关 vs 多普勒补偿；右: ZC同步 (fd=40Hz) |
+| Figure 2 | 相位跟踪结果 | 3x3子图: PLL/DFPT/Kalman各自的相位跟踪、误差、星座图 |
+| Figure 3 | 多普勒同步误差分析 | 2x3子图: (1)定时偏差vs速度(LFM/HFM+/双HFM) (2)α估计误差 (3)α估计精度(est vs true) (4)RMSE vs SNR (5)PLL相位跟踪 (6)PLL星座图(补偿前/后) |
