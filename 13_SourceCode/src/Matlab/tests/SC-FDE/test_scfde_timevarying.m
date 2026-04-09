@@ -139,38 +139,30 @@ for fi = 1:size(fading_cfgs,1)
         % 1. 下变频（有噪声信号）
         [bb_raw,~] = downconvert(rx_pb, fs, fc, bw_lfm);
 
-        % 2. 多普勒估计（有噪声信号，CAF二维搜索——两级精度）
-        alpha_est = 0;
-        if abs(dop_rate) > 1e-10
-            try
-                alpha_max = 0.005;
-                % 粗搜索
-                [a_coarse, ~, ~] = est_doppler_caf(bb_raw, HFM_bb_n, fs, [-alpha_max, alpha_max], 5e-5);
-                % 细搜索（粗结果附近±2步长）
-                [a_fine, ~, ~] = est_doppler_caf(bb_raw, HFM_bb_n, fs, ...
-                    [a_coarse-1e-4, a_coarse+1e-4], 1e-5);
-                if ~isempty(a_fine) && isfinite(a_fine)
-                    % CAF在基带信号上估计的alpha与通带约定反号
-                    % 原因：下变频后信号的时间压缩在基带表现为扩展
-                    alpha_est = -a_fine;
-                end
-            catch; end
+        % 2+3+4. 双HFM联合帧同步+多普勒估计（一步完成，无需分离）
+        % 生成HFM-（负扫频）基带模板
+        if abs(f1-f0) < 1e-6
+            phase_hfm_neg = 2*pi*f1*t_pre;
+        else
+            k_neg = f1*f0*T_pre/(f0-f1);
+            phase_hfm_neg = -2*pi*k_neg*log(1 - (f0-f1)/f0*t_pre/T_pre);
         end
+        HFM_bb_neg = exp(1j*(phase_hfm_neg - 2*pi*fc*t_pre)) * lfm_scale;
 
-        % 3. 多普勒补偿（用估计值，非真实值）
+        % 双HFM帧同步+多普勒估计
+        sync_params = struct('S_bias', T_pre * (f_lo+f_hi)/2 / (f_hi-f_lo), ...
+                             'alpha_max', 0.02, 'search_win', round(0.5*length(bb_raw)));
+        [sync_pos, alpha_est, sync_qual, sync_info] = ...
+            sync_dual_hfm(bb_raw, HFM_bb_n, HFM_bb_neg, fs, sync_params);
+        sync_peak = (sync_info.peak_pos + sync_info.peak_neg) / 2;
+
+        % 多普勒补偿
         if abs(alpha_est) > 1e-10
             bb_comp = comp_resample_spline(bb_raw, alpha_est, fs, 'fast');
         else
             bb_comp = bb_raw;
         end
 
-        % 4. 同步检测（有噪声+补偿后信号，首达径检测）
-        [~, ~, corr_noisy] = sync_detect(bb_comp, HFM_bb_n, 0.3);
-        dw = min(50, round(length(corr_noisy)/2));
-        [max_peak, max_pos] = max(corr_noisy(1:dw));
-        first_idx = find(corr_noisy(1:dw) > 0.6*max_peak, 1, 'first');
-        if ~isempty(first_idx), sync_pos=first_idx; sync_peak=corr_noisy(first_idx);
-        else, sync_pos=max_pos; sync_peak=max_peak; end
         sync_offset_samp = sync_pos - 1;
         sync_offset_sym = round(sync_offset_samp / sps);
         sync_offset_sym_frac = sync_offset_samp/sps - sync_offset_sym;
