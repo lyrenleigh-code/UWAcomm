@@ -70,28 +70,19 @@ for n = 1:num_corr
     corr_neg(n) = abs(sum(seg .* conj(hfm_neg))) / sqrt(seg_energy * energy_neg);
 end
 
-%% ========== 4. 分段峰值检测（防互相关串扰）========== %%
-% 策略：先找HFM+峰（搜前半段），再在HFM+峰之后sep_samples处搜HFM-峰
-% 这利用了帧结构：HFM+在前，HFM-在后
-
-% HFM+: 搜索前段（到sep_samples之前）
+%% ========== 4. 分段峰值检测（max峰+插值，无首达径阈值偏差）========== %%
+% HFM+: 搜前段（到sep_samples之前）
 half_win = min(params.sep_samples, num_corr);
-[max_peak_p, max_pos_p] = max(corr_pos(1:half_win));
-first_p = find(corr_pos(1:half_win) > 0.6 * max_peak_p, 1, 'first');
-if ~isempty(first_p), n_peak_pos = first_p; else, n_peak_pos = max_pos_p; end
+[~, n_peak_pos] = max(corr_pos(1:half_win));
 
 % HFM-: 从HFM+峰位置+间隔之后开始搜索
 neg_start = n_peak_pos + params.sep_samples;
 if neg_start < num_corr
     corr_neg_search = corr_neg(neg_start:end);
-    [max_peak_n, max_pos_n_rel] = max(corr_neg_search);
-    first_n_rel = find(corr_neg_search > 0.6 * max_peak_n, 1, 'first');
-    if ~isempty(first_n_rel), n_peak_neg = neg_start + first_n_rel - 1;
-    else, n_peak_neg = neg_start + max_pos_n_rel - 1; end
+    [~, max_pos_n_rel] = max(corr_neg_search);
+    n_peak_neg = neg_start + max_pos_n_rel - 1;
 else
-    % 搜索范围不够，回退到全局搜索
-    [max_peak_n, max_pos_n] = max(corr_neg);
-    n_peak_neg = max_pos_n;
+    [~, n_peak_neg] = max(corr_neg);
 end
 
 %% ========== 5. 亚采样抛物线插值精化 ========== %%
