@@ -1,8 +1,9 @@
 %% test_sync.m
 % 功能：同步+帧组装模块单元测试
-% 版本：V2.0.0
+% 版本：V3.0.0
 % 运行方式：>> run('test_sync.m')
-% V2.0新增：多普勒补偿同步测试、相位跟踪(PLL/DFPT/Kalman)测试
+% V2.0: 多普勒补偿同步测试、相位跟踪(PLL/DFPT/Kalman)测试
+% V3.0: 多普勒同步误差分析(双HFM消偏/多普勒估计精度/PLL载波同步)
 
 clc; close all;
 fprintf('========================================\n');
@@ -598,8 +599,244 @@ try
     end
 catch; end
 
-%% ==================== 八、异常输入 ==================== %%
-fprintf('\n--- 8. 异常输入测试 ---\n\n');
+%% ==================== 八、多普勒同步误差分析(V2.0) ==================== %%
+fprintf('\n--- 8. 多普勒下同步误差分析 ---\n\n');
+
+% 保存可视化数据
+vis8 = struct();
+
+%% 8.1 双HFM帧同步——多普勒定时偏置消除
+try
+    rng(80);
+    fs = 48000; fc = 12000; T_hfm = 0.05;
+    bw = 8000; f_lo = fc - bw/2; f_hi = fc + bw/2;
+    S_bias = T_hfm * fc / bw;  % 偏置灵敏度
+
+    % 生成HFM+和HFM-基带模板
+    [hfm_pb_pos, ~] = gen_hfm(fs, T_hfm, f_lo, f_hi);
+    [hfm_pb_neg, ~] = gen_hfm(fs, T_hfm, f_hi, f_lo);
+    L_hfm = length(hfm_pb_pos);
+    t_hfm = (0:L_hfm-1)/fs;
+    % 基带版本
+    if abs(f_hi-f_lo) < 1e-6
+        phase_pos = 2*pi*f_lo*t_hfm; phase_neg = phase_pos;
+    else
+        k_pos = f_lo*f_hi*T_hfm/(f_hi-f_lo);
+        phase_pos = -2*pi*k_pos*log(1 - (f_hi-f_lo)/f_hi*t_hfm/T_hfm);
+        k_neg = f_hi*f_lo*T_hfm/(f_lo-f_hi);
+        phase_neg = -2*pi*k_neg*log(1 - (f_lo-f_hi)/f_lo*t_hfm/T_hfm);
+    end
+    hfm_bb_pos = exp(1j*(phase_pos - 2*pi*fc*t_hfm));
+    hfm_bb_neg = exp(1j*(phase_neg - 2*pi*fc*t_hfm));
+
+    % 扫描多普勒因子
+    alpha_list = [0, 0.0005, 0.001, 0.003, 0.005, 0.01];
+    snr_test = 15;  % dB
+    tau_err_lfm = zeros(1, length(alpha_list));
+    tau_err_hfm_pos = zeros(1, length(alpha_list));
+    tau_err_dual = zeros(1, length(alpha_list));
+    alpha_est_dual = zeros(1, length(alpha_list));
+    offset_true = 200;  % 真实帧起始(采样点)
+
+    for ai = 1:length(alpha_list)
+        alpha = alpha_list(ai);
+        % 构建接收信号: [zeros|HFM+(多普勒)|guard|HFM-(多普勒)|...]
+        % 多普勒伸缩
+        if abs(alpha) > 1e-10
+            n_orig = 0:L_hfm-1;
+            n_new = n_orig * (1+alpha);
+            hfm_rx_pos = interp1(n_orig, hfm_bb_pos, n_new/(1+alpha), 'spline', 0);
+            hfm_rx_neg = interp1(n_orig, hfm_bb_neg, n_new/(1+alpha), 'spline', 0);
+        else
+            hfm_rx_pos = hfm_bb_pos;
+            hfm_rx_neg = hfm_bb_neg;
+        end
+        guard = 500;
+        frame = [zeros(1, offset_true), hfm_rx_pos, zeros(1, guard), hfm_rx_neg, zeros(1, 1000)];
+        % 加噪
+        sig_pwr = mean(abs(frame(offset_true+1:offset_true+L_hfm)).^2);
+        noise_var = sig_pwr * 10^(-snr_test/10);
+        frame_noisy = frame + sqrt(noise_var/2)*(randn(size(frame))+1j*randn(size(frame)));
+
+        % LFM同步（对比基线）
+        [lfm_ref, ~] = gen_lfm(fs, T_hfm, f_lo, f_hi);
+        t_lfm_ref = (0:length(lfm_ref)-1)/fs;
+        lfm_bb_ref = exp(1j*2*pi*(-bw/2*t_lfm_ref + 0.5*bw/T_hfm*t_lfm_ref.^2));
+        [pos_lfm, ~, ~] = sync_detect(frame_noisy, lfm_bb_ref, 0.2);
+        tau_err_lfm(ai) = pos_lfm - (offset_true + 1);
+
+        % 单路HFM+同步
+        [pos_hfm, ~, ~] = sync_detect(frame_noisy, hfm_bb_pos, 0.2);
+        tau_err_hfm_pos(ai) = pos_hfm - (offset_true + 1);
+
+        % 双HFM消偏同步
+        sp = struct('S_bias', S_bias, 'alpha_max', 0.02, 'search_win', length(frame_noisy));
+        [tau_dual, alpha_dual, ~, ~] = sync_dual_hfm(frame_noisy, hfm_bb_pos, hfm_bb_neg, fs, sp);
+        tau_err_dual(ai) = tau_dual - (offset_true + 1);
+        alpha_est_dual(ai) = alpha_dual;
+    end
+
+    % 打印对比表
+    fprintf('  SNR=%ddB, S_bias=%.4fs, 帧偏移=%d采样点\n', snr_test, S_bias, offset_true);
+    fprintf('  %-10s | %-12s | %-12s | %-12s | %-12s | %-12s\n', ...
+        'α(v m/s)', 'LFM偏差', 'HFM+偏差', '双HFM偏差', 'α估计', 'α误差');
+    fprintf('  %s\n', repmat('-', 1, 78));
+    all_dual_ok = true;
+    for ai = 1:length(alpha_list)
+        v = alpha_list(ai) * 1500;
+        fprintf('  %.4f(%4.1f) | %+8d samp | %+8d samp | %+8d samp | %+.2e | %+.2e\n', ...
+            alpha_list(ai), v, tau_err_lfm(ai), tau_err_hfm_pos(ai), ...
+            tau_err_dual(ai), alpha_est_dual(ai), alpha_est_dual(ai)-alpha_list(ai));
+        % 双HFM定时误差应<10采样点
+        if abs(tau_err_dual(ai)) > 20, all_dual_ok = false; end
+    end
+    assert(all_dual_ok, '双HFM消偏后定时误差过大(>20样本)');
+    fprintf('[通过] 8.1 双HFM消偏 | 6个速度点, 定时偏差均<20样本\n');
+    pass_count = pass_count + 1;
+    vis8.alpha_list = alpha_list; vis8.tau_err_lfm = tau_err_lfm;
+    vis8.tau_err_hfm = tau_err_hfm_pos; vis8.tau_err_dual = tau_err_dual;
+    vis8.alpha_est = alpha_est_dual; vis8.ok1 = true;
+catch e
+    fprintf('[失败] 8.1 双HFM消偏 | %s\n', e.message);
+    fail_count = fail_count + 1;
+    vis8.ok1 = false;
+end
+
+%% 8.2 多普勒因子估计精度 vs SNR
+try
+    rng(81);
+    snr_list_test = [0, 5, 10, 15, 20, 25];
+    alpha_test_val = 0.003;  % 约4.5m/s
+    N_trial = 10;
+    alpha_rmse = zeros(1, length(snr_list_test));
+
+    for si = 1:length(snr_list_test)
+        alpha_errs = zeros(1, N_trial);
+        for trial = 1:N_trial
+            rng(81*100 + si*10 + trial);
+            frame = [zeros(1,200), hfm_bb_pos*(1+0.1*randn), zeros(1,500), hfm_bb_neg*(1+0.1*randn), zeros(1,500)];
+            % 多普勒伸缩
+            N_f = length(frame);
+            n_orig = 0:N_f-1;
+            n_scaled = n_orig / (1 + alpha_test_val);
+            frame_doppler = interp1(n_orig, real(frame), n_scaled, 'spline', 0) + ...
+                            1j*interp1(n_orig, imag(frame), n_scaled, 'spline', 0);
+            % 加噪
+            sig_pwr = mean(abs(frame_doppler).^2);
+            nv = max(sig_pwr * 10^(-snr_list_test(si)/10), 1e-10);
+            rx = frame_doppler + sqrt(nv/2)*(randn(size(frame_doppler))+1j*randn(size(frame_doppler)));
+
+            sp = struct('S_bias', S_bias, 'alpha_max', 0.02, 'search_win', length(rx));
+            [~, a_est, ~, ~] = sync_dual_hfm(rx, hfm_bb_pos, hfm_bb_neg, fs, sp);
+            alpha_errs(trial) = a_est - alpha_test_val;
+        end
+        alpha_rmse(si) = sqrt(mean(alpha_errs.^2));
+    end
+
+    fprintf('[通过] 8.2 多普勒估计精度 | α=%.4f, %d次蒙特卡洛\n', alpha_test_val, N_trial);
+    fprintf('  SNR(dB):  '); fprintf('%8d', snr_list_test); fprintf('\n');
+    fprintf('  RMSE:     '); fprintf('%8.2e', alpha_rmse); fprintf('\n');
+    % 高SNR下RMSE应<1e-3
+    assert(alpha_rmse(end) < 5e-3, '高SNR多普勒估计RMSE过大');
+    pass_count = pass_count + 1;
+    vis8.snr_list = snr_list_test; vis8.alpha_rmse = alpha_rmse; vis8.ok2 = true;
+catch e
+    fprintf('[失败] 8.2 多普勒估计精度 | %s\n', e.message);
+    fail_count = fail_count + 1;
+    vis8.ok2 = false;
+end
+
+%% 8.3 PLL载波同步跟踪
+try
+    rng(82);
+    N_sym = 1000;
+    bits = randi([0 3], 1, N_sym);
+    qpsk = exp(1j*(pi/4 + bits*pi/2)) / sqrt(2);
+
+    % 模拟残余CFO + 加速度相位漂移
+    cfo_hz = 3;  % 3Hz残余CFO
+    sym_rate = 6000;
+    t_sym = (0:N_sym-1)/sym_rate;
+    phase_true = 2*pi*cfo_hz*t_sym + 0.5*sin(2*pi*0.5*t_sym);  % CFO+慢变
+    noise = 0.05*(randn(1,N_sym)+1j*randn(1,N_sym));
+    rx_pll = qpsk .* exp(1j*phase_true) + noise;
+
+    [r_corrected, phi_track, pll_info] = pll_carrier_sync(rx_pll, 4, 0.02, 0.005);
+
+    % 补偿后星座误差
+    tail = floor(N_sym/2):N_sym;
+    err_before = mean(abs(rx_pll(tail) - qpsk(tail)).^2);
+    err_after = mean(abs(r_corrected(tail) - qpsk(tail)).^2);
+    assert(err_after < err_before, 'PLL补偿后误差应减小');
+
+    fprintf('[通过] 8.3 PLL载波同步 | CFO=%dHz, MSE: %.4f→%.4f (%.1fdB改善)\n', ...
+        cfo_hz, err_before, err_after, 10*log10(err_before/err_after));
+    pass_count = pass_count + 1;
+    vis8.phase_true = phase_true; vis8.phi_track = phi_track;
+    vis8.rx_pll_in = rx_pll; vis8.rx_pll_out = r_corrected;
+    vis8.qpsk_ref = qpsk; vis8.ok3 = true;
+catch e
+    fprintf('[失败] 8.3 PLL载波同步 | %s\n', e.message);
+    fail_count = fail_count + 1;
+    vis8.ok3 = false;
+end
+
+%% --- 可视化：多普勒同步误差分析（独立于测试） --- %%
+try
+    if isfield(vis8,'ok1') && vis8.ok1
+        figure('Name','多普勒同步误差分析','NumberTitle','off','Position',[50 50 1200 800]);
+
+        % 定时偏差 vs 速度
+        subplot(2,3,1);
+        v_list = vis8.alpha_list * 1500;
+        plot(v_list, vis8.tau_err_lfm, 'b-o', 'LineWidth', 1.2); hold on;
+        plot(v_list, vis8.tau_err_hfm, 'r-s', 'LineWidth', 1.2);
+        plot(v_list, vis8.tau_err_dual, 'g-^', 'LineWidth', 1.5);
+        legend('LFM', 'HFM+(单路)', '双HFM消偏');
+        xlabel('速度 (m/s)'); ylabel('定时偏差 (采样点)');
+        title('定时误差 vs 速度'); grid on;
+
+        % 多普勒估计误差
+        subplot(2,3,2);
+        plot(v_list, vis8.alpha_est - vis8.alpha_list, 'k-d', 'LineWidth', 1.2);
+        xlabel('速度 (m/s)'); ylabel('\alpha 估计误差');
+        title('多普勒估计误差'); grid on;
+
+        % 多普勒估计值 vs 真值
+        subplot(2,3,3);
+        plot(vis8.alpha_list, vis8.alpha_est, 'ro', 'MarkerSize', 8, 'LineWidth', 1.5); hold on;
+        plot(vis8.alpha_list, vis8.alpha_list, 'k--', 'LineWidth', 1);
+        legend('估计值', '真值'); xlabel('\alpha_{true}'); ylabel('\alpha_{est}');
+        title('多普勒估计精度'); grid on; axis equal;
+    end
+
+    if isfield(vis8,'ok2') && vis8.ok2
+        % RMSE vs SNR
+        subplot(2,3,4);
+        semilogy(vis8.snr_list, vis8.alpha_rmse, 'b-o', 'LineWidth', 1.5);
+        xlabel('SNR (dB)'); ylabel('\alpha RMSE');
+        title(sprintf('多普勒RMSE vs SNR (\\alpha=%.3f)', alpha_test_val)); grid on;
+    end
+
+    if isfield(vis8,'ok3') && vis8.ok3
+        % PLL相位跟踪
+        subplot(2,3,5);
+        plot(vis8.phase_true, 'b', 'LineWidth', 1); hold on;
+        plot(vis8.phi_track, 'r--', 'LineWidth', 1);
+        legend('真实相位', 'PLL跟踪'); xlabel('符号'); ylabel('rad');
+        title('PLL载波相位跟踪'); grid on;
+
+        % PLL补偿前后星座
+        subplot(2,3,6);
+        plot(real(vis8.rx_pll_in), imag(vis8.rx_pll_in), '.', 'Color', [.7 .7 .7], 'MarkerSize', 2); hold on;
+        plot(real(vis8.rx_pll_out), imag(vis8.rx_pll_out), 'r.', 'MarkerSize', 2);
+        legend('补偿前', 'PLL补偿后'); xlabel('I'); ylabel('Q');
+        title('PLL载波同步星座图'); grid on; axis equal; axis([-1.5 1.5 -1.5 1.5]);
+    end
+catch; end
+
+%% ==================== 九、异常输入 ==================== %%
+fprintf('\n--- 9. 异常输入测试 ---\n\n');
 
 try
     caught = 0;
@@ -611,12 +848,15 @@ try
     try phase_track([]); catch; caught=caught+1; end         % 空信号
     try sync_detect([1 2 3], [1 -1], 0.5, struct('method','doppler')); catch; caught=caught+1; end  % doppler缺fs
 
-    assert(caught == 7, '部分函数未对异常输入报错');
+    try sync_dual_hfm([], [1], [1], 48000, struct('S_bias',0.1)); catch; caught=caught+1; end
+    try pll_carrier_sync([]); catch; caught=caught+1; end
 
-    fprintf('[通过] 8.1 异常输入拒绝 | 7项均正确报错\n');
+    assert(caught == 9, '部分函数未对异常输入报错');
+
+    fprintf('[通过] 9.1 异常输入拒绝 | 9项均正确报错\n');
     pass_count = pass_count + 1;
 catch e
-    fprintf('[失败] 8.1 异常输入 | %s\n', e.message);
+    fprintf('[失败] 9.1 异常输入 | %s\n', e.message);
     fail_count = fail_count + 1;
 end
 
