@@ -198,7 +198,10 @@
 | test_channel_est_eq | V2.0.0 | ✅ | 24项测试+6张可视化 |
 | sync_detect | V2.0.0 | ✅ | 新增doppler方法(二维时延-多普勒补偿搜索) |
 | phase_track | V1.0.0 | ✅ | 位同步: PLL/DFPT/Kalman三种相位跟踪 |
-| test_sync | V2.0.0 | ✅ | 22项测试, 可视化与测试分离 |
+| test_sync | V3.0.0 | ✅ | 25项测试(+双HFM消偏/RMSE/PLL) |
+| sync_dual_hfm | V1.0.0 | ✅ | 双HFM消偏帧同步, 零偏差, α精度10⁻⁷ |
+| pll_carrier_sync | V1.0.0 | ✅ | DD-PLL载波同步, 25.2dB MSE改善 |
+| velocity_spectrum | V1.0.0 | ✅ | 速度谱扫描法多普勒估计 |
 
 ---
 
@@ -206,10 +209,12 @@
 
 | 优先级 | 任务 | 状态 | 说明 |
 |--------|------|------|------|
-| ~~P1/P2~~ | ~~SC-FDE/OFDM去oracle~~ | **✅ 完成** | BEM(DCT)/GAMP替代oracle, fd=5Hz<2% |
+| **同步** | **5个端到端测试改双HFM全链路** | **进行中** | SC-FDE已部分改(帧结构需前HFM+后HFM-)，其余4个待改 |
+| **同步** | **SC-FDE帧结构改造** | **待做** | 前导码HFM+/后导码HFM-串联+sync_dual_hfm集成 |
+| ~~P1/P2~~ | ~~SC-FDE/OFDM去oracle~~ | **✅ 完成** | BEM(DCT)/GAMP替代oracle, fd=5Hz<2%(无噪声sync) |
 | P3-2 | fd=5Hz低SNR优化 | 可选 | 增Turbo迭代/iter2+ MMSE精化/导频密度调整 |
 | 07 | 测试运行速度优化 | 待优化 | 4fd×7SNR×4方法=112次Turbo，需减少或并行化 |
 | 07 | fd=10Hz BER非单调问题 | 待分析 | oracle也非零→接近系统ICI极限 |
-| P4 | OTFS端到端 | 待P3 | DD域处理+通带 |
+| P4 | OTFS端到端 | 可开始 | DD域处理+通带 |
 | P5 | DSSS端到端 | 待P4 | 扩频+Rake |
 | P6 | FH-MFSK端到端 | 待P5 | 跳频+能量检测 |
