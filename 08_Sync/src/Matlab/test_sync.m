@@ -713,30 +713,33 @@ end
 
 %% 8.2 多普勒因子估计精度 vs SNR
 try
-    rng(81);
     snr_list_test = [0, 5, 10, 15, 20, 25];
     alpha_test_val = 0.003;  % 约4.5m/s
-    N_trial = 10;
+    N_trial = 20;
     alpha_rmse = zeros(1, length(snr_list_test));
+    bias_samp_test = round(alpha_test_val * S_bias * fs);
 
     for si = 1:length(snr_list_test)
         alpha_errs = zeros(1, N_trial);
         for trial = 1:N_trial
             rng(81*100 + si*10 + trial);
-            frame = [zeros(1,200), hfm_bb_pos*(1+0.1*randn), zeros(1,500), hfm_bb_neg*(1+0.1*randn), zeros(1,500)];
-            % 多普勒伸缩
-            N_f = length(frame);
-            n_orig = 0:N_f-1;
-            n_scaled = n_orig / (1 + alpha_test_val);
-            frame_doppler = interp1(n_orig, real(frame), n_scaled, 'spline', 0) + ...
-                            1j*interp1(n_orig, imag(frame), n_scaled, 'spline', 0);
+            % 用偏置模型构建帧（与8.1一致）
+            frame_t = zeros(1, offset_true + 2*L_hfm + guard + 1000);
+            ps = max(1, offset_true + 1 - bias_samp_test);
+            pe = min(ps + L_hfm - 1, length(frame_t));
+            frame_t(ps:pe) = hfm_bb_pos(1:pe-ps+1);
+            ns = offset_true + L_hfm + guard + 1 + bias_samp_test;
+            ne = min(ns + L_hfm - 1, length(frame_t));
+            frame_t(ns:ne) = hfm_bb_neg(1:ne-ns+1);
+
             % 加噪
-            sig_pwr = mean(abs(frame_doppler).^2);
-            nv = max(sig_pwr * 10^(-snr_list_test(si)/10), 1e-10);
-            rx = frame_doppler + sqrt(nv/2)*(randn(size(frame_doppler))+1j*randn(size(frame_doppler)));
+            sig_pwr_t = mean(abs(hfm_bb_pos).^2);
+            nv = max(sig_pwr_t * 10^(-snr_list_test(si)/10), 1e-10);
+            rx = frame_t + sqrt(nv/2)*(randn(size(frame_t))+1j*randn(size(frame_t)));
 
             sp = struct('S_bias', S_bias, 'alpha_max', 0.02, ...
-                        'search_win', length(rx), 'sep_samples', L_hfm + 500);
+                        'search_win', length(rx), 'sep_samples', L_hfm + guard, ...
+                        'frame_gap', guard);
             [~, a_est, ~, ~] = sync_dual_hfm(rx, hfm_bb_pos, hfm_bb_neg, fs, sp);
             alpha_errs(trial) = a_est - alpha_test_val;
         end
