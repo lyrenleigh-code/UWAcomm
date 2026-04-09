@@ -11,6 +11,10 @@ function [tau_est, alpha_est, qual, info] = sync_dual_hfm(r, hfm_pos, hfm_neg, f
 %       .alpha_max  : 预期最大|α| (默认 0.01)
 %       .search_win : 搜索窗长度 (采样点，默认 length(r)/2)
 %       .threshold  : 归一化峰值检测门限 (默认 0.3)
+%       .sep_samples: HFM+与HFM-之间的最小间隔(采样点，默认 L)
+%                     用于分段搜索防止互相关串扰
+%       .frame_gap  : HFM+尾到HFM-头的帧内标称间距(采样点，默认 0)
+%                     串联形式需提供(= guard + L_hfm)，并联=0
 % 输出：
 %   tau_est   - 无偏帧起始时延 (采样点, 1-based)
 %   alpha_est - 多普勒因子估计
@@ -42,6 +46,8 @@ L = length(hfm_pos);
 M = length(r);
 
 if ~isfield(params, 'search_win'), params.search_win = M - L + 1; end
+if ~isfield(params, 'sep_samples'), params.sep_samples = L; end
+if ~isfield(params, 'frame_gap'), params.frame_gap = 0; end
 
 %% ========== 2. 参数校验 ========== %%
 if isempty(r), error('接收信号不能为空！'); end
@@ -64,16 +70,29 @@ for n = 1:num_corr
     corr_neg(n) = abs(sum(seg .* conj(hfm_neg))) / sqrt(seg_energy * energy_neg);
 end
 
-%% ========== 4. 首达径峰值检测 ========== %%
-% HFM+峰值
-[max_peak_p, max_pos_p] = max(corr_pos);
-first_p = find(corr_pos > 0.6 * max_peak_p, 1, 'first');
+%% ========== 4. 分段峰值检测（防互相关串扰）========== %%
+% 策略：先找HFM+峰（搜前半段），再在HFM+峰之后sep_samples处搜HFM-峰
+% 这利用了帧结构：HFM+在前，HFM-在后
+
+% HFM+: 搜索前段（到sep_samples之前）
+half_win = min(params.sep_samples, num_corr);
+[max_peak_p, max_pos_p] = max(corr_pos(1:half_win));
+first_p = find(corr_pos(1:half_win) > 0.6 * max_peak_p, 1, 'first');
 if ~isempty(first_p), n_peak_pos = first_p; else, n_peak_pos = max_pos_p; end
 
-% HFM-峰值
-[max_peak_n, max_pos_n] = max(corr_neg);
-first_n = find(corr_neg > 0.6 * max_peak_n, 1, 'first');
-if ~isempty(first_n), n_peak_neg = first_n; else, n_peak_neg = max_pos_n; end
+% HFM-: 从HFM+峰位置+间隔之后开始搜索
+neg_start = n_peak_pos + params.sep_samples;
+if neg_start < num_corr
+    corr_neg_search = corr_neg(neg_start:end);
+    [max_peak_n, max_pos_n_rel] = max(corr_neg_search);
+    first_n_rel = find(corr_neg_search > 0.6 * max_peak_n, 1, 'first');
+    if ~isempty(first_n_rel), n_peak_neg = neg_start + first_n_rel - 1;
+    else, n_peak_neg = neg_start + max_pos_n_rel - 1; end
+else
+    % 搜索范围不够，回退到全局搜索
+    [max_peak_n, max_pos_n] = max(corr_neg);
+    n_peak_neg = max_pos_n;
+end
 
 %% ========== 5. 亚采样抛物线插值精化 ========== %%
 delta_pos = parabola_interp(corr_pos, n_peak_pos);
@@ -83,10 +102,15 @@ tau_pos_precise = n_peak_pos + delta_pos;  % 精确采样点位置(1-based)
 tau_neg_precise = n_peak_neg + delta_neg;
 
 %% ========== 6. 联合估计（偏置对消）========== %%
-% τ_true = (τ+ + τ-) / 2  (偏置对消)
-% α = (τ- - τ+) / (2 * S_bias * fs)  (从偏置差估计多普勒)
-tau_est = round((tau_pos_precise + tau_neg_precise) / 2);
-alpha_est = (tau_neg_precise - tau_pos_precise) / (2 * params.S_bias * fs);
+% 串联形式：HFM+在前，HFM-在后，间隔frame_gap采样点
+% τ_neg - τ_pos = frame_gap + L + 2*α*S_bias*fs (标称间距 + 偏置差)
+% α = (τ_neg - τ_pos - frame_gap - L) / (2 * S_bias * fs)
+% τ_true = τ_pos + α*S_bias*fs (用HFM+位置+偏置修正)
+%
+% 并联形式(frame_gap=0, L=0): 退化为 (τ++τ-)/2
+nominal_gap = params.frame_gap + L;  % HFM+头到HFM-头的标称距离
+alpha_est = (tau_neg_precise - tau_pos_precise - nominal_gap) / (2 * params.S_bias * fs);
+tau_est = round(tau_pos_precise + alpha_est * params.S_bias * fs);
 
 %% ========== 7. 同步质量评估 ========== %%
 noise_floor = (mean(corr_pos) + mean(corr_neg)) / 2;

@@ -638,27 +638,32 @@ try
     alpha_est_dual = zeros(1, length(alpha_list));
     offset_true = 200;  % 真实帧起始(采样点)
 
+    guard = 500;
     for ai = 1:length(alpha_list)
         alpha = alpha_list(ai);
-        % 构建接收信号: [zeros|HFM+(多普勒)|guard|HFM-(多普勒)|...]
-        % 多普勒伸缩
-        if abs(alpha) > 1e-10
-            n_orig = 0:L_hfm-1;
-            n_new = n_orig * (1+alpha);
-            hfm_rx_pos = interp1(n_orig, hfm_bb_pos, n_new/(1+alpha), 'spline', 0);
-            hfm_rx_neg = interp1(n_orig, hfm_bb_neg, n_new/(1+alpha), 'spline', 0);
-        else
-            hfm_rx_pos = hfm_bb_pos;
-            hfm_rx_neg = hfm_bb_neg;
-        end
-        guard = 500;
-        frame = [zeros(1, offset_true), hfm_rx_pos, zeros(1, guard), hfm_rx_neg, zeros(1, 1000)];
-        % 加噪
-        sig_pwr = mean(abs(frame(offset_true+1:offset_true+L_hfm)).^2);
-        noise_var = sig_pwr * 10^(-snr_test/10);
-        frame_noisy = frame + sqrt(noise_var/2)*(randn(size(frame))+1j*randn(size(frame)));
+        % 构建帧：[zeros|HFM+|guard|HFM-|zeros]，模拟多普勒通过偏移HFM峰位置
+        % HFM+定时偏置: Δτ+ = -α·S_bias (采样点: -α·S_bias·fs)
+        % HFM-定时偏置: Δτ- = +α·S_bias
+        bias_samp = round(alpha * S_bias * fs);
+        hfm_neg_start = offset_true + L_hfm + guard;
 
-        % LFM同步（对比基线）
+        frame = zeros(1, offset_true + 2*L_hfm + guard + 1000);
+        % HFM+放在 offset_true+1-bias_samp 处（偏置偏早）
+        pos_start = max(1, offset_true + 1 - bias_samp);
+        pos_end = min(pos_start + L_hfm - 1, length(frame));
+        frame(pos_start : pos_end) = hfm_bb_pos(1 : pos_end-pos_start+1);
+        % HFM-放在 hfm_neg_start+1+bias_samp 处（偏置偏晚）
+        neg_start = hfm_neg_start + 1 + bias_samp;
+        neg_end = min(neg_start + L_hfm - 1, length(frame));
+        frame(neg_start : neg_end) = hfm_bb_neg(1 : neg_end-neg_start+1);
+
+        % 加噪
+        sig_pwr = mean(abs(hfm_bb_pos).^2);
+        noise_var_t = sig_pwr * 10^(-snr_test/10);
+        rng(80 + ai);
+        frame_noisy = frame + sqrt(noise_var_t/2)*(randn(size(frame))+1j*randn(size(frame)));
+
+        % LFM同步（对比基线，用LFM模板找HFM+位置）
         [lfm_ref, ~] = gen_lfm(fs, T_hfm, f_lo, f_hi);
         t_lfm_ref = (0:length(lfm_ref)-1)/fs;
         lfm_bb_ref = exp(1j*2*pi*(-bw/2*t_lfm_ref + 0.5*bw/T_hfm*t_lfm_ref.^2));
@@ -670,8 +675,12 @@ try
         tau_err_hfm_pos(ai) = pos_hfm - (offset_true + 1);
 
         % 双HFM消偏同步
-        sp = struct('S_bias', S_bias, 'alpha_max', 0.02, 'search_win', length(frame_noisy));
+        sp = struct('S_bias', S_bias, 'alpha_max', 0.02, ...
+                     'search_win', length(frame_noisy), ...
+                     'sep_samples', L_hfm + guard, ...
+                     'frame_gap', guard);
         [tau_dual, alpha_dual, ~, ~] = sync_dual_hfm(frame_noisy, hfm_bb_pos, hfm_bb_neg, fs, sp);
+        % tau_dual是消偏后的帧起始估计
         tau_err_dual(ai) = tau_dual - (offset_true + 1);
         alpha_est_dual(ai) = alpha_dual;
     end
@@ -726,7 +735,8 @@ try
             nv = max(sig_pwr * 10^(-snr_list_test(si)/10), 1e-10);
             rx = frame_doppler + sqrt(nv/2)*(randn(size(frame_doppler))+1j*randn(size(frame_doppler)));
 
-            sp = struct('S_bias', S_bias, 'alpha_max', 0.02, 'search_win', length(rx));
+            sp = struct('S_bias', S_bias, 'alpha_max', 0.02, ...
+                        'search_win', length(rx), 'sep_samples', L_hfm + 500);
             [~, a_est, ~, ~] = sync_dual_hfm(rx, hfm_bb_pos, hfm_bb_neg, fs, sp);
             alpha_errs(trial) = a_est - alpha_test_val;
         end
