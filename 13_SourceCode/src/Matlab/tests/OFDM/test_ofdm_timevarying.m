@@ -5,8 +5,9 @@
 % RX: 09下变频 → ①LFM相位+CP多普勒估计 → ②重采样补偿 → ③LFM精确定时 →
 %     提取数据 → 09 RRC匹配 → 去CP+FFT → 信道估计+MMSE-IC →
 %     FFT恢复频域符号 → 跨块BCJR
-% 版本：V4.1.0 — 基于SC-FDE V4.0两级分离架构，OFDM调制（IFFT at TX）
+% 版本：V4.2.0 — 基于SC-FDE V4.0两级分离架构，OFDM调制（IFFT at TX）
 %   V4.1: 静态信道估计由GAMP改为OMP（修复高SNR发散）
+%   V4.2: nv_post实测噪声兜底nv_k（修复fd=1Hz高SNR非单调）+ TX/RX波形频谱可视化
 % 与SC-FDE区别：TX有IFFT(06 ofdm_modulate)，RX均衡后FFT恢复频域符号
 
 clc; close all;
@@ -90,6 +91,8 @@ alpha_est_matrix = zeros(size(fading_cfgs,1), length(snr_list));
 sync_info_matrix = zeros(size(fading_cfgs,1), 2);
 H_est_blocks_save = cell(1, size(fading_cfgs,1));
 ch_info_save = cell(1, size(fading_cfgs,1));
+% 保存波形用于可视化（static配置, 10dB SNR）
+wave_save = struct();
 
 fprintf('%-8s |', '');
 for si=1:length(snr_list), fprintf(' %6ddB', snr_list(si)); end
@@ -139,6 +142,17 @@ for fi = 1:size(fading_cfgs,1)
     T_v_lfm = (N_lfm + guard_samp) / fs;  % LFM1头到LFM2头间隔(秒)
     lfm_data_offset = N_lfm + guard_samp;  % LFM2头到data头的距离
 
+    % 保存static配置的TX波形
+    if fi == 1
+        wave_save.frame_bb = frame_bb;
+        wave_save.shaped_bb = shaped_bb;
+        [frame_pb_tx,~] = upconvert(frame_bb, fs, fc);
+        wave_save.frame_pb_tx = frame_pb_tx;
+        wave_save.N_preamble = N_preamble;
+        wave_save.guard_samp = guard_samp;
+        wave_save.N_lfm = N_lfm;
+    end
+
     %% ===== 信道（固定，不随SNR变）===== %%
     ch_params = struct('fs',fs,'delay_profile','custom',...
         'delays_s',sym_delays/sym_rate,'gains',gains_raw,...
@@ -162,6 +176,13 @@ for fi = 1:size(fading_cfgs,1)
         noise_var = sig_pwr * 10^(-snr_db/10);
         rng(300+fi*1000+si*100);
         rx_pb = rx_pb_clean + sqrt(noise_var)*randn(size(rx_pb_clean));
+
+        % 保存static@10dB的RX波形
+        if fi == 1 && snr_db == 10
+            wave_save.rx_pb = rx_pb;
+            wave_save.rx_pb_clean = rx_pb_clean;
+            wave_save.snr_save = snr_db;
+        end
 
         % 1. 下变频（有噪声信号）
         [bb_raw,~] = downconvert(rx_pb, fs, fc, bw_lfm);
@@ -353,6 +374,30 @@ for fi = 1:size(fading_cfgs,1)
         end
         if si == 1, H_est_blocks_save{fi} = H_est_blocks{1}; end
 
+        % 6b. 从CP已知符号实测噪声方差 nv_post（防高SNR时LLR过度自信）
+        nv_post_sum = 0; nv_post_cnt = 0;
+        for bi = 1:N_blocks
+            blk_start = (bi-1)*sym_per_block;
+            % 取该块CIR（时域）
+            h_td_blk = ifft(H_est_blocks{bi});
+            for kk = max(sym_delays)+1 : blk_cp
+                n = blk_start + kk;
+                if n > length(rx_sym_all), break; end
+                y_pred = 0;
+                for pp = 1:K_sparse
+                    d_p = eff_delays(pp) + 1;
+                    idx = n - sym_delays(pp);
+                    if idx >= 1 && idx <= N_total_sym
+                        y_pred = y_pred + h_td_blk(d_p) * all_cp_data(idx);
+                    end
+                end
+                nv_post_sum = nv_post_sum + abs(rx_sym_all(n) - y_pred)^2;
+                nv_post_cnt = nv_post_cnt + 1;
+            end
+        end
+        nv_post = nv_post_sum / max(nv_post_cnt, 1);
+        nv_eq = max(nv_eq, nv_post);  % 取实测值和理论值的较大者
+
         % 7. 分块去CP+FFT
         Y_freq_blocks = cell(1, N_blocks);
         for bi = 1:N_blocks
@@ -387,7 +432,7 @@ for fi = 1:size(fading_cfgs,1)
                 mu_k = real(G_k .* H_eff);
                 mu_k = max(mu_k, 1e-8);
                 nv_k = mu_k .* (1 - mu_k) * var_x_bi + abs(G_k).^2 * nv_eq;
-                nv_k = max(nv_k, 1e-10);
+                nv_k = max(nv_k, nv_post);  % 用实测噪声做下限，防高SNR时LLR过度自信
 
                 % 逐子载波QPSK LLR（与soft_demapper公式一致）
                 scale_k = 2 * mu_k ./ nv_k;
@@ -410,7 +455,7 @@ for fi = 1:size(fading_cfgs,1)
             if diag_iter_ber
                 nc_diag = min(length(bits_decoded), N_info);
                 ber_iter = mean(bits_decoded(1:nc_diag) ~= info_bits(1:nc_diag));
-                if si == 1 || (fi == 1 && snr_db >= 15)
+                if snr_db >= 15
                     fprintf('\n    %s@%ddB iter%d: BER=%.4f%%', fname, snr_db, titer, ber_iter*100);
                 end
             end
@@ -483,13 +528,18 @@ for p=1:length(sym_delays), fprintf(' %.3f', abs(gains(p))); end
 fprintf('\n');
 
 %% ========== 多普勒估计 ========== %%
-fprintf('\n--- 多普勒估计（有噪声, SNR1）---\n');
+fprintf('\n--- 多普勒估计（全SNR）---\n');
 for fi=1:size(fading_cfgs,1)
     alpha_true = fading_cfgs{fi,4};
     if abs(alpha_true) < 1e-10
         fprintf('%-8s: -\n', fading_cfgs{fi,1});
     else
-        fprintf('%-8s: est=%.2e, true=%.2e\n', fading_cfgs{fi,1}, alpha_est_matrix(fi,1), alpha_true);
+        fprintf('%-8s: true=%.2e |', fading_cfgs{fi,1}, alpha_true);
+        for si2=1:length(snr_list)
+            residual_hz = (alpha_est_matrix(fi,si2) - alpha_true) * fc;
+            fprintf(' %ddB:%.2e(Δ%.1fHz)', snr_list(si2), alpha_est_matrix(fi,si2), residual_hz);
+        end
+        fprintf('\n');
     end
 end
 
@@ -594,6 +644,91 @@ for fi=1:size(fading_cfgs,1)
     set(gca, 'FontSize', 10);
 end
 sgtitle('时变信道冲激响应瀑布图', 'FontSize', 14);
+
+% ===== TX/RX时域波形 =====
+figure('Position',[50 50 1400 700]);
+t_frame = (0:length(wave_save.frame_pb_tx)-1)/fs*1000;  % ms
+Np = wave_save.N_preamble; Ng = wave_save.guard_samp; Nl = wave_save.N_lfm;
+% 帧段标记位置
+seg_bounds = [0, Np, Np+Ng, 2*Np+Ng, 2*Np+2*Ng, 2*Np+2*Ng+Nl, ...
+              2*Np+3*Ng+Nl, 2*Np+3*Ng+2*Nl, 2*Np+4*Ng+2*Nl] / fs * 1000;
+seg_labels = {'HFM+','guard','HFM-','guard','LFM1','guard','LFM2','guard'};
+
+% TX通带
+subplot(3,1,1);
+plot(t_frame, wave_save.frame_pb_tx, 'b', 'LineWidth',0.3);
+hold on;
+for ss=1:length(seg_bounds)-1
+    xline(seg_bounds(ss), '--', seg_labels{ss}, 'Color',[0.6 0.6 0.6], ...
+        'LabelVerticalAlignment','top', 'FontSize',7);
+end
+xline(seg_bounds(end), '--', 'data', 'Color',[0.6 0.6 0.6], ...
+    'LabelVerticalAlignment','top', 'FontSize',7);
+xlabel('时间 (ms)'); ylabel('幅值');
+title('TX 通带信号'); grid on;
+
+% RX通带(含噪声)
+subplot(3,1,2);
+t_rx = (0:length(wave_save.rx_pb)-1)/fs*1000;
+plot(t_rx, wave_save.rx_pb, 'r', 'LineWidth',0.3);
+xlabel('时间 (ms)'); ylabel('幅值');
+title(sprintf('RX 通带信号 (static, SNR=%ddB)', wave_save.snr_save)); grid on;
+
+% TX/RX基带包络对比
+subplot(3,1,3);
+t_bb = (0:length(wave_save.frame_bb)-1)/fs*1000;
+plot(t_bb, abs(wave_save.frame_bb), 'b', 'LineWidth',0.5); hold on;
+rx_bb_env = abs(hilbert(wave_save.rx_pb_clean));
+t_rx_env = (0:length(rx_bb_env)-1)/fs*1000;
+plot(t_rx_env, rx_bb_env, 'r', 'LineWidth',0.5);
+xlabel('时间 (ms)'); ylabel('幅值');
+title('基带包络对比（蓝=TX, 红=RX无噪声）');
+legend('TX基带|x|','RX通带包络'); grid on;
+sgtitle('OFDM 帧时域波形', 'FontSize', 14);
+
+% ===== TX/RX频谱分析 =====
+figure('Position',[50 50 1200 600]);
+Nfft_spec = 4096;
+
+% TX通带频谱
+subplot(2,2,1);
+[Pxx_tx, f_tx] = pwelch(wave_save.frame_pb_tx, hamming(Nfft_spec), Nfft_spec/2, Nfft_spec, fs);
+plot(f_tx/1000, 10*log10(Pxx_tx+1e-20), 'b', 'LineWidth',1);
+xlabel('频率 (kHz)'); ylabel('PSD (dB/Hz)');
+title('TX 通带功率谱'); grid on;
+xlim([0 fs/2000]);
+xline(fc/1000, 'r--', sprintf('fc=%dkHz',fc/1000));
+xline(f_lo/1000, 'g--'); xline(f_hi/1000, 'g--');
+
+% RX通带频谱
+subplot(2,2,2);
+[Pxx_rx, f_rx] = pwelch(wave_save.rx_pb, hamming(Nfft_spec), Nfft_spec/2, Nfft_spec, fs);
+plot(f_rx/1000, 10*log10(Pxx_rx+1e-20), 'r', 'LineWidth',1);
+xlabel('频率 (kHz)'); ylabel('PSD (dB/Hz)');
+title(sprintf('RX 通带功率谱 (SNR=%ddB)', wave_save.snr_save)); grid on;
+xlim([0 fs/2000]);
+xline(fc/1000, 'r--'); xline(f_lo/1000, 'g--'); xline(f_hi/1000, 'g--');
+
+% TX基带频谱
+subplot(2,2,3);
+[Pxx_bb, f_bb] = pwelch(wave_save.frame_bb, hamming(Nfft_spec), Nfft_spec/2, Nfft_spec, fs);
+f_bb_shift = f_bb - fs/2;  % 中心化
+Pxx_bb_shift = fftshift(Pxx_bb);
+plot(f_bb_shift/1000, 10*log10(Pxx_bb_shift+1e-20), 'b', 'LineWidth',1);
+xlabel('频率 (kHz)'); ylabel('PSD (dB/Hz)');
+title('TX 基带功率谱'); grid on;
+xline(0, 'r--', 'DC');
+xlim([-fs/4000 fs/4000]);
+
+% TX vs RX通带频谱叠加
+subplot(2,2,4);
+plot(f_tx/1000, 10*log10(Pxx_tx+1e-20), 'b', 'LineWidth',1); hold on;
+plot(f_rx/1000, 10*log10(Pxx_rx+1e-20), 'r', 'LineWidth',0.8);
+xlabel('频率 (kHz)'); ylabel('PSD (dB/Hz)');
+title('TX/RX 通带频谱对比'); grid on;
+legend('TX','RX'); xlim([0 fs/2000]);
+xline(f_lo/1000, 'g--'); xline(f_hi/1000, 'g--');
+sgtitle('OFDM 频谱分析', 'FontSize', 14);
 
 fprintf('\n完成\n');
 
