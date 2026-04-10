@@ -214,7 +214,11 @@ RX：①LFM相位+训练精估α ②resample补偿 ③LFM精确定时 ④残余C
 - fd=1Hz: 0% coded @[0,+10]dB, 0.6%@-5dB (DCD差分检测消除相位漂移)
 - fd=5Hz: ~36-48% (alpha_est符号反→重采样加剧定时漂移，已知限制)
 
-### ⬜ P6: FH-MFSK — 待开始
+### ✅ P6→V1.0: FH-MFSK — 8-FSK + 16位跳频 + 能量检测
+- 8-FSK, 16跳频位, Δf=500Hz, T_sym=2ms, 非相干能量检测(FFT)
+- 750 bps (R=1/2, 3 bits/sym), 无需信道估计/均衡
+- static: 0%@10dB+, fd=1Hz: 0%@5dB+, fd=5Hz: 0%@0dB+
+- 跳频分集在快衰落(fd=5Hz)下最优——每跳独立信道状态
 
 ---
 
