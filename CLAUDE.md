@@ -216,7 +216,7 @@ $$\hat{h} = (\Phi^H \Phi + \lambda I)^{-1} \Phi^H y$$
 |------|------|------|
 | **SC-TDE** | 🔶 V5.0代码完成 | 两级分离+训练精估，待MATLAB测试 |
 | **SC-FDE** | ✅ V4.0验证 | static 0%, fd=1Hz盲0.20%, fd=5Hz待攻关 |
-| **OFDM** | 🔶 V4.0代码完成 | 对齐SC-FDE V4.0，待MATLAB测试 |
+| **OFDM** | 🔶 V4.1 static修复 | OMP替代GAMP修复高SNR发散，fd=1Hz@25dB非单调待排查 |
 | **OTFS** | ⬜ P4待做 | DD域处理+通带 |
 | **DSSS** | ⬜ P5待做 | 扩频+Rake |
 | **FH-MFSK** | ⬜ P6待做 | 跳频+能量检测 |

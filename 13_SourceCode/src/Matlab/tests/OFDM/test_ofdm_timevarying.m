@@ -5,7 +5,8 @@
 % RX: 09下变频 → ①LFM相位+CP多普勒估计 → ②重采样补偿 → ③LFM精确定时 →
 %     提取数据 → 09 RRC匹配 → 去CP+FFT → 信道估计+MMSE-IC →
 %     FFT恢复频域符号 → 跨块BCJR
-% 版本：V4.0.0 — 基于SC-FDE V4.0两级分离架构，OFDM调制（IFFT at TX）
+% 版本：V4.1.0 — 基于SC-FDE V4.0两级分离架构，OFDM调制（IFFT at TX）
+%   V4.1: 静态信道估计由GAMP改为OMP（修复高SNR发散）
 % 与SC-FDE区别：TX有IFFT(06 ofdm_modulate)，RX均衡后FFT恢复频域符号
 
 clc; close all;
@@ -67,6 +68,11 @@ phase_lfm = 2*pi * (f_lo * t_pre + 0.5 * chirp_rate_lfm * t_pre.^2);
 LFM_bb = exp(1j*(phase_lfm - 2*pi*fc*t_pre));
 N_lfm = length(LFM_bb);
 guard_samp = max(sym_delays) * sps + 80;
+
+%% ===== 调试开关 ===== %%
+use_oracle_h = false;   % true=用oracle H跳过OMP，验证均衡器本身
+diag_iter_ber = false;  % true=打印逐迭代BER
+disable_dd = false;     % true=关闭DD信道重估计
 
 snr_list = [0, 5, 10, 15, 20, 25];
 fading_cfgs = {
@@ -258,25 +264,57 @@ for fi = 1:size(fading_cfgs,1)
         nv_eq = max(noise_var, 1e-10);
         eff_delays = mod(sym_delays - sync_offset_sym, blk_fft);
 
+        % Oracle H构建（用于对比和可选替代）
+        h_oracle_td = zeros(1, blk_fft);
         if strcmpi(ftype, 'static')
-            % GAMP估计（用第1块CP段）
-            usable = blk_cp;
-            T_mat = zeros(usable, L_h);
-            tx_blk1 = all_cp_data(1:sym_per_block);
-            for col = 1:L_h
-                for row = col:usable, T_mat(row, col) = tx_blk1(row - col + 1); end
-            end
-            y_train = rx_sym_all(1:usable).';
-            [h_gamp_vec, ~] = ch_est_gamp(y_train, T_mat, L_h, 50, nv_eq);
-            h_td_est = zeros(1, blk_fft);
             for p = 1:K_sparse
-                if sym_delays(p)+1 <= L_h
-                    h_td_est(eff_delays(p)+1) = h_gamp_vec(sym_delays(p)+1);
-                end
+                h_oracle_td(eff_delays(p)+1) = ch_info.h_time(p, 1);
             end
-            H_est_blocks = cell(1, N_blocks);
-            for bi = 1:N_blocks
-                H_est_blocks{bi} = fft(h_td_est) .* phase_ramp_frac;
+        else
+            blk_mid_o = round(sym_per_block / 2);
+            for p = 1:K_sparse
+                t_idx = min(blk_mid_o * sps, size(ch_info.h_time, 2));
+                h_oracle_td(eff_delays(p)+1) = ch_info.h_time(p, t_idx);
+            end
+        end
+        H_oracle = fft(h_oracle_td);
+
+        if strcmpi(ftype, 'static')
+            if use_oracle_h
+                % 直接用oracle H（跳过GAMP）
+                H_est_blocks = cell(1, N_blocks);
+                for bi = 1:N_blocks
+                    H_est_blocks{bi} = H_oracle .* phase_ramp_frac;
+                end
+                if si == 1, fprintf('\n  [ORACLE H] '); end
+            else
+                % OMP稀疏信道估计（模块07 ch_est_omp）
+                usable = blk_cp;
+                T_mat = zeros(usable, L_h);
+                tx_blk1 = all_cp_data(1:sym_per_block);
+                for col = 1:L_h
+                    for row = col:usable, T_mat(row, col) = tx_blk1(row - col + 1); end
+                end
+                y_train = rx_sym_all(1:usable).';
+                [h_omp_vec, ~, omp_support] = ch_est_omp(y_train, T_mat, L_h, K_sparse, nv_eq);
+
+                h_td_est = zeros(1, blk_fft);
+                for p = 1:K_sparse
+                    if sym_delays(p)+1 <= L_h
+                        h_td_est(eff_delays(p)+1) = h_omp_vec(sym_delays(p)+1);
+                    end
+                end
+                H_est_blocks = cell(1, N_blocks);
+                for bi = 1:N_blocks
+                    H_est_blocks{bi} = fft(h_td_est) .* phase_ramp_frac;
+                end
+
+                % OMP诊断（仅首个SNR打印详细信息）
+                if si == 1
+                    H_omp = H_est_blocks{1};
+                    nmse_omp = 10*log10(sum(abs(H_omp - H_oracle).^2) / sum(abs(H_oracle).^2));
+                    fprintf('\n  [OMP NMSE=%.1fdB support=%s]\n', nmse_omp, mat2str(sort(omp_support)-1));
+                end
             end
         else
             % BEM(DCT)跨块估计（每块CP段作为导频）
@@ -368,6 +406,15 @@ for fi = 1:size(fading_cfgs,1)
                 Le_eq_deint, La_dec_info, codec.gen_polys, codec.constraint_len);
             bits_decoded = double(Lpost_info > 0);
 
+            % 逐迭代BER诊断
+            if diag_iter_ber
+                nc_diag = min(length(bits_decoded), N_info);
+                ber_iter = mean(bits_decoded(1:nc_diag) ~= info_bits(1:nc_diag));
+                if si == 1 || (fi == 1 && snr_db >= 15)
+                    fprintf('\n    %s@%ddB iter%d: BER=%.4f%%', fname, snr_db, titer, ber_iter*100);
+                end
+            end
+
             % 3. 反馈 + DD信道重估计
             if titer < turbo_iter
                 Lpost_inter = random_interleave(Lpost_coded, codec.interleave_seed);
@@ -382,7 +429,7 @@ for fi = 1:size(fading_cfgs,1)
                     var_x_blks(bi) = max(var_x_raw, nv_eq);
 
                     % DD信道重估计: H_dd = Y·X̄*/(|X̄|²+ε)
-                    if titer >= 2 && var_x_blks(bi) < 0.5
+                    if ~disable_dd && titer >= 2 && var_x_blks(bi) < 0.5
                         X_bar_eff = x_bar_freq_blks{bi} * ofdm_norm;  % 等效频域参考
                         H_dd_raw = Y_freq_blocks{bi} .* conj(X_bar_eff) ./ (abs(X_bar_eff).^2 + nv_eq);
                         h_dd = ifft(H_dd_raw);
@@ -412,8 +459,8 @@ for fi=1:size(fading_cfgs,1)
         fading_cfgs{fi,1}, sync_info_matrix(fi,1), lfm_expected, sync_info_matrix(fi,2));
 end
 
-%% ========== Oracle信道估计信息 ========== %%
-fprintf('\n--- Oracle H_est（block1, 各径增益）---\n');
+%% ========== 信道估计信息 ========== %%
+fprintf('\n--- H_est block1 各径增益（static=OMP, 时变=BEM）---\n');
 fprintf('%-8s | offset |', '');
 for p=1:length(sym_delays), fprintf(' path%d(d=%d)', p, sym_delays(p)); end
 fprintf('\n');
@@ -511,7 +558,7 @@ for fi=1:nfig
     plot(f_ax, 20*log10(abs(fft(h_ref))+1e-10), 'r--', 'LineWidth',0.8);
     xlabel('频率(kHz)'); ylabel('|H|(dB)');
     title(sprintf('%s: 频响(蓝=估计,红=静态参考)', fading_cfgs{fi,1}));
-    grid on; legend('Oracle H\_est','Static ref','Location','best');
+    grid on; legend('H\_est','Static ref','Location','best');
 end
 
 % 时变CIR瀑布图（2D热力图：时延×时间×幅度）
@@ -596,7 +643,7 @@ for fi=1:size(fading_cfgs,1)
 end
 
 % 信道估计
-fprintf(fid, '\n=== H_est block1 各径增益 ===\n');
+fprintf(fid, '\n=== H_est block1 各径增益（static=OMP, 时变=BEM）===\n');
 for fi=1:size(fading_cfgs,1)
     blk_fft_fi = fading_cfgs{fi,5};
     off_sym = 0;  % LFM精确定时后offset=0
