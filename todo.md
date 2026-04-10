@@ -207,8 +207,14 @@ RX：①LFM相位+训练精估α ②resample补偿 ③LFM精确定时 ④残余C
 - 待优化：时变跳过训练精估(对齐OFDM) + nv_post兜底
 
 ### ⬜ P4: OTFS — 待开始
-### ⬜ P5: DSSS — 待P4
-### ⬜ P6: FH-MFSK — 待P5
+### ✅ P5→V1.0: DSSS — Rake(MRC) + DBPSK + DCD
+- eq_rake.m: Rake接收机(MRC/EGC), Gold(5) L=31
+- 96.8 bps (BPSK, R=1/2, L=31), 处理增益14.9dB
+- static: 0% coded @[-15,+10]dB
+- fd=1Hz: 0% coded @[0,+10]dB, 0.6%@-5dB (DCD差分检测消除相位漂移)
+- fd=5Hz: ~36-48% (alpha_est符号反→重采样加剧定时漂移，已知限制)
+
+### ⬜ P6: FH-MFSK — 待开始
 
 ---
 
@@ -245,9 +251,9 @@ RX：①LFM相位+训练精估α ②resample补偿 ③LFM精确定时 ④残余C
 | 🔴 高 | **模块07 doppler_rate=0修正** | **待做** | test_channel_est_eq.m第701行, 时变均衡测试应含真实Doppler频偏 |
 | 🟡 中 | SC-FDE fd=5Hz联合迭代多普勒 | **保留** | α·fc∈Jakes频谱, 需Turbo环内CFO跟踪或更高fc |
 | 🟡 中 | fd=10Hz BER非单调问题 | 待分析 | oracle也非零→接近系统ICI极限 |
+| ✅ | **DSSS端到端V1.0** | **完成** | Rake(MRC)+DBPSK+DCD, static 0%, fd=1Hz 0%@0dB+, 96.8bps |
 | 🔵 低 | P4 OTFS端到端 | 可开始 | DD域处理+通带 |
-| 🔵 低 | P5 DSSS端到端 | 待P4 | 扩频+Rake |
-| 🔵 低 | P6 FH-MFSK端到端 | 待P5 | 跳频+能量检测 |
+| 🔵 低 | P6 FH-MFSK端到端 | 待P4 | 跳频+能量检测 |
 
 ---
 
