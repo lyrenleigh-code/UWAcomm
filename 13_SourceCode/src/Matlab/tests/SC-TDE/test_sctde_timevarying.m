@@ -1,13 +1,14 @@
 %% test_sctde_timevarying.m — SC-TDE通带仿真 时变信道测试
 % TX: 编码→交织→QPSK→[训练+数据]→09 RRC成形(基带)→09上变频(通带实数)
-%     08 gen_lfm(通带实LFM) → 08帧组装: [LFM|guard|data_pb|guard|LFM] 全实数
+%     帧组装: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]
 % 信道: 等效基带帧 → gen_uwa_channel(多径+Jakes+多普勒) → 09上变频 → +实噪声
-% RX: 09下变频 → 08同步检测(无噪声,直达径窗口) → 10多普勒估计 →
-%     10重采样补偿(-alpha) → 提取数据 → 09 RRC匹配 → 下采样 →
-%     12 Turbo均衡(RLS+PLL+BCJR) → 译码
-% 版本：V4.0.0 — P3-2: 时变路径改用BEM(DCT)+散布导频+ISI消除(TDE方案)
-%   静态路径保持不变(GAMP+turbo_equalizer_sctde)
-%   V3→V4: 替换DFE+Kalman为BEM(DCT) per-symbol ISI消除+MMSE Turbo
+% RX: 09下变频 → ①LFM相位粗估多普勒 → ②粗补偿+训练精估 → ③LFM精确定时 →
+%     提取数据 → 09 RRC匹配 → 残余CFO补偿(alpha_est*fc) →
+%     12 Turbo均衡(GAMP+DFE或BEM+ISI消除) → 译码
+% 版本：V5.0.0 — 两级分离架构：LFM相位+训练精估多普勒（对齐SC-FDE V4.0）
+% 变更：V4→V5 帧结构[HFM+|HFM-|LFM1|LFM2|data]，去oracle dop_rate+无噪声sync
+%   静态路径: GAMP+turbo_equalizer_sctde（不变）
+%   时变路径: BEM(DCT)+散布导频+ISI消除+MMSE Turbo（不变）
 
 clc; close all;
 fprintf('========================================\n');
@@ -32,8 +33,7 @@ sps = 8; sym_rate = 6000; fs = sym_rate*sps; fc = 12000;
 rolloff = 0.35; span_rrc = 6;
 codec = struct('gen_polys',[7,5], 'constraint_len',3, 'interleave_seed',7, 'decode_mode','max-log');
 n_code = 2; mem = codec.constraint_len - 1;
-turbo_iter = 10;  % P3-2优化：从6增到10次
-% DFE(31,90): num_fb覆盖max_delay=90，配合h_est初始化
+turbo_iter = 10;
 eq_params = struct('num_ff',31, 'num_fb',90, 'lambda',0.998, ...
     'pll', struct('enable',true,'Kp',0.01,'Ki',0.005));
 
@@ -43,33 +43,62 @@ gains_raw = [1, 0.6*exp(1j*0.3), 0.45*exp(1j*0.9), 0.3*exp(1j*1.5), 0.2*exp(1j*2
 gains = gains_raw / sqrt(sum(abs(gains_raw).^2));
 
 train_len = 500;
-N_data_sym = 2000;
-M_coded = 2*N_data_sym;
-N_info = M_coded/n_code - mem;
+% N_data_sym在帧参数之后根据目标帧长动态计算
 
-% --- P3-2: 散布导频参数（仅时变路径使用）--- %
-% 关键：导频簇长度须 > max_delay，否则多径分量指向未知数据，BEM观测无效
-% 导频间隔须保证BEM在整个帧内有足够的时间分辨率
-pilot_cluster_len = max(sym_delays) + 50;  % 每簇导频符号数（max_delay+余量）
-pilot_spacing = 300;                   % 数据段内导频间隔
-N_pilot_clusters = floor(N_data_sym / (pilot_spacing + pilot_cluster_len));
-N_total_pilots = N_pilot_clusters * pilot_cluster_len;
-N_data_actual = N_data_sym - N_total_pilots;  % 实际数据符号数
-M_coded_tv = 2 * N_data_actual;        % 时变情况编码位数
-N_info_tv = M_coded_tv / n_code - mem;
+% --- 散布导频参数（仅时变路径）--- %
+pilot_cluster_len = max(sym_delays) + 50;
+pilot_spacing = 300;
 
 h_sym = zeros(1, max(sym_delays)+1);
 for p=1:length(sym_delays), h_sym(sym_delays(p)+1)=gains(p); end
 
-%% ========== 帧参数 ========== %%
+%% ========== 帧参数（HFM + LFM前导码）========== %%
 bw_lfm = sym_rate * (1 + rolloff);
-lfm_dur = 0.05;
+preamble_dur = 0.05;
 f_lo = fc - bw_lfm/2;  f_hi = fc + bw_lfm/2;
-[LFM_pb, ~] = gen_lfm(fs, lfm_dur, f_lo, f_hi);
-N_lfm = length(LFM_pb);
-t_lfm = (0:N_lfm-1)/fs;
-LFM_bb = exp(1j*2*pi*(-bw_lfm/2*t_lfm + 0.5*bw_lfm/lfm_dur*t_lfm.^2));
-guard_samp = max(sym_delays) * sps + 80;
+
+% HFM+（正扫频，Doppler不变性用于帧检测）
+[HFM_pb, ~] = gen_hfm(fs, preamble_dur, f_lo, f_hi);
+N_preamble = length(HFM_pb);
+t_pre = (0:N_preamble-1)/fs;
+
+% HFM基带版本
+f0 = f_lo; f1 = f_hi; T_pre = preamble_dur;
+if abs(f1-f0) < 1e-6
+    phase_hfm = 2*pi*f0*t_pre;
+else
+    k_hfm = f0*f1*T_pre/(f1-f0);
+    phase_hfm = -2*pi*k_hfm*log(1 - (f1-f0)/f1*t_pre/T_pre);
+end
+HFM_bb = exp(1j*(phase_hfm - 2*pi*fc*t_pre));
+
+% HFM-基带版本（负扫频）
+if abs(f1-f0) < 1e-6
+    phase_hfm_neg = 2*pi*f1*t_pre;
+else
+    k_neg = f1*f0*T_pre/(f0-f1);
+    phase_hfm_neg = -2*pi*k_neg*log(1 - (f0-f1)/f0*t_pre/T_pre);
+end
+HFM_bb_neg = exp(1j*(phase_hfm_neg - 2*pi*fc*t_pre));
+
+% LFM基带版本（线性调频）
+chirp_rate_lfm = (f_hi - f_lo) / preamble_dur;
+phase_lfm = 2*pi * (f_lo * t_pre + 0.5 * chirp_rate_lfm * t_pre.^2);
+LFM_bb = exp(1j*(phase_lfm - 2*pi*fc*t_pre));
+N_lfm = length(LFM_bb);
+guard_samp = max(sym_delays) * sps + 80;    % 保护间隔(覆盖最大多径+余量)
+
+% 恢复原始数据长度参数
+N_data_sym = 2000;
+M_coded = 2*N_data_sym;
+N_info = M_coded/n_code - mem;
+
+% 散布导频计算（依赖N_data_sym）
+N_pilot_clusters = floor(N_data_sym / (pilot_spacing + pilot_cluster_len));
+N_total_pilots = N_pilot_clusters * pilot_cluster_len;
+N_data_actual = N_data_sym - N_total_pilots;
+M_coded_tv = 2 * N_data_actual;
+N_info_tv = M_coded_tv / n_code - mem;
 
 snr_list = [5, 10, 15, 20];
 fading_cfgs = {
@@ -78,15 +107,14 @@ fading_cfgs = {
     'fd=5Hz', 'slow',   5,  5/fc;
 };
 
-fprintf('通带: fs=%dHz, fc=%dHz, LFM=%.0f~%.0fHz\n', fs, fc, f_lo, f_hi);
-fprintf('帧: [LFM_pb|guard|data_pb(RRC→UC)|guard|LFM_pb] 全实数\n');
-fprintf('同步: 无噪声(per fading), 直达径窗口(50样本)\n');
-fprintf('均衡: DFE(ff=%d,fb=%d)+GAMP信道估计, Turbo %d次\n\n', ...
-    eq_params.num_ff, eq_params.num_fb, turbo_iter);
+fprintf('通带: fs=%dHz, fc=%dHz, HFM/LFM=%.0f~%.0fHz\n', fs, fc, f_lo, f_hi);
+fprintf('帧: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data], guard=%d样本(%.1fms)\n', guard_samp, guard_samp/fs*1000);
+fprintf('数据: train=%d + data=%d sym\n', train_len, N_data_sym);
+fprintf('RX: ①LFM相位→alpha ②训练精估 ③LFM定时 ④BEM+Turbo(%d轮)\n\n', turbo_iter);
 
 ber_matrix = zeros(size(fading_cfgs,1), length(snr_list));
+alpha_est_matrix = zeros(size(fading_cfgs,1), length(snr_list));
 sync_info_matrix = zeros(size(fading_cfgs,1), 2);
-alpha_est_save = zeros(1, size(fading_cfgs,1));
 
 fprintf('%-8s |', '');
 for si=1:length(snr_list), fprintf(' %6ddB', snr_list(si)); end
@@ -99,10 +127,9 @@ for fi = 1:size(fading_cfgs,1)
     %% ===== TX ===== %%
     rng(100+fi);
     training = constellation(randi(4,1,train_len));
-    pilot_sym_ref = constellation(randi(4,1,pilot_cluster_len));  % 导频参考符号
+    pilot_sym_ref = constellation(randi(4,1,pilot_cluster_len));
 
     if strcmpi(ftype, 'static')
-        % 静态：原始帧结构（无散布导频）
         info_bits = randi([0 1],1,N_info);
         coded = conv_encode(info_bits,codec.gen_polys,codec.constraint_len);
         coded = coded(1:M_coded);
@@ -112,21 +139,17 @@ for fi = 1:size(fading_cfgs,1)
         known_map = [true(1,train_len), false(1,N_data_sym)];
         pilot_positions = [];
     else
-        % 时变：插入散布导频
         info_bits = randi([0 1],1,N_info_tv);
         coded = conv_encode(info_bits,codec.gen_polys,codec.constraint_len);
         coded = coded(1:M_coded_tv);
         [inter_all,~] = random_interleave(coded,codec.interleave_seed);
         data_sym_tv = bits2qpsk(inter_all);
 
-        % 构建混合数据段: [数据... | 导频簇 | 数据... | 导频簇 | ...]
         mixed_seg = zeros(1, N_data_sym);
-        known_seg = false(1, N_data_sym);     % 数据段内已知位置标记
+        known_seg = false(1, N_data_sym);
         pilot_positions = zeros(1, N_pilot_clusters);
-        d_idx = 0;                             % 数据符号游标
-        pos = 1;                               % 混合段写入位置
+        d_idx = 0; pos = 1;
         for kk = 1:N_pilot_clusters
-            % 填充数据到下一个导频位置
             pilot_start = (kk-1) * pilot_spacing + 1;
             n_data_fill = pilot_start - pos;
             if n_data_fill > 0 && d_idx + n_data_fill <= N_data_actual
@@ -134,21 +157,18 @@ for fi = 1:size(fading_cfgs,1)
                 d_idx = d_idx + n_data_fill;
                 pos = pos + n_data_fill;
             end
-            % 插入导频簇
             if pos + pilot_cluster_len - 1 <= N_data_sym
                 mixed_seg(pos : pos+pilot_cluster_len-1) = pilot_sym_ref;
                 known_seg(pos : pos+pilot_cluster_len-1) = true;
-                pilot_positions(kk) = train_len + pos;  % 帧内1-based位置
+                pilot_positions(kk) = train_len + pos;
                 pos = pos + pilot_cluster_len;
             end
         end
-        % 填充剩余数据
         n_remain = N_data_actual - d_idx;
         if n_remain > 0 && pos + n_remain - 1 <= N_data_sym
             mixed_seg(pos : pos+n_remain-1) = data_sym_tv(d_idx+1 : d_idx+n_remain);
             pos = pos + n_remain;
         end
-        % 截断到实际使用长度
         mixed_seg = mixed_seg(1:pos-1);
         known_seg = known_seg(1:pos-1);
 
@@ -162,16 +182,19 @@ for fi = 1:size(fading_cfgs,1)
     [data_pb,~] = upconvert(shaped_bb, fs, fc);
 
     % 功率归一化
-    lfm_scale = sqrt(mean(data_pb.^2)) / sqrt(mean(LFM_pb.^2));
-    LFM_pb_n = LFM_pb * lfm_scale;
+    data_rms = sqrt(mean(data_pb.^2));
+    lfm_scale = data_rms / sqrt(mean(HFM_pb.^2));
+    HFM_bb_n = HFM_bb * lfm_scale;
+    HFM_bb_neg_n = HFM_bb_neg * lfm_scale;
     LFM_bb_n = LFM_bb * lfm_scale;
 
-    % 帧组装（通带实数）
-    frame_pb = [LFM_pb_n, zeros(1,guard_samp), data_pb, zeros(1,guard_samp), LFM_pb_n];
-    frame_bb = [LFM_bb_n, zeros(1,guard_samp), shaped_bb, zeros(1,guard_samp), LFM_bb_n];
-    data_offset = N_lfm + guard_samp;
+    % 帧组装：[HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]
+    frame_bb = [HFM_bb_n, zeros(1,guard_samp), HFM_bb_neg_n, zeros(1,guard_samp), ...
+                LFM_bb_n, zeros(1,guard_samp), LFM_bb_n, zeros(1,guard_samp), shaped_bb];
+    T_v_lfm = (N_lfm + guard_samp) / fs;  % LFM1头到LFM2头间隔(秒)
+    lfm_data_offset = N_lfm + guard_samp;  % LFM2头到data头的距离
 
-    %% ===== 信道（固定）===== %%
+    %% ===== 信道（固定，不随SNR变）===== %%
     ch_params = struct('fs',fs,'delay_profile','custom',...
         'delays_s',sym_delays/sym_rate,'gains',gains_raw,...
         'num_paths',length(sym_delays),'doppler_rate',dop_rate,...
@@ -181,65 +204,110 @@ for fi = 1:size(fading_cfgs,1)
     [rx_pb_clean,~] = upconvert(rx_bb_frame, fs, fc);
     sig_pwr = mean(rx_pb_clean.^2);
 
-    %% ===== 无噪声同步（直达径窗口）===== %%
-    [bb_clean,~] = downconvert(rx_pb_clean, fs, fc, bw_lfm);
-    if abs(dop_rate) > 1e-10
-        bb_clean_comp = comp_resample_spline(bb_clean, dop_rate, fs, 'fast');
-    else
-        bb_clean_comp = bb_clean;
-    end
-    [~, ~, corr_clean] = sync_detect(bb_clean_comp, LFM_bb_n, 0.3);
-    dw = min(50, round(length(corr_clean)/2));
-    [max_peak, max_pos] = max(corr_clean(1:dw));
-    % 首达径检测：找第一个超过最强峰60%的位置（避免锁定多径回波）
-    first_thresh = 0.6 * max_peak;
-    first_idx = find(corr_clean(1:dw) > first_thresh, 1, 'first');
-    if ~isempty(first_idx)
-        sync_pos_fixed = first_idx;
-        sync_peak_clean = corr_clean(first_idx);
-    else
-        sync_pos_fixed = max_pos;
-        sync_peak_clean = max_peak;
-    end
-
-    % 多普勒估计（无噪声）
-    alpha_est_clean = 0;
-    if abs(dop_rate) > 1e-10
-        try
-            [atmp,~,~] = est_doppler_xcorr(bb_clean, LFM_bb_n, ...
-                (N_lfm+guard_samp+N_shaped+guard_samp)/fs, fs, fc);
-            if ~isempty(atmp) && isfinite(atmp), alpha_est_clean=atmp; else, alpha_est_clean=dop_rate; end
-        catch, alpha_est_clean=dop_rate;
-        end
-    end
-
-    sync_info_matrix(fi,:) = [sync_pos_fixed, sync_peak_clean];
-    alpha_est_save(fi) = alpha_est_clean;
     fprintf('%-8s |', fname);
 
-    %% ===== SNR循环 ===== %%
+    %% ===== SNR循环：全链路处理（含sync+多普勒估计+信道估计）===== %%
     for si = 1:length(snr_list)
         snr_db = snr_list(si);
         noise_var = sig_pwr * 10^(-snr_db/10);
         rng(300+fi*1000+si*100);
         rx_pb = rx_pb_clean + sqrt(noise_var)*randn(size(rx_pb_clean));
 
-        % 下变频 + 多普勒重采样补偿
+        % 1. 下变频（有噪声信号）
         [bb_raw,~] = downconvert(rx_pb, fs, fc, bw_lfm);
-        if abs(dop_rate) > 1e-10
-            bb_comp = comp_resample_spline(bb_raw, dop_rate, fs, 'fast');
+
+        % ===== 阶段1: LFM相位粗估 + 训练精估 =====
+        mf_lfm = conj(fliplr(LFM_bb_n));
+        lfm2_search_len = min(3*N_preamble + 4*guard_samp + 2*N_lfm, length(bb_raw));
+        lfm2_start = 2*N_preamble + 2*guard_samp + N_lfm + 1;
+
+        % LFM相位法粗估alpha
+        corr_est = filter(mf_lfm, 1, bb_raw);
+        corr_est_abs = abs(corr_est);
+        lfm1_end = 2*N_preamble + 2*guard_samp + N_lfm + guard_samp;
+        [~, p1_idx] = max(corr_est_abs(1:min(lfm1_end, length(corr_est_abs))));
+        T_v_samp = round(T_v_lfm * fs);
+        p2_center = p1_idx + T_v_samp;
+        p2_margin = max(sym_delays)*sps + 100;
+        p2_lo = max(1, p2_center - p2_margin);
+        p2_hi = min(length(corr_est_abs), p2_center + p2_margin);
+        [~, p2_rel] = max(corr_est_abs(p2_lo:p2_hi));
+        p2_idx = p2_lo + p2_rel - 1;
+        R1 = corr_est(p1_idx); R2 = corr_est(p2_idx);
+        alpha_lfm = angle(R2 * conj(R1)) / (2*pi*fc*T_v_lfm);
+        sync_peak = abs(R1) / sum(abs(LFM_bb_n).^2);
+
+        % 粗补偿+粗提取（用于训练精估）
+        if abs(alpha_lfm) > 1e-10
+            bb_comp1 = comp_resample_spline(bb_raw, alpha_lfm, fs, 'fast');
+        else
+            bb_comp1 = bb_raw;
+        end
+        corr_c1 = abs(filter(mf_lfm, 1, bb_comp1(1:min(lfm2_search_len,length(bb_comp1)))));
+        % 窗口搜索LFM2（防止衰落导致LFM2弱于LFM1旁瓣）
+        [~, lfm1_c1] = max(corr_c1(1:min(lfm1_end,length(corr_c1))));
+        lfm2_exp_c1 = lfm1_c1 + T_v_samp;
+        c1_lo = max(lfm2_start, lfm2_exp_c1 - p2_margin);
+        c1_hi = min(length(corr_c1), lfm2_exp_c1 + p2_margin);
+        [~, c1_rel] = max(corr_c1(c1_lo:c1_hi));
+        lp1 = c1_lo + c1_rel - 1 - N_lfm + 1;
+        d1 = lp1 + lfm_data_offset; e1 = d1 + N_shaped - 1;
+        if e1 > length(bb_comp1), rd1=[bb_comp1(d1:end),zeros(1,e1-length(bb_comp1))];
+        else, rd1=bb_comp1(d1:e1); end
+        [rf1,~] = match_filter(rd1, sps, 'rrc', rolloff, span_rrc);
+        b1=0; bp1=0;
+        for off=0:sps-1
+            st=rf1(off+1:sps:end);
+            n_check = min(length(st), train_len);
+            if n_check >= 10, c=abs(sum(st(1:n_check).*conj(training(1:n_check))));
+                if c>bp1, bp1=c; b1=off; end, end, end
+        rc = rf1(b1+1:sps:end);
+        N_tx = length(tx_sym);
+        if length(rc)>N_tx, rc=rc(1:N_tx);
+        elseif length(rc)<N_tx, rc=[rc,zeros(1,N_tx-length(rc))]; end
+
+        % 训练精估（替代CP精估：训练分两半，计算相位差→残余alpha）
+        T_half = floor(train_len / 2);
+        R_t1 = sum(rc(1:T_half) .* conj(training(1:T_half)));
+        R_t2 = sum(rc(T_half+1:2*T_half) .* conj(training(T_half+1:2*T_half)));
+        alpha_train = angle(R_t2 * conj(R_t1)) / (2*pi*fc*T_half/sym_rate);
+        alpha_est = alpha_lfm + alpha_train;
+
+        % ===== 阶段2: 精补偿 + LFM精确定时 =====
+        if abs(alpha_est) > 1e-10
+            bb_comp = comp_resample_spline(bb_raw, alpha_est, fs, 'fast');
         else
             bb_comp = bb_raw;
         end
 
-        % 用固定sync位置提取数据
-        ds = sync_pos_fixed + data_offset;
-        de = ds + N_shaped - 1;
-        if de > length(bb_comp), rx_data_bb=[bb_comp(ds:end),zeros(1,de-length(bb_comp))];
-        else, rx_data_bb=bb_comp(ds:de); end
+        corr_lfm_comp = abs(filter(mf_lfm, 1, bb_comp(1:min(lfm2_search_len,length(bb_comp)))));
+        % 窗口搜索LFM2：先找LFM1，再在期望位置附近找LFM2
+        [~, lfm1_comp] = max(corr_lfm_comp(1:min(lfm1_end,length(corr_lfm_comp))));
+        lfm2_expected = lfm1_comp + T_v_samp;
+        lfm2_lo = max(lfm2_start, lfm2_expected - p2_margin);
+        lfm2_hi = min(length(corr_lfm_comp), lfm2_expected + p2_margin);
+        % 首达径检测：取窗口内第一个超过最强峰60%的位置
+        corr_win = corr_lfm_comp(lfm2_lo:lfm2_hi);
+        [peak_win, ~] = max(corr_win);
+        first_idx = find(corr_win > 0.6*peak_win, 1, 'first');
+        if isempty(first_idx), [~, first_idx] = max(corr_win); end
+        lfm2_peak_idx = lfm2_lo + first_idx - 1;
+        lfm_pos = lfm2_peak_idx - N_lfm + 1;
 
-        % RRC匹配+下采样（原始方案：sps范围内搜索分数偏移即可）
-        % 注：sync_pos_fixed已体现在ds的数据提取位置中，无需额外补偿
+        if si == 1
+            sync_info_matrix(fi,:) = [lfm_pos, sync_peak];
+        end
+
+        % 数据段提取
+        ds = lfm_pos + lfm_data_offset;
+        de = ds + N_shaped - 1;
+        if de > length(bb_comp)
+            rx_data_bb = [bb_comp(ds:end), zeros(1, de-length(bb_comp))];
+        else
+            rx_data_bb = bb_comp(ds:de);
+        end
+
+        % RRC匹配+下采样+训练对齐
         [rx_filt,~] = match_filter(rx_data_bb, sps, 'rrc', rolloff, span_rrc);
         best_off = 0; best_pwr = 0;
         for off = 0:sps-1
@@ -251,20 +319,17 @@ for fi = 1:size(fading_cfgs,1)
             end
         end
         rx_sym_recv = rx_filt(best_off+1:sps:end);
-        N_tx = length(tx_sym);
         if length(rx_sym_recv)>N_tx, rx_sym_recv=rx_sym_recv(1:N_tx);
         elseif length(rx_sym_recv)<N_tx, rx_sym_recv=[rx_sym_recv,zeros(1,N_tx-length(rx_sym_recv))]; end
 
-        N_tx = length(tx_sym);
         T = train_len;
         N_dsym = N_tx - T;
         nv_eq = max(noise_var, 1e-10);
         P_paths = length(sym_delays);
 
-        % 残余CFO补偿（符号率，不影响sync）
-        % 重采样去时间压缩后，基带仍残留 alpha*fc Hz 频偏
-        if abs(dop_rate) > 1e-10
-            cfo_res_hz = dop_rate * fc;  % 残余CFO (Hz)
+        % 残余CFO补偿（用估计alpha，不用oracle dop_rate）
+        if abs(alpha_est) > 1e-10
+            cfo_res_hz = alpha_est * fc;
             t_sym_vec = (0:length(rx_sym_recv)-1) / sym_rate;
             rx_sym_recv = rx_sym_recv .* exp(-1j*2*pi*cfo_res_hz*t_sym_vec);
         end
@@ -286,7 +351,6 @@ for fi = 1:size(fading_cfgs,1)
 
             % --- 构建BEM观测矩阵（训练 + 散布导频）--- %
             obs_y = []; obs_x = []; obs_n = [];
-            % 训练段观测
             for n = max(sym_delays)+1 : train_len
                 x_vec = zeros(1, P_paths);
                 for pp = 1:P_paths
@@ -299,12 +363,11 @@ for fi = 1:size(fading_cfgs,1)
                     obs_n(end+1) = n;
                 end
             end
-            % 散布导频观测（跳过每簇前max_delay个ISI保护位置）
             max_d = max(sym_delays);
             for kk = 1:N_pilot_clusters
                 pp_pos = pilot_positions(kk);
                 if pp_pos == 0, continue; end
-                for jj = max_d : pilot_cluster_len-1  % 从max_d开始，确保全部径可解析
+                for jj = max_d : pilot_cluster_len-1
                     n = pp_pos + jj;
                     if n > N_tx, break; end
                     x_vec = zeros(1, P_paths);
@@ -330,26 +393,23 @@ for fi = 1:size(fading_cfgs,1)
             [h_tv, ~, bem_info] = ch_est_bem(obs_y(:), obs_x, obs_n(:), N_tx, ...
                 sym_delays, fd_hz, sym_rate, nv_eq, 'dct', bem_opts);
 
-            if si == 1  % 仅第一个SNR打印诊断
-                % 对齐验证：训练段前10符号相关性
+            if si == 1
                 align_corr = abs(sum(rx_sym_recv(1:min(50,train_len)) .* conj(training(1:min(50,train_len))))) / ...
                              (norm(rx_sym_recv(1:min(50,train_len))) * norm(training(1:min(50,train_len))) + 1e-30);
-                fprintf('\n  [对齐] corr(rx,train)=%.3f, best_off=%d样本(%.1f符号) | ', ...
-                    align_corr, best_off, best_off/sps);
-                fprintf('\n  [BEM] Q=%d, obs=%d, cond=%.0f, nmse=%.1fdB | ', ...
-                    bem_info.Q, length(obs_y), bem_info.cond_num, bem_info.nmse_residual);
+                fprintf('\n  [对齐] corr=%.3f, off=%d | [BEM] Q=%d, obs=%d, cond=%.0f | ', ...
+                    align_corr, best_off, bem_info.Q, length(obs_y), bem_info.cond_num);
             end
 
             % --- Turbo迭代 --- %
             [~,perm_turbo_tv] = random_interleave(zeros(1,M_coded_tv), codec.interleave_seed);
-            data_only_idx = find(~known_map(T+1:end));  % 数据段内非导频位置
+            data_only_idx = find(~known_map(T+1:end));
             bits_decoded = [];
-            var_x = 1;  % 初始软符号方差
+            var_x = 1;
 
             for titer = 1:turbo_iter
 
                 if titer == 1
-                    % --- iter1: 已知位置ISI消除 + MMSE单抽头（ISI建模为噪声）--- %
+                    % iter1: 已知位置ISI消除 + MMSE单抽头
                     data_eq = zeros(1, N_dsym);
                     for n = 1:N_dsym
                         nn = T + n;
@@ -376,9 +436,7 @@ for fi = 1:size(fading_cfgs,1)
                     train_ref = training(1:length(train_eq));
                     nv_post = max(var(train_eq - train_ref), nv_eq * 0.1);
                 else
-                    % --- iter2+: 软符号全ISI消除 + MMSE + BEM重估计 --- %
-
-                    % 软符号 → 全帧重建
+                    % iter2+: 软符号全ISI消除 + MMSE + DD-BEM重估计
                     Lp_inter = random_interleave(Lp_coded, codec.interleave_seed);
                     if length(Lp_inter) < M_coded_tv
                         Lp_inter = [Lp_inter, zeros(1, M_coded_tv-length(Lp_inter))];
@@ -390,18 +448,16 @@ for fi = 1:size(fading_cfgs,1)
 
                     full_soft = zeros(1, N_tx);
                     full_soft(1:T) = training;
-                    % 数据位置填软符号
                     n_fill = min(length(x_bar_data), length(data_only_idx));
                     full_soft(T + data_only_idx(1:n_fill)) = x_bar_data(1:n_fill);
-                    % 导频位置填已知符号
                     pilot_idx_seg = find(known_map(T+1:end));
                     full_soft(T + pilot_idx_seg) = tx_sym(T + pilot_idx_seg);
 
-                    % DD-BEM重估计（用软符号扩展观测）
+                    % DD-BEM重估计
                     avg_confidence = mean(abs(Lp_coded));
-                    if avg_confidence > 0.5  % 置信度门控
+                    if avg_confidence > 0.5
                         obs_y2 = []; obs_x2 = []; obs_n2 = [];
-                        dd_step = 4;  % 每4个符号采样一个DD观测
+                        dd_step = 4;
                         for n = max(sym_delays)+1 : N_tx
                             if n <= T || known_map(n)
                                 use = true;
@@ -479,30 +535,30 @@ for fi = 1:size(fading_cfgs,1)
         end
         ber = mean(bits_out(1:nc) ~= info_bits(1:nc));
         ber_matrix(fi,si) = ber;
+        alpha_est_matrix(fi,si) = alpha_est;
         fprintf(' %6.2f%%', ber*100);
     end
-    fprintf('  (sync=%d, peak=%.3f)\n', sync_pos_fixed, sync_peak_clean);
+    fprintf('  (lfm=%d, peak=%.3f)\n', sync_info_matrix(fi,1), sync_info_matrix(fi,2));
 end
 
 %% ========== 同步信息 ========== %%
-fprintf('\n--- 同步信息（无噪声）---\n');
+fprintf('\n--- 同步信息（LFM定时）---\n');
+lfm_expected = 2*N_preamble + 3*guard_samp + N_lfm + 1;
 for fi=1:size(fading_cfgs,1)
-    fprintf('%-8s: sync=%d, peak=%.3f, offset=%.2f sym\n', ...
-        fading_cfgs{fi,1}, sync_info_matrix(fi,1), sync_info_matrix(fi,2), ...
-        (sync_info_matrix(fi,1)-1)/sps);
+    fprintf('%-8s: lfm_pos=%d (expected~%d), peak=%.3f\n', ...
+        fading_cfgs{fi,1}, sync_info_matrix(fi,1), lfm_expected, sync_info_matrix(fi,2));
 end
 
 %% ========== 多普勒估计 ========== %%
-fprintf('\n--- 多普勒估计（无噪声）---\n');
+fprintf('\n--- 多普勒估计（有噪声, SNR=%ddB）---\n', snr_list(1));
 for fi=1:size(fading_cfgs,1)
     alpha_true = fading_cfgs{fi,4};
     if abs(alpha_true) < 1e-10
         fprintf('%-8s: -\n', fading_cfgs{fi,1});
     else
-        fprintf('%-8s: est=%.2e, true=%.2e\n', fading_cfgs{fi,1}, alpha_est_save(fi), alpha_true);
+        fprintf('%-8s: est=%.2e, true=%.2e\n', fading_cfgs{fi,1}, alpha_est_matrix(fi,1), alpha_true);
     end
 end
-
 
 %% ========== 可视化 ========== %%
 figure('Position',[100 400 700 450]);
@@ -533,39 +589,62 @@ f_khz=(0:1023)*sym_rate/1024/1000;
 plot(f_khz,20*log10(abs(fft(h_show))+1e-10),'b','LineWidth',1);
 xlabel('频率(kHz)');ylabel('|H|(dB)');title('信道频响');grid on;
 
-% 通带发射帧时域波形（最后一个fading config的帧）
+% 通带帧波形（构造用于可视化）
+[frame_pb_vis,~] = upconvert(frame_bb, fs, fc);
 figure('Position',[100 350 900 250]);
-t_frame = (0:length(frame_pb)-1)/fs*1000;
-plot(t_frame, frame_pb, 'b', 'LineWidth',0.3); hold on;
-xline(N_lfm/fs*1000, 'r--');
-xline((N_lfm+guard_samp)/fs*1000, 'r--');
-xline((N_lfm+guard_samp+N_shaped)/fs*1000, 'r--');
-xline((N_lfm+guard_samp+N_shaped+guard_samp)/fs*1000, 'r--');
+t_frame = (0:length(frame_pb_vis)-1)/fs*1000;
+plot(t_frame, frame_pb_vis, 'b', 'LineWidth',0.3);
 xlabel('时间 (ms)'); ylabel('幅度'); grid on;
-title(sprintf('通带发射帧（实信号, fc=%dHz, 全长%.1fms）', fc, length(frame_pb)/fs*1000));
-text(N_lfm/2/fs*1000, max(frame_pb)*0.8, 'LFM1', 'FontSize',10, 'Color','r', 'HorizontalAlignment','center');
-text((N_lfm+guard_samp+N_shaped/2)/fs*1000, max(frame_pb)*0.8, 'Train+Data', 'FontSize',10, 'Color','r', 'HorizontalAlignment','center');
-text((2*N_lfm+2*guard_samp+N_shaped-N_lfm/2)/fs*1000, max(frame_pb)*0.8, 'LFM2', 'FontSize',10, 'Color','r', 'HorizontalAlignment','center');
-
-% 通带接收信号（最后一个fading config, 最高SNR）
-figure('Position',[100 650 900 250]);
-t_rx = (0:length(rx_pb)-1)/fs*1000;
-plot(t_rx, rx_pb, 'b', 'LineWidth',0.3);
-xlabel('时间 (ms)'); ylabel('幅度'); grid on;
-title(sprintf('通带接收信号（%s, SNR=%ddB）', fname, snr_list(end)));
-
-% 通带频谱（发射 vs 接收）
-figure('Position',[700 400 500 350]);
-N_spec = length(frame_pb);
-f_spec = (-N_spec/2:N_spec/2-1)*fs/N_spec/1000;
-spec_tx = 20*log10(abs(fftshift(fft(frame_pb)))/N_spec + 1e-10);
-plot(f_spec, spec_tx, 'b', 'LineWidth',0.5); hold on;
-N_spec_rx = length(rx_pb);
-f_spec_rx = (-N_spec_rx/2:N_spec_rx/2-1)*fs/N_spec_rx/1000;
-spec_rx = 20*log10(abs(fftshift(fft(rx_pb)))/N_spec_rx + 1e-10);
-plot(f_spec_rx, spec_rx, 'r', 'LineWidth',0.5);
-xlabel('频率 (kHz)'); ylabel('dB'); grid on;
-title('通带频谱'); legend('TX','RX','Location','best');
-xlim([0 fs/1000/2]);
+title(sprintf('通带发射帧（实信号, fc=%dHz, 全长%.1fms）', fc, length(frame_pb_vis)/fs*1000));
+% 标注各段
+xline(N_preamble/fs*1000, 'r--');
+xline((N_preamble+guard_samp)/fs*1000, 'r--');
+xline((2*N_preamble+guard_samp)/fs*1000, 'r--');
+xline((2*N_preamble+2*guard_samp)/fs*1000, 'r--');
+text(N_preamble/2/fs*1000, max(frame_pb_vis)*0.8, 'HFM+', 'FontSize',9, 'Color','r', 'HorizontalAlignment','center');
+text((2*N_preamble+3*guard_samp+N_lfm/2)/fs*1000, max(frame_pb_vis)*0.8, 'LFM1+2', 'FontSize',9, 'Color','r', 'HorizontalAlignment','center');
 
 fprintf('\n完成\n');
+
+%% ========== 保存结果到txt ========== %%
+result_file = fullfile(fileparts(mfilename('fullpath')), 'test_sctde_timevarying_results.txt');
+fid = fopen(result_file, 'w');
+fprintf(fid, 'SC-TDE 通带时变信道测试结果 — %s\n', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+fprintf(fid, '帧结构: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]\n');
+fprintf(fid, 'fs=%dHz, fc=%dHz, HFM/LFM=%.0f~%.0fHz, sps=%d\n', fs, fc, f_lo, f_hi, sps);
+fprintf(fid, '信道: %d径, delays=[%s], guard=%d\n', length(sym_delays), num2str(sym_delays), guard_samp);
+fprintf(fid, '训练: %d符号, 散布导频: %d簇×%d, 间隔%d\n\n', train_len, N_pilot_clusters, pilot_cluster_len, pilot_spacing);
+
+% BER表格
+fprintf(fid, '=== BER ===\n');
+fprintf(fid, '%-8s |', '');
+for si=1:length(snr_list), fprintf(fid, ' %6ddB', snr_list(si)); end
+fprintf(fid, '\n%s\n', repmat('-',1,8+8*length(snr_list)));
+for fi=1:size(fading_cfgs,1)
+    fprintf(fid, '%-8s |', fading_cfgs{fi,1});
+    for si=1:length(snr_list), fprintf(fid, ' %6.2f%%', ber_matrix(fi,si)*100); end
+    fprintf(fid, '\n');
+end
+
+% 同步信息
+fprintf(fid, '\n=== 同步信息（LFM定时）===\n');
+lfm_expected_f = 2*N_preamble + 3*guard_samp + N_lfm + 1;
+for fi=1:size(fading_cfgs,1)
+    fprintf(fid, '%-8s: lfm_pos=%d (expected~%d), peak=%.3f\n', ...
+        fading_cfgs{fi,1}, sync_info_matrix(fi,1), lfm_expected_f, sync_info_matrix(fi,2));
+end
+
+% 多普勒估计
+fprintf(fid, '\n=== 多普勒估计 (SNR=%ddB) ===\n', snr_list(1));
+for fi=1:size(fading_cfgs,1)
+    alpha_true = fading_cfgs{fi,4};
+    fprintf(fid, '%-8s: alpha_est=%.4e, alpha_true=%.4e', fading_cfgs{fi,1}, alpha_est_matrix(fi,1), alpha_true);
+    if abs(alpha_true) > 1e-10
+        fprintf(fid, ', err=%.1f%%\n', abs(alpha_est_matrix(fi,1)-alpha_true)/abs(alpha_true)*100);
+    else
+        fprintf(fid, '\n');
+    end
+end
+
+fclose(fid);
+fprintf('结果已保存: %s\n', result_file);

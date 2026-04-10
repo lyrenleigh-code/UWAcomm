@@ -77,6 +77,7 @@ UWAcomm/
   - 模块文件夹不存在时**直接新建**
   - 文件命名：`{日期}_{主题}.md`，如 `2026-04-08_P3-2_SC-TDE时变BEM集成.md`
   - 跨模块变更放在主要涉及的模块文件夹下
+- **每次更新todo.md必须同步更新项目仪表盘**：`todo.md`与`D:\Obsidian\workspace\UWAcomm\项目仪表盘.md`保持一致。任何对待办事项、体制进度、已知问题、技术结论的变更，必须同时更新两个文件
 - **模块更新必须同步README**：每次新增、修改或删除模块内的函数文件时，必须同步更新该模块的 `src/Matlab/README.md`（详见下方README要求）
 
 ### 3. MATLAB测试调试流程（详见模块08 sync调试经验）
@@ -136,28 +137,31 @@ $$\hat{h} = (\Phi^H \Phi + \lambda I)^{-1} \Phi^H y$$
 7. **测试覆盖**：测试文件名、版本、测试项数，并逐条列出每个用例的**编号、名称、断言条件、说明**（格式见上方测试调试流程中的示例表格）
 8. **可视化说明**：测试生成的figure列表及其展示内容（如"Figure 1: 扩频码自相关/互相关/正交矩阵"）
 
-## 端到端信号流（V4 — P3-2更新）
+## 端到端信号流（V5 — 三体制统一两级分离架构）
 
 ```
-=== TX ===
+=== TX（三体制通用）===
 02 conv_encode → 03 random_interleave → QPSK映射
-[时变] 插入散布导频(簇长140, 间隔300) → 混合帧[训练|导频+数据交替]
-09 pulse_shape(RRC) → 09 upconvert → 通带实数
-08 gen_lfm(通带实LFM) → 功率归一化
-帧组装: [LFM_pb | guard | data_pb | guard | LFM_pb]  全实数
+[SC-TDE时变] 插入散布导频(簇长140, 间隔300) → 混合帧[训练|导频+数据交替]
+[SC-FDE/OFDM] 分块+CP
+09 pulse_shape(RRC) → 功率归一化
+帧组装: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]  基带复信号
 
 === 信道仿真 ===
 等效基带帧 → 13 gen_uwa_channel(多径+Jakes+多普勒)
 09 upconvert → +实噪声
 
-=== RX ===
+=== RX（两级分离架构）===
 09 downconvert → 复基带
-10 comp_resample_spline(alpha) → 残余CFO补偿(alpha*fc Hz)
-08 sync_detect(基带LFM参考, **首达径检测**>60%最强峰)
-提取数据段 → 09 match_filter(RRC) → 训练序列相关对齐
+阶段1: LFM匹配滤波→双LFM相位差→alpha_lfm(粗估)
+        粗补偿→[SC-FDE/OFDM: CP精估 | SC-TDE: 训练精估]→alpha_est
+阶段2: 精补偿→LFM2匹配定时→数据段提取
+09 match_filter(RRC) → 训练序列相关对齐
+[SC-TDE残余CFO] alpha_est*fc Hz频偏补偿(符号率)
 [静态] 07 ch_est_gamp(Toeplitz) → 12 turbo_equalizer_sctde(DFE+BCJR)
-[时变] 07 ch_est_bem('dct',训练+散布导频) → per-symbol MMSE ISI消除
-        iter2+: BCJR软符号 → DD-BEM重估计 → 全ISI消除+MMSE → BCJR
+[时变SC-TDE] 07 ch_est_bem('dct',训练+散布导频) → per-symbol MMSE ISI消除
+              iter2+: BCJR软符号 → DD-BEM重估计 → 全ISI消除+MMSE → BCJR
+[时变SC-FDE/OFDM] 07 ch_est_bem('dct',CP段) → LMMSE-IC + DD信道更新 + BCJR
 03 random_deinterleave → 02 siso_decode_conv → bits_out
 ```
 
@@ -202,7 +206,7 @@ $$\hat{h} = (\Phi^H \Phi + \lambda I)^{-1} \Phi^H y$$
 | comp_resample_spline方向 | 已修复 | V7: 内部改为pos=(1:N)/(1+alpha)，正alpha直接传入 |
 | 残余CFO未补偿 | **已修复(P3-2)** | 重采样后alpha*fc Hz频偏须在符号率上去除 |
 | sync多径锁定 | **已修复(P3-2)** | 首达径检测(>60%最强峰)替代最强径检测 |
-| SC-FDE/OFDM用oracle | **待修正** | P1/P2需改为ch_est_bem |
+| SC-FDE/OFDM/SC-TDE去oracle | **代码完成** | V4/V5两级分离架构，待MATLAB测试 |
 | fd=5Hz低SNR BER | 优化中 | 5dB:15%, 需更好的iter1初始化或增加导频密度 |
 | OTFS通带实现 | 搁置 | DD域二维脉冲成形, 需专项 |
 
@@ -210,9 +214,9 @@ $$\hat{h} = (\Phi^H \Phi + \lambda I)^{-1} \Phi^H y$$
 
 | 体制 | 状态 | 说明 |
 |------|------|------|
-| **SC-TDE** | ✅ P3完成 | static 0%, fd=1Hz 0%, fd=5Hz 5-15% |
-| **SC-FDE** | ✅ P1完成 | static 0%, 时变待改BEM |
-| **OFDM** | ✅ P2完成 | static 0%, 时变待改BEM |
+| **SC-TDE** | 🔶 V5.0代码完成 | 两级分离+训练精估，待MATLAB测试 |
+| **SC-FDE** | ✅ V4.0验证 | static 0%, fd=1Hz盲0.20%, fd=5Hz待攻关 |
+| **OFDM** | 🔶 V4.0代码完成 | 对齐SC-FDE V4.0，待MATLAB测试 |
 | **OTFS** | ⬜ P4待做 | DD域处理+通带 |
 | **DSSS** | ⬜ P5待做 | 扩频+Rake |
 | **FH-MFSK** | ⬜ P6待做 | 跳频+能量检测 |
