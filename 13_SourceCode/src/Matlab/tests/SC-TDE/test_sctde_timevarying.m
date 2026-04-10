@@ -5,14 +5,14 @@
 % RX: 09下变频 → ①LFM相位粗估多普勒 → ②粗补偿+训练精估 → ③LFM精确定时 →
 %     提取数据 → 09 RRC匹配 → 残余CFO补偿(alpha_est*fc) →
 %     12 Turbo均衡(GAMP+DFE或BEM+ISI消除) → 译码
-% 版本：V5.0.0 — 两级分离架构：LFM相位+训练精估多普勒（对齐SC-FDE V4.0）
+% 版本：V5.1.0 — 修复LFM检测（跳过HFM区域+全局max替代窗口搜索）
 % 变更：V4→V5 帧结构[HFM+|HFM-|LFM1|LFM2|data]，去oracle dop_rate+无噪声sync
 %   静态路径: GAMP+turbo_equalizer_sctde（不变）
 %   时变路径: BEM(DCT)+散布导频+ISI消除+MMSE Turbo（不变）
 
 clc; close all;
 fprintf('========================================\n');
-fprintf('  SC-TDE 通带仿真 — 时变信道测试\n');
+fprintf('  SC-TDE 通带仿真 — 时变信道测试 V5.1\n');
 fprintf('========================================\n\n');
 
 proj_root = fileparts(fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))))));
@@ -219,18 +219,21 @@ for fi = 1:size(fading_cfgs,1)
         % ===== 阶段1: LFM相位粗估 + 训练精估 =====
         mf_lfm = conj(fliplr(LFM_bb_n));
         lfm2_search_len = min(3*N_preamble + 4*guard_samp + 2*N_lfm, length(bb_raw));
-        lfm2_start = 2*N_preamble + 2*guard_samp + N_lfm + 1;
+        % 匹配滤波标称峰值位置（基于帧结构，filter输出在信号尾部达峰）
+        lfm1_peak_nom = 2*N_preamble + 2*guard_samp + N_lfm;   % LFM1峰 = 8800
+        lfm2_peak_nom = 2*N_preamble + 3*guard_samp + 2*N_lfm; % LFM2峰 = 12000
+        lfm_search_margin = max(sym_delays)*sps + 200;           % 搜索半径(覆盖多径+Doppler)
 
-        % LFM相位法粗估alpha
+        % LFM相位法粗估alpha（窗口搜索，避免HFM互相关和LFM1/LFM2互扰）
         corr_est = filter(mf_lfm, 1, bb_raw);
         corr_est_abs = abs(corr_est);
-        lfm1_end = 2*N_preamble + 2*guard_samp + N_lfm + guard_samp;
-        [~, p1_idx] = max(corr_est_abs(1:min(lfm1_end, length(corr_est_abs))));
+        p1_lo = max(1, lfm1_peak_nom - lfm_search_margin);
+        p1_hi = min(lfm1_peak_nom + lfm_search_margin, length(corr_est_abs));
+        [~, p1_rel] = max(corr_est_abs(p1_lo:p1_hi));
+        p1_idx = p1_lo + p1_rel - 1;
         T_v_samp = round(T_v_lfm * fs);
-        p2_center = p1_idx + T_v_samp;
-        p2_margin = max(sym_delays)*sps + 100;
-        p2_lo = max(1, p2_center - p2_margin);
-        p2_hi = min(length(corr_est_abs), p2_center + p2_margin);
+        p2_lo = max(1, lfm2_peak_nom - lfm_search_margin);
+        p2_hi = min(lfm2_peak_nom + lfm_search_margin, length(corr_est_abs));
         [~, p2_rel] = max(corr_est_abs(p2_lo:p2_hi));
         p2_idx = p2_lo + p2_rel - 1;
         R1 = corr_est(p1_idx); R2 = corr_est(p2_idx);
@@ -244,11 +247,8 @@ for fi = 1:size(fading_cfgs,1)
             bb_comp1 = bb_raw;
         end
         corr_c1 = abs(filter(mf_lfm, 1, bb_comp1(1:min(lfm2_search_len,length(bb_comp1)))));
-        % 窗口搜索LFM2（防止衰落导致LFM2弱于LFM1旁瓣）
-        [~, lfm1_c1] = max(corr_c1(1:min(lfm1_end,length(corr_c1))));
-        lfm2_exp_c1 = lfm1_c1 + T_v_samp;
-        c1_lo = max(lfm2_start, lfm2_exp_c1 - p2_margin);
-        c1_hi = min(length(corr_c1), lfm2_exp_c1 + p2_margin);
+        c1_lo = max(1, lfm2_peak_nom - lfm_search_margin);
+        c1_hi = min(lfm2_peak_nom + lfm_search_margin, length(corr_c1));
         [~, c1_rel] = max(corr_c1(c1_lo:c1_hi));
         lp1 = c1_lo + c1_rel - 1 - N_lfm + 1;
         d1 = lp1 + lfm_data_offset; e1 = d1 + N_shaped - 1;
@@ -281,17 +281,10 @@ for fi = 1:size(fading_cfgs,1)
         end
 
         corr_lfm_comp = abs(filter(mf_lfm, 1, bb_comp(1:min(lfm2_search_len,length(bb_comp)))));
-        % 窗口搜索LFM2：先找LFM1，再在期望位置附近找LFM2
-        [~, lfm1_comp] = max(corr_lfm_comp(1:min(lfm1_end,length(corr_lfm_comp))));
-        lfm2_expected = lfm1_comp + T_v_samp;
-        lfm2_lo = max(lfm2_start, lfm2_expected - p2_margin);
-        lfm2_hi = min(length(corr_lfm_comp), lfm2_expected + p2_margin);
-        % 首达径检测：取窗口内第一个超过最强峰60%的位置
-        corr_win = corr_lfm_comp(lfm2_lo:lfm2_hi);
-        [peak_win, ~] = max(corr_win);
-        first_idx = find(corr_win > 0.6*peak_win, 1, 'first');
-        if isempty(first_idx), [~, first_idx] = max(corr_win); end
-        lfm2_peak_idx = lfm2_lo + first_idx - 1;
+        c2_lo = max(1, lfm2_peak_nom - lfm_search_margin);
+        c2_hi = min(lfm2_peak_nom + lfm_search_margin, length(corr_lfm_comp));
+        [~, lfm2_local] = max(corr_lfm_comp(c2_lo:c2_hi));
+        lfm2_peak_idx = c2_lo + lfm2_local - 1;
         lfm_pos = lfm2_peak_idx - N_lfm + 1;
 
         if si == 1
@@ -609,7 +602,7 @@ fprintf('\n完成\n');
 %% ========== 保存结果到txt ========== %%
 result_file = fullfile(fileparts(mfilename('fullpath')), 'test_sctde_timevarying_results.txt');
 fid = fopen(result_file, 'w');
-fprintf(fid, 'SC-TDE 通带时变信道测试结果 — %s\n', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+fprintf(fid, 'SC-TDE 通带时变信道测试结果 V5.1 — %s\n', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
 fprintf(fid, '帧结构: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]\n');
 fprintf(fid, 'fs=%dHz, fc=%dHz, HFM/LFM=%.0f~%.0fHz, sps=%d\n', fs, fc, f_lo, f_hi, sps);
 fprintf(fid, '信道: %d径, delays=[%s], guard=%d\n', length(sym_delays), num2str(sym_delays), guard_samp);

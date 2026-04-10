@@ -202,18 +202,16 @@ for fi = 1:size(fading_cfgs,1)
         lfm2_search_len = min(3*N_preamble + 4*guard_samp + 2*N_lfm, length(bb_raw));
         lfm2_start = 2*N_preamble + 2*guard_samp + N_lfm + 1;
 
-        % LFM相位法粗估（峰位稳定，不随N_blocks变）
+        % LFM相位法粗估（峰位稳定，不随N_blocks变；搜索范围跳过HFM区域）
         corr_est = filter(mf_lfm, 1, bb_raw);
         corr_est_abs = abs(corr_est);
         lfm1_end = 2*N_preamble + 2*guard_samp + N_lfm + guard_samp;
-        [~, p1_idx] = max(corr_est_abs(1:min(lfm1_end, length(corr_est_abs))));
+        lfm1_search_start = 2*N_preamble + 2*guard_samp + 1;  % 跳过HFM+/-区域
+        [~, p1_rel] = max(corr_est_abs(lfm1_search_start:min(lfm1_end, length(corr_est_abs))));
+        p1_idx = lfm1_search_start + p1_rel - 1;
         T_v_samp = round(T_v_lfm * fs);
-        p2_center = p1_idx + T_v_samp;
-        p2_margin = max(sym_delays)*sps + 100;
-        p2_lo = max(1, p2_center - p2_margin);
-        p2_hi = min(length(corr_est_abs), p2_center + p2_margin);
-        [~, p2_rel] = max(corr_est_abs(p2_lo:p2_hi));
-        p2_idx = p2_lo + p2_rel - 1;
+        [~, p2_rel] = max(corr_est_abs(lfm2_start:min(lfm2_search_len, length(corr_est_abs))));
+        p2_idx = lfm2_start + p2_rel - 1;
         R1 = corr_est(p1_idx); R2 = corr_est(p2_idx);
         alpha_lfm = angle(R2 * conj(R1)) / (2*pi*fc*T_v_lfm);
         sync_peak = abs(R1) / sum(abs(LFM_bb_n).^2);
