@@ -72,7 +72,7 @@ UWAcomm/
 - **接收端禁用发射端参数（关键）**：接收端处理链路**严禁使用实际系统中无法获得的发射端参数**。包括但不限于：已知多普勒因子(dop_rate)、已知发射符号(all_cp_data/info_bits)、真实信道(ch_info.h_time)、已知SNR。这些参数**只能用于性能对比基准（oracle baseline），不能作为最终系统的输入**。接收端可用的信息仅限于：接收信号(bb_raw/rx_pb)、已知前导码/训练序列模板、帧结构参数（帧长、CP长度等协议约定）、系统参数（fs/fc/sps等）
 - **信道估计规则**：端到端测试**必须调用模块07的ch_est_*函数**（如ch_est_gamp）从接收信号估计信道。Oracle只能作为性能对比基准
 - 当前SC-FDE/OFDM端到端仍使用oracle H_est，属**待修正项**
-- **每次提交同步更新笔记**：每次git commit后，必须同步更新Obsidian笔记，记录本次变更内容、测试结果和关键发现。笔记存放规则：
+- **每次提交同步更新笔记并清理txt**：每次git commit后，必须同步更新Obsidian笔记，记录本次变更内容、测试结果和关键发现；同时**删除测试目录下的临时txt结果文件**（`test_*_results.txt`等调试产物，不纳入版本控制）。笔记存放规则：
   - 路径：`D:\Obsidian\workspace\UWAcomm\{模块名}\`，如 `08_Sync\`、`13_SourceCode\`
   - 模块文件夹不存在时**直接新建**
   - 文件命名：`{日期}_{主题}.md`，如 `2026-04-08_P3-2_SC-TDE时变BEM集成.md`
@@ -216,7 +216,7 @@ $$\hat{h} = (\Phi^H \Phi + \lambda I)^{-1} \Phi^H y$$
 |------|------|------|
 | **SC-TDE** | 🔶 V5.0代码完成 | 两级分离+训练精估，待MATLAB测试 |
 | **SC-FDE** | ✅ V4.0验证 | static 0%, fd=1Hz盲0.20%, fd=5Hz待攻关 |
-| **OFDM** | ✅ V4.2验证 | OMP+nv_post, static 0%@10dB+, fd=1Hz 0%@15dB+, 0.68%@25dB |
+| **OFDM** | ✅ V4.3固化 | OMP+nv_post+跳过CP+null SC CFO+DD-BEM, 鲁棒架构, fd=1Hz ~1%@15dB+ |
 | **OTFS** | ⬜ P4待做 | DD域处理+通带 |
 | **DSSS** | ⬜ P5待做 | 扩频+Rake |
 | **FH-MFSK** | ⬜ P6待做 | 跳频+能量检测 |

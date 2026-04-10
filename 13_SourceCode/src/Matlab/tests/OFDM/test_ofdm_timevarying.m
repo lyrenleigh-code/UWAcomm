@@ -104,7 +104,14 @@ for fi = 1:size(fading_cfgs,1)
     blk_fft=fading_cfgs{fi,5}; blk_cp=fading_cfgs{fi,6}; N_blocks=fading_cfgs{fi,7};
     sym_per_block = blk_cp + blk_fft;
 
-    M_per_blk = 2*blk_fft;
+    % 空子载波配置（每32个子载波置1个null，用于CFO估计）
+    null_spacing = 32;
+    null_idx = 1:null_spacing:blk_fft;      % null子载波索引(1-based)
+    N_null = length(null_idx);
+    data_idx = setdiff(1:blk_fft, null_idx); % 数据子载波索引
+    N_data_sc = blk_fft - N_null;            % 每块数据子载波数
+
+    M_per_blk = 2*N_data_sc;  % QPSK: 2 bits/symbol, 仅数据子载波
     M_total = M_per_blk * N_blocks;
     N_info = M_total/n_code - mem;
 
@@ -116,14 +123,17 @@ for fi = 1:size(fading_cfgs,1)
     [inter_all,perm_all] = random_interleave(coded,codec.interleave_seed);
     sym_all = bits2qpsk(inter_all);
 
-    % OFDM调制：频域符号 → IFFT+CP（调用模块06 ofdm_modulate）
+    % OFDM调制：数据符号映射到data_idx，null_idx置0
     all_cp_data = zeros(1, N_blocks * sym_per_block);
     for bi=1:N_blocks
-        freq_sym = sym_all((bi-1)*blk_fft+1:bi*blk_fft);  % 频域QPSK子载波符号
-        [x_ofdm, ~] = ofdm_modulate(freq_sym, blk_fft, blk_cp, 'cp');  % IFFT*sqrt(N)+CP
+        data_sym = sym_all((bi-1)*N_data_sc+1:bi*N_data_sc);
+        freq_sym = zeros(1, blk_fft);
+        freq_sym(data_idx) = data_sym;       % 数据子载波
+        % freq_sym(null_idx) = 0;            % null子载波（已初始化为0）
+        [x_ofdm, ~] = ofdm_modulate(freq_sym, blk_fft, blk_cp, 'cp');
         all_cp_data((bi-1)*sym_per_block+1:bi*sym_per_block) = x_ofdm;
     end
-    ofdm_norm = sqrt(blk_fft);  % ofdm_modulate的归一化因子
+    ofdm_norm = sqrt(blk_fft);
 
     [shaped_bb,~,~] = pulse_shape(all_cp_data, sps, 'rrc', rolloff, span);
     N_shaped = length(shaped_bb);
@@ -187,12 +197,12 @@ for fi = 1:size(fading_cfgs,1)
         % 1. 下变频（有噪声信号）
         [bb_raw,~] = downconvert(rx_pb, fs, fc, bw_lfm);
 
-        % ===== LFM相位粗估 + CP精估 =====
+        % ===== LFM相位粗估（时变跳过CP精估）=====
         mf_lfm = conj(fliplr(LFM_bb_n));
         lfm2_search_len = min(3*N_preamble + 4*guard_samp + 2*N_lfm, length(bb_raw));
         lfm2_start = 2*N_preamble + 2*guard_samp + N_lfm + 1;
 
-        % LFM相位法粗估
+        % LFM相位法粗估（峰位稳定，不随N_blocks变）
         corr_est = filter(mf_lfm, 1, bb_raw);
         corr_est_abs = abs(corr_est);
         lfm1_end = 2*N_preamble + 2*guard_samp + N_lfm + guard_samp;
@@ -230,15 +240,18 @@ for fi = 1:size(fading_cfgs,1)
         if length(rc)>N_total_sym, rc=rc(1:N_total_sym);
         elseif length(rc)<N_total_sym, rc=[rc,zeros(1,N_total_sym-length(rc))]; end
 
-        % CP精估
-        Rcp = 0;
-        for bi2 = 1:N_blocks
-            bs2 = (bi2-1)*sym_per_block;
-            Rcp = Rcp + sum(rc(bs2+1:bs2+blk_cp) .* conj(rc(bs2+blk_fft+1:bi2*sym_per_block)));
+        % CP精估（仅静态信道；时变信道跳过——CP相位被Jakes污染，反而引入错误修正）
+        if strcmpi(ftype, 'static')
+            Rcp = 0;
+            for bi2 = 1:N_blocks
+                bs2 = (bi2-1)*sym_per_block;
+                Rcp = Rcp + sum(rc(bs2+1:bs2+blk_cp) .* conj(rc(bs2+blk_fft+1:bi2*sym_per_block)));
+            end
+            alpha_cp = angle(Rcp) / (2*pi*fc*blk_fft/sym_rate);
+            alpha_est = alpha_lfm + alpha_cp;
+        else
+            alpha_est = alpha_lfm;  % 时变：仅用LFM粗估，残余由BEM跟踪
         end
-        alpha_cp = angle(Rcp) / (2*pi*fc*blk_fft/sym_rate);
-        alpha_est = alpha_lfm + alpha_cp;
-        sync_peak = abs(R1) / sum(abs(LFM_bb_n).^2);
 
         % ---- Round 2: 精补偿 + 最终提取 ----
         if abs(alpha_est) > 1e-10
@@ -280,6 +293,53 @@ for fi = 1:size(fading_cfgs,1)
         N_total_sym = N_blocks * sym_per_block;
         if length(rx_sym_all)>N_total_sym, rx_sym_all=rx_sym_all(1:N_total_sym);
         elseif length(rx_sym_all)<N_total_sym, rx_sym_all=[rx_sym_all,zeros(1,N_total_sym-length(rx_sym_all))]; end
+
+        % 5b. 空子载波CFO估计（时变信道：搜索使null能量最小的CFO）
+        if ~strcmpi(ftype, 'static') && N_null >= 2
+            sc_spacing = sym_rate / blk_fft;  % 子载波间隔(Hz)
+            cfo_range = 3;  % 搜索±3Hz
+            % 粗搜（0.1Hz步长）
+            cfo_grid = -cfo_range : 0.1 : cfo_range;
+            E_null_grid = zeros(size(cfo_grid));
+            for ci = 1:length(cfo_grid)
+                cfo_hz = cfo_grid(ci);
+                phase_corr = exp(-1j*2*pi*cfo_hz/sym_rate*(0:blk_fft-1));
+                for bi = 1:N_blocks
+                    blk_sym = rx_sym_all((bi-1)*sym_per_block+1:bi*sym_per_block);
+                    rx_nocp = blk_sym(blk_cp+1:end);
+                    Y_corr = fft(rx_nocp .* phase_corr);
+                    E_null_grid(ci) = E_null_grid(ci) + sum(abs(Y_corr(null_idx)).^2);
+                end
+            end
+            [~, ci_best] = min(E_null_grid);
+            cfo_coarse = cfo_grid(ci_best);
+            % 细搜（0.01Hz步长，±0.15Hz）
+            cfo_fine = (cfo_coarse-0.15) : 0.01 : (cfo_coarse+0.15);
+            E_null_fine = zeros(size(cfo_fine));
+            for ci = 1:length(cfo_fine)
+                cfo_hz = cfo_fine(ci);
+                phase_corr = exp(-1j*2*pi*cfo_hz/sym_rate*(0:blk_fft-1));
+                for bi = 1:N_blocks
+                    blk_sym = rx_sym_all((bi-1)*sym_per_block+1:bi*sym_per_block);
+                    rx_nocp = blk_sym(blk_cp+1:end);
+                    Y_corr = fft(rx_nocp .* phase_corr);
+                    E_null_fine(ci) = E_null_fine(ci) + sum(abs(Y_corr(null_idx)).^2);
+                end
+            end
+            [~, ci_best2] = min(E_null_fine);
+            cfo_est_hz = cfo_fine(ci_best2);
+            % 应用CFO校正到rx_sym_all
+            for bi = 1:N_blocks
+                blk_start = (bi-1)*sym_per_block;
+                n_vec = blk_start + (0:sym_per_block-1);
+                rx_sym_all(blk_start+1:bi*sym_per_block) = ...
+                    rx_sym_all(blk_start+1:bi*sym_per_block) .* ...
+                    exp(-1j*2*pi*cfo_est_hz/sym_rate*n_vec);
+            end
+            alpha_est = alpha_est + cfo_est_hz / fc;  % 累加到总alpha
+        else
+            cfo_est_hz = 0;
+        end
 
         % 6. 信道估计（有噪声信号，每个SNR独立估计）
         nv_eq = max(noise_var, 1e-10);
@@ -443,13 +503,16 @@ for fi = 1:size(fading_cfgs,1)
                     nv_k = max(nv_k, 1e-10);    % 静态：无残余CFO，用极小兜底即可
                 end
 
-                % 逐子载波QPSK LLR（与soft_demapper公式一致）
+                % 仅数据子载波的QPSK LLR（null子载波跳过）
                 scale_k = 2 * mu_k ./ nv_k;
                 Lp_I = -scale_k .* sqrt(2) .* real(X_hat_freq);
                 Lp_Q = -scale_k .* sqrt(2) .* imag(X_hat_freq);
+                % 只取data_idx子载波的LLR
+                Lp_I_data = Lp_I(data_idx);
+                Lp_Q_data = Lp_Q(data_idx);
                 Le_eq_blk = zeros(1, M_per_blk);
-                Le_eq_blk(1:2:end) = Lp_I;
-                Le_eq_blk(2:2:end) = Lp_Q;
+                Le_eq_blk(1:2:end) = Lp_I_data;
+                Le_eq_blk(2:2:end) = Lp_Q_data;
                 LLR_all((bi-1)*M_per_blk+1:bi*M_per_blk) = Le_eq_blk;
             end
 
@@ -483,11 +546,15 @@ for fi = 1:size(fading_cfgs,1)
                 var_x_avg = 0;
                 for bi = 1:N_blocks
                     coded_blk = Lpost_inter((bi-1)*M_per_blk+1:bi*M_per_blk);
-                    [x_bar_freq_blks{bi}, var_x_raw] = soft_mapper(coded_blk, 'qpsk');
+                    [x_bar_data, var_x_raw] = soft_mapper(coded_blk, 'qpsk');
                     var_x_blks(bi) = max(var_x_raw, nv_eq);
                     var_x_avg = var_x_avg + var_x_blks(bi);
+                    % 映射回blk_fft维频域向量（null子载波为0）
+                    x_bar_freq_full = zeros(1, blk_fft);
+                    x_bar_freq_full(data_idx) = x_bar_data;
+                    x_bar_freq_blks{bi} = x_bar_freq_full;
                     % OFDM: 频域软符号→时域（IFFT*sqrt(N)+CP）
-                    x_bar_td_blk = ifft(x_bar_freq_blks{bi}) * ofdm_norm;
+                    x_bar_td_blk = ifft(x_bar_freq_full) * ofdm_norm;
                     blk_start = (bi-1)*sym_per_block;
                     x_bar_td_all(blk_start+blk_cp+1:bi*sym_per_block) = x_bar_td_blk;
                     x_bar_td_all(blk_start+1:blk_start+blk_cp) = x_bar_td_blk(end-blk_cp+1:end);
