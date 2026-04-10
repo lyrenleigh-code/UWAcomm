@@ -396,7 +396,12 @@ for fi = 1:size(fading_cfgs,1)
             end
         end
         nv_post = nv_post_sum / max(nv_post_cnt, 1);
-        nv_eq = max(nv_eq, nv_post);  % 取实测值和理论值的较大者
+        % 时变信道：nv_post兜底nv_eq（含残余CFO模型误差）
+        % 静态信道：不兜底（无残余CFO，MMSE公式已准确）
+        is_timevarying = ~strcmpi(ftype, 'static');
+        if is_timevarying
+            nv_eq = max(nv_eq, nv_post);
+        end
 
         % 7. 分块去CP+FFT
         Y_freq_blocks = cell(1, N_blocks);
@@ -408,7 +413,7 @@ for fi = 1:size(fading_cfgs,1)
 
         % 8. 跨块Turbo均衡: 逐子载波MMSE-IC ⇌ BCJR + DD信道重估计
         %    OFDM特有：逐子载波mu_k/nv_k（频选信道各子载波SNR不同）
-        turbo_iter = 6;
+        turbo_iter = 10;
         x_bar_freq_blks = cell(1,N_blocks);  % 频域软符号先验
         var_x_blks = ones(1,N_blocks);
         H_cur_blocks = H_est_blocks;
@@ -432,7 +437,11 @@ for fi = 1:size(fading_cfgs,1)
                 mu_k = real(G_k .* H_eff);
                 mu_k = max(mu_k, 1e-8);
                 nv_k = mu_k .* (1 - mu_k) * var_x_bi + abs(G_k).^2 * nv_eq;
-                nv_k = max(nv_k, nv_post);  % 用实测噪声做下限，防高SNR时LLR过度自信
+                if is_timevarying
+                    nv_k = max(nv_k, nv_post);  % 时变：实测噪声兜底，防高SNR LLR过度自信
+                else
+                    nv_k = max(nv_k, 1e-10);    % 静态：无残余CFO，用极小兜底即可
+                end
 
                 % 逐子载波QPSK LLR（与soft_demapper公式一致）
                 scale_k = 2 * mu_k ./ nv_k;
@@ -468,20 +477,91 @@ for fi = 1:size(fading_cfgs,1)
                 else
                     Lpost_inter=Lpost_inter(1:M_total);
                 end
+
+                % 构建时域软符号（所有块拼接）
+                x_bar_td_all = zeros(1, N_total_sym);
+                var_x_avg = 0;
                 for bi = 1:N_blocks
                     coded_blk = Lpost_inter((bi-1)*M_per_blk+1:bi*M_per_blk);
                     [x_bar_freq_blks{bi}, var_x_raw] = soft_mapper(coded_blk, 'qpsk');
                     var_x_blks(bi) = max(var_x_raw, nv_eq);
+                    var_x_avg = var_x_avg + var_x_blks(bi);
+                    % OFDM: 频域软符号→时域（IFFT*sqrt(N)+CP）
+                    x_bar_td_blk = ifft(x_bar_freq_blks{bi}) * ofdm_norm;
+                    blk_start = (bi-1)*sym_per_block;
+                    x_bar_td_all(blk_start+blk_cp+1:bi*sym_per_block) = x_bar_td_blk;
+                    x_bar_td_all(blk_start+1:blk_start+blk_cp) = x_bar_td_blk(end-blk_cp+1:end);
+                end
+                var_x_avg = var_x_avg / N_blocks;
 
-                    % DD信道重估计: H_dd = Y·X̄*/(|X̄|²+ε)
-                    if ~disable_dd && titer >= 2 && var_x_blks(bi) < 0.5
-                        X_bar_eff = x_bar_freq_blks{bi} * ofdm_norm;  % 等效频域参考
-                        H_dd_raw = Y_freq_blocks{bi} .* conj(X_bar_eff) ./ (abs(X_bar_eff).^2 + nv_eq);
-                        h_dd = ifft(H_dd_raw);
-                        h_dd_sparse = zeros(1, blk_fft);
-                        eff_d = mod(sym_delays - sync_offset_sym, blk_fft);
-                        for p=1:length(eff_d), h_dd_sparse(eff_d(p)+1) = h_dd(eff_d(p)+1); end
-                        H_cur_blocks{bi} = fft(h_dd_sparse) .* phase_ramp_frac;
+                if ~disable_dd && titer >= 2
+                    if is_timevarying && var_x_avg < 0.5
+                        % 时变：DD-BEM重估计（用软符号扩展BEM观测集）
+                        dd_obs_y = []; dd_obs_x = []; dd_obs_n = [];
+                        for bi = 1:N_blocks
+                            blk_start = (bi-1)*sym_per_block;
+                            % CP段（已知符号，高置信度）
+                            for kk = max(sym_delays)+1 : blk_cp
+                                n = blk_start + kk;
+                                x_vec = zeros(1, K_sparse);
+                                for pp = 1:K_sparse
+                                    idx = n - sym_delays(pp);
+                                    if idx >= 1 && idx <= N_total_sym
+                                        x_vec(pp) = all_cp_data(idx);
+                                    end
+                                end
+                                if any(x_vec ~= 0) && n <= length(rx_sym_all)
+                                    dd_obs_y(end+1) = rx_sym_all(n);
+                                    dd_obs_x = [dd_obs_x; x_vec];
+                                    dd_obs_n(end+1) = n;
+                                end
+                            end
+                            % 数据段（软符号，置信度门控）
+                            for kk = blk_cp+max(sym_delays)+1 : sym_per_block
+                                n = blk_start + kk;
+                                if n > length(rx_sym_all), break; end
+                                x_vec = zeros(1, K_sparse);
+                                all_known = true;
+                                for pp = 1:K_sparse
+                                    idx = n - sym_delays(pp);
+                                    if idx >= 1 && idx <= N_total_sym
+                                        x_vec(pp) = x_bar_td_all(idx);
+                                    else
+                                        all_known = false;
+                                    end
+                                end
+                                if all_known && any(x_vec ~= 0)
+                                    dd_obs_y(end+1) = rx_sym_all(n);
+                                    dd_obs_x = [dd_obs_x; x_vec];
+                                    dd_obs_n(end+1) = n;
+                                end
+                            end
+                        end
+                        bem_opts_dd = struct('Q_mode', 'auto', 'lambda_scale', 1.0);
+                        [h_tv_dd, ~, ~] = ch_est_bem(dd_obs_y(:), dd_obs_x, dd_obs_n(:), ...
+                            N_total_sym, sym_delays, fd_hz, sym_rate, nv_eq, 'dct', bem_opts_dd);
+                        for bi = 1:N_blocks
+                            blk_mid = (bi-1)*sym_per_block + round(sym_per_block/2);
+                            blk_mid = max(1, min(blk_mid, N_total_sym));
+                            h_td_dd = zeros(1, blk_fft);
+                            for p = 1:K_sparse
+                                h_td_dd(eff_delays(p)+1) = h_tv_dd(p, blk_mid);
+                            end
+                            H_cur_blocks{bi} = fft(h_td_dd) .* phase_ramp_frac;
+                        end
+                    else
+                        % 静态：逐块频域DD-LS
+                        for bi = 1:N_blocks
+                            if var_x_blks(bi) < 0.5
+                                X_bar_eff = x_bar_freq_blks{bi} * ofdm_norm;
+                                H_dd_raw = Y_freq_blocks{bi} .* conj(X_bar_eff) ./ (abs(X_bar_eff).^2 + nv_eq);
+                                h_dd = ifft(H_dd_raw);
+                                h_dd_sparse = zeros(1, blk_fft);
+                                eff_d = mod(sym_delays - sync_offset_sym, blk_fft);
+                                for p=1:length(eff_d), h_dd_sparse(eff_d(p)+1) = h_dd(eff_d(p)+1); end
+                                H_cur_blocks{bi} = fft(h_dd_sparse) .* phase_ramp_frac;
+                            end
+                        end
                     end
                 end
             end
