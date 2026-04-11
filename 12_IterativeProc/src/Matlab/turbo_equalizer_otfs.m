@@ -74,21 +74,31 @@ bits_decoded = [];
 
 %% ========== Turbo外层迭代 ========== %%
 for iter = 1:num_iter
-    %% 1. MP均衡（内层BP 10次）
-    if isfield(codec_params, 'mp_iters')
-        mp_iters = codec_params.mp_iters;
+    %% 1. 均衡器选择
+    if isfield(codec_params, 'eq_type') && strcmpi(codec_params.eq_type, 'uamp')
+        % UAMP: Onsager修正 + EM噪声估计
+        uamp_iter = 5;
+        if isfield(codec_params, 'uamp_iter'), uamp_iter = codec_params.uamp_iter; end
+        [x_hat_dd, ~, x_mean_dd, eq_info_t] = eq_otfs_uamp(Y_dd, h_dd, path_info, N, M, ...
+            noise_var, uamp_iter, constellation, prior_mean, prior_var);
+        nv_llr = max(eq_info_t.nv_post, 1e-8);
     else
-        mp_iters = 10;
+        % MP均衡（内层BP）
+        if isfield(codec_params, 'mp_iters')
+            mp_iters = codec_params.mp_iters;
+        else
+            mp_iters = 10;
+        end
+        [x_hat_dd, ~, x_mean_dd] = eq_otfs_mp(Y_dd, h_dd, path_info, N, M, ...
+            noise_var, mp_iters, constellation, prior_mean, prior_var);
+        nv_llr = noise_var;
     end
-    [x_hat_dd, ~, x_mean_dd] = eq_otfs_mp(Y_dd, h_dd, path_info, N, M, ...
-        noise_var, mp_iters, constellation, prior_mean, prior_var);
 
     %% 2. DD域符号→LLR（用软估计x_mean，非硬判决x_hat）
     x_hat_vec = reshape(x_mean_dd.', 1, []);
-    % LLR符号取负（我们的QPSK: bit=1→Re<0，BCJR需正=bit1）
     LLR_eq = zeros(1, 2*length(x_hat_vec));
-    LLR_eq(1:2:end) = -2*sqrt(2) * real(x_hat_vec) / noise_var;
-    LLR_eq(2:2:end) = -2*sqrt(2) * imag(x_hat_vec) / noise_var;
+    LLR_eq(1:2:end) = -2*sqrt(2) * real(x_hat_vec) / nv_llr;
+    LLR_eq(2:2:end) = -2*sqrt(2) * imag(x_hat_vec) / nv_llr;
 
     %% 3. 解交织 → SISO译码
     LLR_eq_trunc = LLR_eq(1:min(length(LLR_eq), M_coded));

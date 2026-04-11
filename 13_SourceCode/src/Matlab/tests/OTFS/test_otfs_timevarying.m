@@ -1,20 +1,23 @@
-%% test_otfs_timevarying.m — OTFS基带仿真 时变信道测试
-% TX: 编码→交织→QPSK→DD域导频嵌入→OTFS调制(V2.0 真DD域)
-% 信道: gen_uwa_channel(5径+Jakes, 基带sym_rate)→+噪声
-% RX: OTFS解调→DD域信道估计(V1.1自适应阈值)→Turbo(MP+BCJR)均衡→译码
-% 版本：V2.1.0 — DD域修正 + Turbo迭代 + 自适应阈值 + delay_guard消除β因子
-% 特点：DD域天然分离时延和多普勒
+%% test_otfs_timevarying.m — OTFS通带仿真 时变信道测试
+% TX: 编码→交织→QPSK→DD域导频→OTFS调制→FFT上采样→上变频→通带实信号
+% 信道: 等效基带(离散Doppler/Rician混合/Jakes)
+% RX: 下变频→FFT降采样→OTFS解调→DD域信道估计→LMMSE+Turbo→译码
+% 版本：V4.0.0 — 通带仿真 + 离散/混合/Jakes信道对比
+% 特点：通带实噪声, FFT零延迟重采样(无RRC,保持DD域关系)
 
 clc; close all;
-use_oracle = false;  % true=用真实信道(测均衡器上限), false=用估计信道
+use_oracle = false;
+eq_type = 'lmmse';
+uamp_inner = 5;
+passband_mode = true;  % true=通带仿真, false=基带仿真
+
 fprintf('========================================\n');
-fprintf('  OTFS 基带仿真 — 时变信道测试 V2.1\n');
-if use_oracle
-    fprintf('  [Oracle模式] 真实信道 — 测均衡器性能上限\n');
+if passband_mode
+    fprintf('  OTFS 通带仿真 V4.0\n');
 else
-    fprintf('  [估计模式] ch_est_otfs_dd V2.0\n');
+    fprintf('  OTFS 基带仿真 V4.0\n');
 end
-fprintf('  (DD域修正 + delay_guard + Turbo)\n');
+fprintf('  均衡: %s, Oracle=%d\n', upper(eq_type), use_oracle);
 fprintf('========================================\n\n');
 
 proj_root = fileparts(fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))))));
@@ -22,6 +25,8 @@ addpath(fullfile(proj_root, '02_ChannelCoding', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '03_Interleaving', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '06_MultiCarrier', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '07_ChannelEstEq', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '08_Sync', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '09_Waveform', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '13_SourceCode', 'src', 'Matlab', 'common'));
 
 %% ========== 参数 ========== %%
@@ -37,8 +42,12 @@ gains_raw = [1, 0.5*exp(1j*0.5), 0.3*exp(1j*1.2), 0.2*exp(1j*2.0), 0.1*exp(1j*0.
 N = 32;          % 多普勒格点
 M = 64;          % 时延格点
 cp_len = 32;     % per-sub-block CP (需>max_delay, 较大余量避免ISI)
-mp_iters = 20;   % MP迭代次数
-num_turbo = 3;   % 外层Turbo迭代次数
+mp_iters = 20;
+num_turbo = 3;
+
+% 通带参数
+sps = 6;                    % 上采样倍数 (需满足 fs_pb > 2*(fc+sym_rate/2))
+fs_pb = sym_rate * sps;     % 通带采样率 36kHz
 
 % QPSK
 constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
@@ -66,19 +75,36 @@ info_rate_bps = N_info / frame_duration;
 [~, perm] = random_interleave(zeros(1, M_coded), codec.interleave_seed);
 
 snr_list = [0, 5, 10, 15, 20];
+
+% 多普勒分辨率 (DD域网格间距)
+delta_nu = sym_rate / (N * M);  % = fs/(N*M) ≈ 2.93 Hz
+
+% 信道配置：离散Doppler vs Jakes对比
+% 格式: {名称, 类型, 参数}
+%   'discrete': 每径固定Doppler ν_p → h_p*exp(j2πν_p*t)
+%   'jakes':    Jakes衰落 (连续Doppler谱)
+%   'static':   无Doppler
+% 混合信道: Rician = sqrt(K/(K+1))*exp(j2πν_p*t) + sqrt(1/(K+1))*jakes(fd_sc)
+% K=Rician因子(谱直散比), fd_sc=散射Doppler展宽
 fading_cfgs = {
-    'static', 'static', 0,  0;
-    'fd=1Hz', 'slow',   1,  1/fc;
-    'fd=5Hz', 'slow',   5,  5/fc;
+    'static',   'static',   zeros(1,5);
+    'disc-5Hz', 'discrete', [0, 3, -4, 5, -2];
+    'hyb-K20',  'hybrid',   struct('doppler_hz',[0,3,-4,5,-2], 'fd_scatter',0.5, 'K_rice',20);
+    'hyb-K10',  'hybrid',   struct('doppler_hz',[0,3,-4,5,-2], 'fd_scatter',0.5, 'K_rice',10);
+    'hyb-K5',   'hybrid',   struct('doppler_hz',[0,3,-4,5,-2], 'fd_scatter',1.0, 'K_rice',5);
+    'jakes5Hz', 'jakes',    5;
 };
 
-fprintf('OTFS: N=%d x M=%d, CP=%d, df=%.1fHz, fs=%dHz\n', N, M, cp_len, subcarrier_spacing, sym_rate);
-fprintf('Turbo: %d轮 (内层MP=%d iter)\n', num_turbo, mp_iters);
+fprintf('OTFS: N=%d x M=%d, CP=%d, df=%.1fHz, fs_bb=%dHz\n', N, M, cp_len, subcarrier_spacing, sym_rate);
+if passband_mode
+    fprintf('通带: sps=%d, fs_pb=%dHz, fc=%dHz\n', sps, fs_pb, fc);
+end
+fprintf('均衡: %s + Turbo %d轮\n', upper(eq_type), num_turbo);
 fprintf('速率: %.0f bps (QPSK, R=1/%d, %d data slots)\n', info_rate_bps, n_code, N_data_slots);
 fprintf('帧长: %d样本 (%.1fms)\n', N*M+cp_len, frame_duration*1000);
 fprintf('信道: %d径, delay_bins=[%s], max=%d < CP=%d\n', ...
     length(delay_bins), num2str(delay_bins), max(delay_bins), cp_len);
-fprintf('多普勒分辨率: %.2f Hz\n\n', subcarrier_spacing/N);
+fprintf('多普勒分辨率: Δν=%.2f Hz\n\n', delta_nu);
 
 %% ========== Loopback验证 ========== %%
 fprintf('--- Loopback验证 ---\n');
@@ -98,13 +124,14 @@ ber_turbo_trace = cell(size(fading_cfgs,1), length(snr_list));
 % 保存每配置的真实/估计DD信道（最高SNR时）用于可视化
 ch_diag = struct('h_true',{}, 'h_est',{}, 'path_info',{});
 
-fprintf('%-8s |', '');
+fprintf('%-9s|', '');
 for si=1:length(snr_list), fprintf(' %6ddB', snr_list(si)); end
 fprintf('\n%s\n', repmat('-',1,8+8*length(snr_list)));
 
 for fi = 1:size(fading_cfgs,1)
-    fname=fading_cfgs{fi,1}; ftype=fading_cfgs{fi,2};
-    fd_hz=fading_cfgs{fi,3}; dop_rate=fading_cfgs{fi,4};
+    fname = fading_cfgs{fi,1};
+    ftype = fading_cfgs{fi,2};
+    fparams = fading_cfgs{fi,3};
 
     %% ===== TX ===== %%
     rng(100+fi);
@@ -117,51 +144,85 @@ for fi = 1:size(fading_cfgs,1)
     [dd_frame, pilot_info, guard_mask, ~] = otfs_pilot_embed(data_sym, N, M, pilot_config);
     [otfs_signal, ~] = otfs_modulate(dd_frame, N, M, cp_len, 'dft');
 
-    %% ===== 信道 ===== %%
-    if strcmpi(ftype, 'static')
-        rx_clean = zeros(size(otfs_signal));
-        for p = 1:length(delay_bins)
-            d = delay_bins(p);
-            rx_clean(d+1:end) = rx_clean(d+1:end) + gains_raw(p) * otfs_signal(1:end-d);
-        end
-    else
-        ch_params = struct('fs',sym_rate, 'delay_profile','custom', ...
-            'delays_s',delays_s, 'gains',gains_raw, ...
-            'num_paths',length(delay_bins), 'doppler_rate',dop_rate, ...
-            'fading_type',ftype, 'fading_fd_hz',fd_hz, ...
-            'snr_db',Inf, 'seed',200+fi*100);
-        [rx_clean,~] = gen_uwa_channel(otfs_signal, ch_params);
-    end
-    sig_pwr = mean(abs(rx_clean).^2);
+    N_sig = length(otfs_signal);
 
-    % === Pilot-only信道探测：获取真实DD域信道响应 ===
+    %% ===== 1) 信道(等效基带) ===== %%
+    rx_clean = apply_channel(otfs_signal, delay_bins, gains_raw, ftype, fparams, sym_rate, fc);
+
+    %% ===== 2) 通带帧组装: [LFM|guard|OTFS|guard|LFM] ===== %%
+    if passband_mode
+        % LFM同步信号 (通带)
+        lfm_dur = 0.02; guard_dur = 0.005;
+        N_guard_pb = round(guard_dur * fs_pb);
+        [lfm_pb, ~] = gen_lfm(fs_pb, lfm_dur, fc-sym_rate/2, fc+sym_rate/2);
+        lfm_bb = hilbert(lfm_pb);  % LFM基带版本(供RX匹配)
+        lfm_bb = lfm_bb .* exp(-1j*2*pi*fc*(0:length(lfm_bb)-1)/fs_pb);  % 下变频到基带
+
+        % OTFS逐子块上采样(消除Gibbs振铃) + 升余弦过渡
+        [otfs_pb, tx_up] = otfs_to_passband(otfs_signal, N, M, cp_len, sps, fs_pb, fc);
+        % RX侧同理
+        [rx_otfs_pb, ~] = otfs_to_passband(rx_clean, N, M, cp_len, sps, fs_pb, fc);
+
+        % 功率匹配
+        lfm_pb = lfm_pb * sqrt(mean(otfs_pb.^2)) / sqrt(mean(lfm_pb.^2));
+
+        % 帧组装
+        guard_pb = zeros(1, N_guard_pb);
+        frame_tx_pb = [lfm_pb, guard_pb, otfs_pb, guard_pb, lfm_pb];
+        frame_rx_pb = [lfm_pb, guard_pb, rx_otfs_pb, guard_pb, lfm_pb];
+        data_offset_pb = length(lfm_pb) + N_guard_pb;
+        sig_pwr_pb = mean(frame_rx_pb.^2);
+
+        % 无噪声同步(一次性, 确定LFM定时位置)
+        [bb_sync,~] = downconvert(frame_rx_pb, fs_pb, fc, sym_rate*0.45);
+        [~,~,corr_sync] = sync_detect(bb_sync, lfm_bb(1:min(end,500)), 0.3);
+        % 找第1个LFM峰→数据起始
+        [~, sync_pos] = max(corr_sync(1:length(lfm_pb)+N_guard_pb));
+    else
+        sig_pwr = mean(abs(rx_clean).^2);
+    end
+
+    % 保存第1配置波形(供可视化)
+    if fi == 1
+        if passband_mode
+            vis_frame_tx = frame_tx_pb;
+            vis_frame_info = struct('data_offset', data_offset_pb, ...
+                'data_len', length(otfs_pb), 'lfm_len', length(lfm_pb), ...
+                'guard_len', N_guard_pb);
+        end
+        vis_tx_bb = otfs_signal;
+    end
+
+    % === Pilot-only信道探测(基带) ===
     dd_pilot_only = zeros(N, M);
     dd_pilot_only(pilot_info.positions(1,1), pilot_info.positions(1,2)) = pilot_info.values(1);
     [sig_po, ~] = otfs_modulate(dd_pilot_only, N, M, cp_len, 'dft');
-    if strcmpi(ftype, 'static')
-        rx_po = zeros(size(sig_po));
-        for p = 1:length(delay_bins)
-            d = delay_bins(p);
-            rx_po(d+1:end) = rx_po(d+1:end) + gains_raw(p) * sig_po(1:end-d);
-        end
-    else
-        ch_po = struct('fs',sym_rate, 'delay_profile','custom', ...
-            'delays_s',delays_s, 'gains',gains_raw, ...
-            'num_paths',length(delay_bins), 'doppler_rate',dop_rate, ...
-            'fading_type',ftype, 'fading_fd_hz',fd_hz, ...
-            'snr_db',Inf, 'seed',200+fi*100);  % 同seed=同信道
-        [rx_po, ~] = gen_uwa_channel(sig_po, ch_po);
-    end
+    rx_po = apply_channel(sig_po, delay_bins, gains_raw, ftype, fparams, sym_rate, fc);
     [Y_dd_po, ~] = otfs_demodulate(rx_po, N, M, cp_len, 'dft');
-    ch_diag(fi).h_true = Y_dd_po / pilot_info.values(1);  % 归一化=真实DD信道
+    ch_diag(fi).h_true = Y_dd_po / pilot_info.values(1);
 
-    fprintf('%-8s |', fname);
+    fprintf('%-9s|', fname);
 
     for si = 1:length(snr_list)
         snr_db = snr_list(si);
-        noise_var = sig_pwr * 10^(-snr_db/10);
         rng(300+fi*1000+si*100);
-        rx_noisy = rx_clean + sqrt(noise_var/2)*(randn(size(rx_clean)) + 1j*randn(size(rx_clean)));
+
+        if passband_mode
+            % 通带帧加实噪声
+            noise_pwr = sig_pwr_pb * 10^(-snr_db/10);
+            frame_rx_noisy = frame_rx_pb + sqrt(noise_pwr) * randn(size(frame_rx_pb));
+            % LFM匹配定时 → 提取OTFS数据段
+            rx_otfs_seg = frame_rx_noisy(data_offset_pb+1 : data_offset_pb+length(rx_otfs_pb));
+            % 逐子块下变频+降采样
+            rx_noisy = passband_to_otfs(rx_otfs_seg, N, M, cp_len, sps, fs_pb, fc);
+            noise_var = mean(abs(rx_clean).^2) * 10^(-snr_db/10);
+            if fi == 1 && si == length(snr_list)
+                vis_frame_rx = frame_rx_noisy;
+            end
+        else
+            noise_var = mean(abs(rx_clean).^2) * 10^(-snr_db/10);
+            rx_noisy = rx_clean + sqrt(noise_var/2)*(randn(size(rx_clean)) + 1j*randn(size(rx_clean)));
+        end
 
         % 1. OTFS解调
         [Y_dd, ~] = otfs_demodulate(rx_noisy, N, M, cp_len, 'dft');
@@ -222,15 +283,9 @@ for fi = 1:size(fading_cfgs,1)
             Y_dd_eq(kk_r, ll_r) = Y_dd_eq(kk_r, ll_r) - path_info.gain(pp_r) * pv_val;
         end
 
-        % 诊断（每配置最高SNR）
-        if si == length(snr_list)
-            if use_oracle, ch_mode='Oracle'; else, ch_mode='Est'; end
-            fprintf('\n--- DD域诊断 %s@%ddB [%s] ---\n', fname, snr_db, ch_mode);
-            fprintf('paths=%d, nv=%.2e\n', path_info.num_paths, nv_dd);
-            fprintf('delays=[%s]\n', num2str(path_info.delay_idx));
-            fprintf('dopplers=[%s]\n', num2str(path_info.doppler_idx));
-            fprintf('|gains|=[%s]\n', num2str(abs(path_info.gain), '%.3f '));
-        end
+        % 诊断标记（最高SNR时保存eq_info）
+        do_diag = (si == length(snr_list));
+        if si == 1, diag_info = []; end
 
         % 保存（供可视化）
         if si == length(snr_list)
@@ -238,19 +293,30 @@ for fi = 1:size(fading_cfgs,1)
             ch_diag(fi).path_info = path_info;
         end
 
-        %% ===== 5. Turbo迭代：LMMSE-IC + BCJR ===== %%
+        %% ===== 5. Turbo迭代：UAMP/LMMSE + BCJR ===== %%
         prior_mean = [];
         prior_var = [];
         ber_trace = zeros(1, num_turbo);
         guard_indices = find(guard_mask);
 
         for turbo_iter = 1:num_turbo
-            % 5a. LMMSE-IC均衡（BCCB 2D-FFT对角化，含先验）
-            % LMMSE单次线性滤波(max_iter=1)，迭代由外层Turbo控制
-            [x_hat, ~, x_mean, eq_info] = eq_otfs_lmmse(Y_dd_eq, h_dd, path_info, N, M, ...
-                nv_dd, 1, constellation, prior_mean, prior_var);
+            % 5a. 均衡器选择
+            if strcmp(eq_type, 'uamp')
+                % UAMP: Onsager修正允许多轮内部迭代, EM自适应噪声
+                [x_hat, ~, x_mean, eq_info] = eq_otfs_uamp(Y_dd_eq, h_dd, path_info, N, M, ...
+                    nv_dd, uamp_inner, constellation, prior_mean, prior_var);
+            else
+                % LMMSE: 单次线性滤波(max_iter=1)
+                [x_hat, ~, x_mean, eq_info] = eq_otfs_lmmse(Y_dd_eq, h_dd, path_info, N, M, ...
+                    nv_dd, 1, constellation, prior_mean, prior_var);
+            end
 
-            % 5b. 提取数据符号 → LLR (用LMMSE后验方差，比固定nv_dd更准确)
+            % 保存诊断信息（延迟到BER打印后输出，避免断行）
+            if do_diag && turbo_iter == 1
+                diag_info = eq_info;
+            end
+
+            % 5b. 提取数据符号 → LLR (用后验方差τ_r，比固定nv_dd更准确)
             x_data_soft = x_mean(data_indices);
             nv_llr = max(eq_info.nv_post, 1e-8);
             LLR_eq = zeros(1, M_coded);
@@ -280,15 +346,13 @@ for fi = 1:size(fading_cfgs,1)
                 [x_bar, var_x] = soft_mapper(Lp_coded_inter, 'qpsk');
                 var_x = max(var_x, nv_dd);
 
-                % 构建完整NxM先验 (BCCB LMMSE要求均匀v_x，guard用相同方差)
+                % 构建完整NxM先验 (BCCB要求均匀v_x，guard用相同方差)
                 prior_mean = zeros(N, M);
-                prior_var = var_x * ones(N, M);  % 均匀方差（BCCB兼容）
-                % 数据位置：SISO反馈
+                prior_var = var_x * ones(N, M);
                 n_fill = min(length(x_bar), N_data_slots);
                 for i_d = 1:n_fill
                     prior_mean(data_indices(i_d)) = x_bar(i_d);
                 end
-                % guard位置: prior_mean=0(已知零), prior_var=var_x(保持均匀)
             end
         end
 
@@ -307,12 +371,103 @@ for fi = 1:size(fading_cfgs,1)
         ber_turbo_trace{fi,si} = ber_trace;
         fprintf(' %6.2f%%', ber*100);
     end
-    fprintf('  (paths=%d)\n', path_info.num_paths);
+    fprintf('  (p=%d)\n', path_info.num_paths);
+
+    % 诊断
+    if ~isempty(diag_info)
+        fprintf('  nv_post=%.4f, v_x=%.4f\n', diag_info.nv_post, diag_info.v_x);
+    end
 end
 
 %% ========== 可视化 ========== %%
 try
-    markers={'o-','s-','d-'}; colors=[0 .45 .74; .85 .33 .1; .47 .67 .19];
+    n_cfg = size(fading_cfgs,1);
+    markers={'o-','s-','d-','^-','v-','p-'};
+    colors = lines(n_cfg);
+
+    % --- Figure 0: 通带帧波形+频谱 ---
+    if passband_mode && exist('vis_frame_tx','var')
+        figure('Position',[30 50 1400 750], 'Name','OTFS 通带帧波形与频谱');
+        t_frame = (0:length(vis_frame_tx)-1) / fs_pb * 1000;  % ms
+        t_bb = (0:length(vis_tx_bb)-1) / sym_rate * 1000;
+        dur_ms = t_frame(end);
+        vfi = vis_frame_info;
+
+        % (1,1) TX通带帧波形 (完整, 标注结构)
+        subplot(3,2,1);
+        plot(t_frame, vis_frame_tx, 'b', 'LineWidth', 0.3);
+        xlabel('时间 (ms)'); ylabel('幅度'); grid on;
+        title(sprintf('TX 通带帧 (%.1fms, fc=%dkHz)', dur_ms, fc/1000));
+        hold on;
+        % 标注帧结构
+        lfm_end = vfi.lfm_len / fs_pb * 1000;
+        data_start = vfi.data_offset / fs_pb * 1000;
+        data_end = (vfi.data_offset + vfi.data_len) / fs_pb * 1000;
+        yl = ylim;
+        patch([0 lfm_end lfm_end 0], [yl(1) yl(1) yl(2) yl(2)], 'g', 'FaceAlpha',0.1,'EdgeColor','none');
+        patch([data_start data_end data_end data_start], [yl(1) yl(1) yl(2) yl(2)], 'b', 'FaceAlpha',0.08,'EdgeColor','none');
+        text(lfm_end/2, yl(2)*0.9, 'LFM', 'HorizontalAlignment','center','FontSize',8);
+        text((data_start+data_end)/2, yl(2)*0.9, 'OTFS data', 'HorizontalAlignment','center','FontSize',8);
+
+        % (1,2) RX通带帧波形 (完整)
+        subplot(3,2,2);
+        if exist('vis_frame_rx','var')
+            plot(t_frame, vis_frame_rx, 'Color',[0.85 0.33 0.1], 'LineWidth', 0.3);
+            title(sprintf('RX 通带帧 @%ddB', snr_list(end)));
+        else
+            title('RX (无数据)');
+        end
+        xlabel('时间 (ms)'); ylabel('幅度'); grid on;
+
+        % (2,1) TX基带I/Q (OTFS数据, WOLA窗后)
+        subplot(3,2,3);
+        plot(t_bb, real(vis_tx_bb), 'b', 'LineWidth', 0.5); hold on;
+        plot(t_bb, imag(vis_tx_bb), 'r', 'LineWidth', 0.5);
+        xlabel('时间 (ms)'); ylabel('幅度'); grid on;
+        title('TX 基带 I/Q (WOLA窗后)'); legend('I','Q','FontSize',7);
+
+        % (2,2) TX/RX通带包络对比
+        subplot(3,2,4);
+        env_tx = abs(hilbert(vis_frame_tx));
+        plot(t_frame, env_tx, 'b', 'LineWidth', 0.6);
+        if exist('vis_frame_rx','var')
+            hold on;
+            env_rx = abs(hilbert(vis_frame_rx));
+            plot(t_frame, env_rx, 'Color',[0.85 0.33 0.1], 'LineWidth', 0.3);
+            legend('TX','RX','FontSize',7);
+        end
+        xlabel('时间 (ms)'); ylabel('包络'); grid on;
+        title('帧包络对比');
+
+        % (3,1) TX通带频谱
+        subplot(3,2,5);
+        N_fft = length(vis_frame_tx);
+        f_pb = (0:N_fft-1) * fs_pb / N_fft;
+        S_tx = 20*log10(abs(fft(vis_frame_tx)) / N_fft + 1e-12);
+        plot(f_pb/1000, S_tx, 'b', 'LineWidth', 0.8);
+        xlabel('频率 (kHz)'); ylabel('dB'); grid on;
+        title('TX 通带频谱'); xlim([0, fs_pb/2000]);
+        hold on;
+        xline((fc-sym_rate/2)/1000, 'g--', 'LineWidth',1);
+        xline((fc+sym_rate/2)/1000, 'g--', 'LineWidth',1);
+
+        % (3,2) RX通带频谱
+        subplot(3,2,6);
+        if exist('vis_frame_rx','var')
+            S_rx = 20*log10(abs(fft(vis_frame_rx)) / N_fft + 1e-12);
+            plot(f_pb/1000, S_rx, 'Color',[0.85 0.33 0.1], 'LineWidth', 0.8); hold on;
+            plot(f_pb/1000, S_tx, 'b--', 'LineWidth', 0.4);
+            legend('RX','TX','FontSize',7);
+            title(sprintf('RX 通带频谱 @%ddB', snr_list(end)));
+        else
+            title('RX 频谱 (无数据)');
+        end
+        xlabel('频率 (kHz)'); ylabel('dB'); grid on;
+        xlim([0, fs_pb/2000]);
+
+        sgtitle(sprintf('OTFS 通带仿真 — N=%dx%d, %.0f bps, fc=%dkHz, BW=%dkHz', ...
+            N, M, info_rate_bps, fc/1000, sym_rate/1000), 'FontSize',13);
+    end
 
     % --- Figure 1: BER曲线 ---
     figure('Position',[50 550 700 400]);
@@ -324,23 +479,22 @@ try
     snr_lin=10.^(snr_list/10);
     semilogy(snr_list,max(0.5*erfc(sqrt(snr_lin)),1e-5),'k--','LineWidth',1,'DisplayName','QPSK AWGN');
     grid on; xlabel('SNR (dB)'); ylabel('BER');
-    title(sprintf('OTFS %dx%d Turbo(%d) MP(%d) — %.0f bps', N, M, num_turbo, mp_iters, info_rate_bps));
+    title(sprintf('OTFS %dx%d %s Turbo(%d) — %.0f bps', N, M, upper(eq_type), num_turbo, info_rate_bps));
     legend('Location','southwest'); ylim([1e-5 1]); set(gca,'FontSize',12);
 
-    % --- Figure 2: DD域信道 真实vs估计 (3配置 × 3列) ---
-    figure('Position',[50 50 1400 750], 'Name','DD域信道: 真实 vs 估计');
+    % --- Figure 2: DD域信道 真实vs估计 (前3配置 × 3列) ---
+    n_vis = min(n_cfg, 3);  % 最多显示3行
+    figure('Position',[50 50 1400 250*n_vis], 'Name','DD域信道: 真实 vs 估计');
     pk_pos = pilot_info.positions(1,1);
     pl_pos = pilot_info.positions(1,2);
     dk_range = -pilot_config.guard_k:pilot_config.guard_k;
     dl_range = -2:pilot_config.guard_l+3;
     cmax = max(abs(gains_raw)) * 1.1;
 
-    for fi = 1:size(fading_cfgs,1)
+    for fi = 1:n_vis
         h_true = ch_diag(fi).h_true;
         h_est  = ch_diag(fi).h_est;
         pi_fi  = ch_diag(fi).path_info;
-
-        % 裁剪保护区附近区域
         crop_true = zeros(length(dk_range), length(dl_range));
         crop_est  = zeros(length(dk_range), length(dl_range));
         for i=1:length(dk_range)
@@ -351,54 +505,27 @@ try
                 crop_est(i,j)  = abs(h_est(kk, ll));
             end
         end
-
-        % 列1: 真实DD信道
-        subplot(3,3,(fi-1)*3+1);
-        imagesc(dl_range, dk_range, crop_true);
-        axis xy; colorbar; caxis([0 cmax]);
-        hold on;
-        for p=1:length(delay_bins)
-            plot(delay_bins(p), 0, 'rx', 'MarkerSize',12, 'LineWidth',2);
-        end
-        ylabel('dk (多普勒)');
-        if fi==1, title('真实DD信道 (pilot-only)'); end
-        text(-1.5, dk_range(end)-0.5, fading_cfgs{fi,1}, 'FontSize',12, 'FontWeight','bold');
-
-        % 列2: 估计DD信道
-        subplot(3,3,(fi-1)*3+2);
-        imagesc(dl_range, dk_range, crop_est);
-        axis xy; colorbar; caxis([0 cmax]);
-        hold on;
-        for p=1:pi_fi.num_paths
-            plot(pi_fi.delay_idx(p), pi_fi.doppler_idx(p), 'g+', 'MarkerSize',10, 'LineWidth',2);
-        end
-        if fi==1, title(sprintf('估计DD信道 (ch\\_est, SNR=%ddB)', snr_list(end))); end
-
-        % 列3: dk=0延迟剖面对比
-        subplot(3,3,(fi-1)*3+3);
+        subplot(n_vis,3,(fi-1)*3+1);
+        imagesc(dl_range, dk_range, crop_true); axis xy; colorbar; caxis([0 cmax]);
+        ylabel('dk'); text(-1.5, dk_range(end)-0.5, fading_cfgs{fi,1}, 'FontSize',11, 'FontWeight','bold');
+        if fi==1, title('真实DD信道'); end
+        subplot(n_vis,3,(fi-1)*3+2);
+        imagesc(dl_range, dk_range, crop_est); axis xy; colorbar; caxis([0 cmax]);
+        if fi==1, title('估计DD信道'); end
+        subplot(n_vis,3,(fi-1)*3+3);
         dl_prof = 0:max(delay_bins)+4;
-        prof_true = zeros(size(dl_prof));
-        prof_est  = zeros(size(dl_prof));
-        prof_ideal = zeros(size(dl_prof));
+        prof_true = zeros(size(dl_prof)); prof_est = zeros(size(dl_prof));
         for j=1:length(dl_prof)
             ll = mod(pl_pos-1+dl_prof(j), M)+1;
             prof_true(j) = abs(h_true(pk_pos, ll));
             prof_est(j)  = abs(h_est(pk_pos, ll));
         end
-        for p=1:length(delay_bins)
-            idx = find(dl_prof == delay_bins(p));
-            if ~isempty(idx), prof_ideal(idx) = abs(gains_raw(p)); end
-        end
-        stem(dl_prof, prof_ideal, 'k--', 'LineWidth',1.2, 'MarkerSize',5, 'DisplayName','理想');
-        hold on;
-        stem(dl_prof, prof_true, 'b-', 'LineWidth',1.5, 'MarkerSize',4, 'DisplayName','真实');
-        stem(dl_prof, prof_est, 'r:', 'LineWidth',1.5, 'MarkerSize',4, 'DisplayName','估计');
-        xlabel('dl (时延bin)'); ylabel('|h|');
-        if fi==1, title('dk=0 延迟剖面'); end
-        legend('Location','northeast','FontSize',7); grid on;
-        if fi==size(fading_cfgs,1), xlabel('dl (时延bin)'); end
+        stem(dl_prof, prof_true, 'b-', 'LineWidth',1.5, 'MarkerSize',4); hold on;
+        stem(dl_prof, prof_est, 'r:', 'LineWidth',1.5, 'MarkerSize',4);
+        if fi==1, title('dk=0 延迟剖面'); legend('真实','估计','FontSize',7); end
+        grid on;
     end
-    sgtitle(sprintf('OTFS DD域信道诊断 (N=%d, M=%d, %d径)', N, M, length(delay_bins)), 'FontSize',14);
+    sgtitle(sprintf('OTFS DD域信道诊断 (N=%d, M=%d)', N, M), 'FontSize',14);
 
     % --- Figure 3: Turbo收敛 ---
     figure('Position',[770 550 500 350]);
@@ -424,8 +551,13 @@ fprintf('\n完成\n');
 %% ========== 保存结果 ========== %%
 result_file = fullfile(fileparts(mfilename('fullpath')), 'test_otfs_results.txt');
 fid = fopen(result_file, 'w');
-fprintf(fid, 'OTFS 时变信道测试结果 V2.1 — %s\n', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
-fprintf(fid, 'OTFS: N=%d, M=%d, CP=%d, Turbo=%d, MP iter=%d (基带仿真)\n', N, M, cp_len, num_turbo, mp_iters);
+fprintf(fid, 'OTFS 时变信道测试结果 V4.0 — %s\n', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+if passband_mode
+    fprintf(fid, '模式: 通带 (sps=%d, fs_pb=%dHz, fc=%dHz)\n', sps, fs_pb, fc);
+else
+    fprintf(fid, '模式: 基带 (fs=%dHz)\n', sym_rate);
+end
+fprintf(fid, 'OTFS: N=%d, M=%d, CP=%d, 均衡=%s, Turbo=%d\n', N, M, cp_len, upper(eq_type), num_turbo);
 fprintf(fid, '速率: %.0f bps (QPSK, R=1/%d, %d data slots)\n', info_rate_bps, n_code, N_data_slots);
 fprintf(fid, '信道: %d径, delay_bins=[%s]\n', length(delay_bins), num2str(delay_bins));
 fprintf(fid, 'Loopback误差: %.2e\n\n', err_loopback);
@@ -435,7 +567,7 @@ fprintf(fid, '%-8s |', '');
 for si=1:length(snr_list), fprintf(fid, ' %6ddB', snr_list(si)); end
 fprintf(fid, '\n%s\n', repmat('-',1,8+8*length(snr_list)));
 for fi=1:size(fading_cfgs,1)
-    fprintf(fid, '%-8s |', fading_cfgs{fi,1});
+    fprintf(fid, '%-9s|', fading_cfgs{fi,1});
     for si=1:length(snr_list), fprintf(fid, ' %6.2f%%', ber_matrix(fi,si)*100); end
     fprintf(fid, '\n');
 end
@@ -455,9 +587,136 @@ fprintf(fid, '%-8s |', '');
 for si=1:length(snr_list), fprintf(fid, ' %6ddB', snr_list(si)); end
 fprintf(fid, '\n%s\n', repmat('-',1,8+8*length(snr_list)));
 for fi=1:size(fading_cfgs,1)
-    fprintf(fid, '%-8s |', fading_cfgs{fi,1});
+    fprintf(fid, '%-9s|', fading_cfgs{fi,1});
     for si=1:length(snr_list), fprintf(fid, ' %6.2f%%', ber_unc_matrix(fi,si)*100); end
     fprintf(fid, '\n');
 end
 fclose(fid);
 fprintf('结果已保存: %s\n', result_file);
+
+%% ========== 辅助函数：逐子块上变频(消除Gibbs振铃) ========== %%
+function [pb_signal, bb_up] = otfs_to_passband(bb_signal, N, M, cp_len, sps, fs_pb, fc)
+% 逐子块FFT上采样 + 升余弦过渡 + 上变频
+% 关键: 每子块独立interpft, 避免跨子块Gibbs振铃
+    sub_size = M + cp_len;
+    sub_up = sub_size * sps;
+    win_samp = 4 * sps;  % 过渡区样本数(通带率)
+    taper_up = 0.5*(1 - cos(pi*(0:win_samp-1)/win_samp));
+    taper_dn = 0.5*(1 + cos(pi*(0:win_samp-1)/win_samp));
+
+    bb_up = zeros(1, N * sub_up);
+    for n = 1:N
+        offset_bb = (n-1) * sub_size;
+        sub = bb_signal(offset_bb+1 : offset_bb+sub_size);
+        sub_interp = interpft(sub, sub_up);  % 逐子块FFT插值
+
+        % 升余弦过渡: CP首部上升, 数据尾部下降
+        if n > 1
+            sub_interp(1:win_samp) = sub_interp(1:win_samp) .* taper_up;
+        end
+        if n < N
+            sub_interp(end-win_samp+1:end) = sub_interp(end-win_samp+1:end) .* taper_dn;
+        end
+
+        offset_up = (n-1) * sub_up;
+        bb_up(offset_up+1 : offset_up+sub_up) = sub_interp;
+    end
+
+    % 上变频
+    [pb_signal, ~] = upconvert(bb_up, fs_pb, fc);
+end
+
+%% ========== 辅助函数：逐子块下变频(匹配上变频) ========== %%
+function bb_signal = passband_to_otfs(pb_segment, N, M, cp_len, sps, fs_pb, fc)
+% 下变频 + 逐子块FFT降采样
+    [bb_raw, ~] = downconvert(pb_segment, fs_pb, fc, fs_pb/(2*sps)*0.9);
+    sub_size = M + cp_len;
+    sub_up = sub_size * sps;
+    bb_signal = zeros(1, N * sub_size);
+
+    for n = 1:N
+        offset_up = (n-1) * sub_up;
+        if offset_up + sub_up <= length(bb_raw)
+            sub_raw = bb_raw(offset_up+1 : offset_up+sub_up);
+        else
+            sub_raw = [bb_raw(offset_up+1:end), zeros(1, sub_up-(length(bb_raw)-offset_up))];
+        end
+        sub_down = interpft(sub_raw, sub_size);  % 逐子块FFT降采样
+        bb_signal((n-1)*sub_size+1 : n*sub_size) = sub_down;
+    end
+end
+
+%% ========== 辅助函数：信道施加 ========== %%
+function rx = apply_channel(tx, delay_bins, gains_raw, ftype, fparams, fs, fc)
+% 支持三种信道类型: static, discrete(固定Doppler), jakes(连续Doppler谱)
+    tx = tx(:).';
+    rx = zeros(size(tx));
+    N_tx = length(tx);
+
+    switch ftype
+        case 'static'
+            % 静态多径: h_p * x(n-d_p)
+            for p = 1:length(delay_bins)
+                d = delay_bins(p);
+                rx(d+1:end) = rx(d+1:end) + gains_raw(p) * tx(1:end-d);
+            end
+
+        case 'discrete'
+            % 离散Doppler: h_p * exp(j2πν_p*n/fs) * x(n-d_p)
+            % fparams = [ν_1, ν_2, ..., ν_P] (Hz)
+            doppler_hz = fparams;
+            for p = 1:length(delay_bins)
+                d = delay_bins(p);
+                n_range = (d+1):N_tx;
+                phase = exp(1j * 2 * pi * doppler_hz(p) * (n_range-1) / fs);
+                rx(n_range) = rx(n_range) + gains_raw(p) * phase .* tx(n_range-d);
+            end
+
+        case 'hybrid'
+            % Rician混合: 离散Doppler(强) + Jakes散射(弱)
+            % h_p(t) = h_p * exp(j2πν_p*t) * [√(K/(K+1)) + √(1/(K+1))*g(t)]
+            % g(t) = Jakes过程(fd_scatter), 散射Doppler谱以ν_p为中心
+            doppler_hz = fparams.doppler_hz;
+            fd_sc = fparams.fd_scatter;
+            K = fparams.K_rice;
+            spec_amp = sqrt(K / (K+1));      % 直达(谱)分量幅度
+            scat_amp = sqrt(1 / (K+1));       % 散射分量幅度
+            t = (0:N_tx-1) / fs;
+            N_osc = 8;
+            rng_state = rng;  % 保存
+            rng(43);          % 固定seed保证可复现
+            for p = 1:length(delay_bins)
+                d = delay_bins(p);
+                n_range = (d+1):N_tx;
+                t_r = t(n_range);
+                % 离散Doppler相位
+                phase_disc = exp(1j * 2*pi * doppler_hz(p) * t_r);
+                % Jakes散射 (单位功率, 以ν_p为中心)
+                g_scat = zeros(1, length(n_range));
+                for n_osc = 1:N_osc
+                    theta = 2*pi*rand;
+                    beta = pi*n_osc / N_osc;
+                    g_scat = g_scat + exp(1j*(2*pi*fd_sc*cos(beta)*t_r + theta));
+                end
+                g_scat = g_scat / sqrt(N_osc);
+                % Rician组合: 稳定谱 + 弱散射, 再乘离散Doppler
+                h_tv = gains_raw(p) * phase_disc .* (spec_amp + scat_amp * g_scat);
+                rx(n_range) = rx(n_range) + h_tv .* tx(n_range-d);
+            end
+            rng(rng_state);  % 恢复
+
+        case 'jakes'
+            % Jakes衰落: fparams = fd_hz (最大多普勒频移)
+            fd_hz = fparams;
+            delays_s = delay_bins / fs;
+            ch_params = struct('fs',fs, 'delay_profile','custom', ...
+                'delays_s',delays_s, 'gains',gains_raw, ...
+                'num_paths',length(delay_bins), 'doppler_rate',fd_hz/fc, ...
+                'fading_type','slow', 'fading_fd_hz',fd_hz, ...
+                'snr_db',Inf, 'seed',42);
+            [rx,~] = gen_uwa_channel(tx, ch_params);
+
+        otherwise
+            error('不支持的信道类型: %s', ftype);
+    end
+end
