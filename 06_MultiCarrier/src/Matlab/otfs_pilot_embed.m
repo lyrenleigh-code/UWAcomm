@@ -1,6 +1,6 @@
 function [dd_frame, pilot_info, guard_mask, data_indices] = otfs_pilot_embed(data_symbols, N, M, pilot_config)
 % 功能：OTFS DD域导频嵌入——支持5种导频方案
-% 版本：V2.0.0
+% 版本：V2.1.0 — 新增delay_guard: 排除l<max_delay区域(消除帧CP β因子)
 % 输入：
 %   data_symbols - 数据符号 (1xK 向量)
 %   N            - 多普勒格点数
@@ -95,6 +95,14 @@ gk = cfg.guard_k; gl = cfg.guard_l;
 pv = cfg.pilot_value;
 
 gmask = build_guard_mask(N, M, [pk, pl], gk, gl);
+
+% 延迟保护区：排除 l < delay_guard 的列（消除帧CP跨子块β因子）
+if isfield(cfg, 'delay_guard') && cfg.delay_guard > 0
+    for l_dg = 1:min(cfg.delay_guard, M)
+        gmask(:, l_dg) = true;
+    end
+end
+
 didx = find(~gmask);
 
 data_padded = pad_data(data, length(didx));
