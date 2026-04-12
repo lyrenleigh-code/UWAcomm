@@ -697,11 +697,23 @@ for fi = 1:length(fd_list_eq)
 
     [shaped_fde,~,~]=pulse_shape(frame_fde,sps,'rrc',rolloff,span_rrc);
     if fd_i==0, ftype_i='static'; else, ftype_i='slow'; end
+    fc_ref = 12000;  % 载频 12kHz，与 sys_params 一致
+    dop_rate_i = fd_i / fc_ref;  % doppler_rate = fd / fc
     ch_p=struct('fs',sym_rate*sps,'delay_profile','custom','delays_s',sym_delays/sym_rate,...
-        'gains',gains_raw,'num_paths',K,'doppler_rate',0,...
+        'gains',gains_raw,'num_paths',K,'doppler_rate',dop_rate_i,...
         'fading_type',ftype_i,'fading_fd_hz',fd_i,'snr_db',Inf,'seed',200+fi*100);
     [rx_shaped_fde,ch_info_fde]=gen_uwa_channel(shaped_fde,ch_p);
-    rx_shaped_fde=rx_shaped_fde(1:length(shaped_fde));
+    % 多普勒补偿：oracle alpha 重采样还原（模块07聚焦估计+均衡，不测多普勒补偿）
+    if abs(dop_rate_i) > 1e-10
+        scale_inv = 1 + dop_rate_i;  % 逆缩放
+        t_rx = (0:length(rx_shaped_fde)-1) / (sym_rate*sps);
+        t_comp = linspace(0, t_rx(end), round(length(rx_shaped_fde)*scale_inv));
+        rx_shaped_fde = interp1(t_rx, rx_shaped_fde, t_comp, 'spline', 0);
+    end
+    rx_shaped_fde = rx_shaped_fde(1:min(length(rx_shaped_fde),length(shaped_fde)));
+    if length(rx_shaped_fde) < length(shaped_fde)
+        rx_shaped_fde = [rx_shaped_fde, zeros(1, length(shaped_fde)-length(rx_shaped_fde))];
+    end
     h_paths_fde=zeros(K,N_frame_fde);
     for si_s=1:N_frame_fde
         ms=(si_s-1)*sps+round(sps/2); ms=min(ms,size(ch_info_fde.h_time,2));
