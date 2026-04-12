@@ -249,3 +249,29 @@ addpath(fullfile(proj_root, '07_ChannelEstEq', 'src', 'Matlab'));
 - `12_IterativeProc/turbo_equalizer_implementation.md` — Turbo均衡实现方案
 - `refrence/` — 哈工程殷敬伟课题组学位论文 + Turbo_VAMP参考实现
 - `D:\ProjectTask\Turbo Equalization/` — SC-TDE工程参考
+
+## 工程闭环（从 ohmybrain-core 派生）
+
+### 目录补充
+
+| 目录 | 职责 |
+|------|------|
+| `wiki/` | 项目知识层（概念、架构、模块、决策） |
+| `specs/active/` | 当前任务 spec（含 Spec+Plan+Log+Result） |
+| `specs/archive/` | 已完成任务 |
+| `plans/` | 实现计划（可选，大任务使用） |
+| `scripts/` | 自动化脚本（lint/sync/validate） |
+| `workflows/` | 知识闭环 + 开发闭环流程文档 |
+| `.claude/rules/` | 路径特定规则 |
+| `.claude/skills/` | 可复用工作流 |
+| `.claude/hooks/` | 行为钩子 |
+
+### 开发闭环
+
+```
+specs/active/ → plan → 改代码(01~13模块) → 跑测试 → validate → specs/archive/
+```
+
+### 知识沉淀
+
+项目级知识写入 `wiki/`，跨项目知识 promote 到 ohmybrain 的 wiki。
