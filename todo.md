@@ -274,9 +274,10 @@ RX：①LFM相位+训练精估α ②resample补偿 ③LFM精确定时 ④残余C
 | ✅ | SC-TDE离散Doppler测试 | **完成** | disc-5Hz/hyb-K20/K10 **0%@5dB+**, 最大改善 |
 | ✅ | DSSS离散Doppler测试 | **完成** | disc-5Hz 0%@-10dB+, hyb-K5 0%@-5dB+ |
 | ✅ | FH-MFSK离散Doppler测试 | **完成** | 全部6种信道 0%@0~5dB+, 最鲁棒 |
-| 🔴 高 | OTFS通带2D脉冲整形 | **待做** | 减少PAPR尖刺, 升余弦窗+频谱整形 |
+| 🔶 进行 | OTFS通带2D脉冲整形 | **Phase2完成** | Hann旁瓣降13.8dB+模糊度PSL降33dB; PAPR无法通过窗化降低(根因是IFFT叠加); 待Phase4端到端BER验证 |
 | 🔴 高 | OTFS两级同步架构 | **待做** | 对齐其他体制HFM+LFM帧结构 |
 | 🟡 中 | 模块07 doppler_rate=0修正 | **待做** | 时变均衡测试应含真实Doppler频偏 |
+| 🟡 中 | OTFS PAPR专项降低 | **待做** | 需SLM/PTS/削峰等专用技术, 当前papr_clip可用 |
 
 ---
 
@@ -293,6 +294,8 @@ RX：①LFM相位+训练精估α ②resample补偿 ③LFM精确定时 ④残余C
 9. **离散Doppler下全部6体制可工作**：disc-5Hz/Rician混合信道，高速体制(SC-FDE/OFDM/SC-TDE/OTFS)均在5-10dB达到0%BER
 10. **SC-TDE在离散Doppler下逆袭**：从Jakes的~48%@全SNR → disc-5Hz **0%@5dB+**，改善最大
 11. **FH-MFSK是唯一全信道可工作的体制**：即使Jakes连续谱也在0dB即0%，跳频分集+能量检测天然抗Doppler
+12. **OTFS PAPR无法通过窗化降低**（2026-04-13）：PAPR=7.1dB，根因是IFFT随机叠加（与OFDM同理），CP-only窗化和数据脉冲成形均无效。需SLM/PTS/削峰等专用技术
+13. **Hann脉冲成形降旁瓣有效**（2026-04-13）：频谱PSL降13.8dB（-17.8→-31.6dB），模糊度函数多普勒PSL降33dB（-13.4→-46.9dB），代价是多普勒分辨力展宽2.3x（水声5Hz场景可接受）
 
 ---
 

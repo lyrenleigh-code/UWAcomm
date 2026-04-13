@@ -639,22 +639,27 @@ try
     offset_true = 200;  % 真实帧起始(采样点)
 
     guard = 500;
+    G_nominal = L_hfm + guard;  % HFM+头到HFM-头标称间距
+    total_len = offset_true + 2*L_hfm + guard + 1000;
     for ai = 1:length(alpha_list)
         alpha = alpha_list(ai);
-        % 构建帧：[zeros|HFM+|guard|HFM-|zeros]，模拟多普勒通过偏移HFM峰位置
-        % HFM+定时偏置: Δτ+ = -α·S_bias (采样点: -α·S_bias·fs)
-        % HFM-定时偏置: Δτ- = +α·S_bias
+        % 多普勒偏移模型（通带等效）：
+        %   HFM+峰偏移: -α*S_bias*fs（偏早）
+        %   HFM-峰偏移: +α*S_bias*fs（偏晚）
+        %   间隔压缩:   G → G/(1+α)（多普勒时间压缩）
+        %   帧起始压缩: (offset+1) → (offset+1)/(1+α)
         bias_samp = round(alpha * S_bias * fs);
-        hfm_neg_start = offset_true + L_hfm + guard;
+        rx_offset = round((offset_true + 1) / (1 + alpha));
+        rx_gap = round(G_nominal / (1 + alpha));
 
-        frame = zeros(1, offset_true + 2*L_hfm + guard + 1000);
-        % HFM+放在 offset_true+1-bias_samp 处（偏置偏早）
-        pos_start = max(1, offset_true + 1 - bias_samp);
-        pos_end = min(pos_start + L_hfm - 1, length(frame));
+        frame = zeros(1, total_len);
+        % HFM+在RX中的位置: rx_offset - bias_samp
+        pos_start = max(1, rx_offset - bias_samp);
+        pos_end = min(pos_start + L_hfm - 1, total_len);
         frame(pos_start : pos_end) = hfm_bb_pos(1 : pos_end-pos_start+1);
-        % HFM-放在 hfm_neg_start+1+bias_samp 处（偏置偏晚）
-        neg_start = hfm_neg_start + 1 + bias_samp;
-        neg_end = min(neg_start + L_hfm - 1, length(frame));
+        % HFM-在RX中的位置: rx_offset + rx_gap + bias_samp
+        neg_start = rx_offset + rx_gap + bias_samp;
+        neg_end = min(neg_start + L_hfm - 1, total_len);
         frame(neg_start : neg_end) = hfm_bb_neg(1 : neg_end-neg_start+1);
 
         % 加噪
@@ -663,16 +668,16 @@ try
         rng(80 + ai);
         frame_noisy = frame + sqrt(noise_var_t/2)*(randn(size(frame))+1j*randn(size(frame)));
 
-        % LFM同步（对比基线，用LFM模板找HFM+位置）
+        % LFM同步（对比基线）
         [lfm_ref, ~] = gen_lfm(fs, T_hfm, f_lo, f_hi);
         t_lfm_ref = (0:length(lfm_ref)-1)/fs;
         lfm_bb_ref = exp(1j*2*pi*(-bw/2*t_lfm_ref + 0.5*bw/T_hfm*t_lfm_ref.^2));
         [pos_lfm, ~, ~] = sync_detect(frame_noisy, lfm_bb_ref, 0.2);
-        tau_err_lfm(ai) = pos_lfm - (offset_true + 1);
+        tau_err_lfm(ai) = pos_lfm - rx_offset;
 
         % 单路HFM+同步
         [pos_hfm, ~, ~] = sync_detect(frame_noisy, hfm_bb_pos, 0.2);
-        tau_err_hfm_pos(ai) = pos_hfm - (offset_true + 1);
+        tau_err_hfm_pos(ai) = pos_hfm - rx_offset;
 
         % 双HFM消偏同步
         sp = struct('S_bias', S_bias, 'alpha_max', 0.02, ...
@@ -680,8 +685,7 @@ try
                      'sep_samples', L_hfm + guard, ...
                      'frame_gap', guard);
         [tau_dual, alpha_dual, ~, ~] = sync_dual_hfm(frame_noisy, hfm_bb_pos, hfm_bb_neg, fs, sp);
-        % tau_dual是消偏后的帧起始估计
-        tau_err_dual(ai) = tau_dual - (offset_true + 1);
+        tau_err_dual(ai) = tau_dual - rx_offset;
         alpha_est_dual(ai) = alpha_dual;
     end
 
@@ -717,30 +721,33 @@ try
     alpha_test_val = 0.003;  % 约4.5m/s
     N_trial = 20;
     alpha_rmse = zeros(1, length(snr_list_test));
+
     bias_samp_test = round(alpha_test_val * S_bias * fs);
+    rx_off_test = round((offset_true + 1) / (1 + alpha_test_val));
+    rx_gap_test = round(G_nominal / (1 + alpha_test_val));
 
     for si = 1:length(snr_list_test)
         alpha_errs = zeros(1, N_trial);
         for trial = 1:N_trial
             rng(81*100 + si*10 + trial);
-            % 用偏置模型构建帧（与8.1一致）
-            frame_t = zeros(1, offset_true + 2*L_hfm + guard + 1000);
-            ps = max(1, offset_true + 1 - bias_samp_test);
-            pe = min(ps + L_hfm - 1, length(frame_t));
+            % 偏移+间隔压缩模型（与8.1一致）
+            frame_t = zeros(1, total_len);
+            ps = max(1, rx_off_test - bias_samp_test);
+            pe = min(ps + L_hfm - 1, total_len);
             frame_t(ps:pe) = hfm_bb_pos(1:pe-ps+1);
-            ns = offset_true + L_hfm + guard + 1 + bias_samp_test;
-            ne = min(ns + L_hfm - 1, length(frame_t));
-            frame_t(ns:ne) = hfm_bb_neg(1:ne-ns+1);
+            ns_t = rx_off_test + rx_gap_test + bias_samp_test;
+            ne_t = min(ns_t + L_hfm - 1, total_len);
+            frame_t(ns_t:ne_t) = hfm_bb_neg(1:ne_t-ns_t+1);
 
             % 加噪
             sig_pwr_t = mean(abs(hfm_bb_pos).^2);
             nv = max(sig_pwr_t * 10^(-snr_list_test(si)/10), 1e-10);
             rx = frame_t + sqrt(nv/2)*(randn(size(frame_t))+1j*randn(size(frame_t)));
 
-            sp = struct('S_bias', S_bias, 'alpha_max', 0.02, ...
+            sp82 = struct('S_bias', S_bias, 'alpha_max', 0.02, ...
                         'search_win', length(rx), 'sep_samples', L_hfm + guard, ...
                         'frame_gap', guard);
-            [~, a_est, ~, ~] = sync_dual_hfm(rx, hfm_bb_pos, hfm_bb_neg, fs, sp);
+            [~, a_est, ~, ~] = sync_dual_hfm(rx, hfm_bb_pos, hfm_bb_neg, fs, sp82);
             alpha_errs(trial) = a_est - alpha_test_val;
         end
         alpha_rmse(si) = sqrt(mean(alpha_errs.^2));
@@ -792,6 +799,96 @@ catch e
     fprintf('[失败] 8.3 PLL载波同步 | %s\n', e.message);
     fail_count = fail_count + 1;
     vis8.ok3 = false;
+end
+
+%% 8.4 Rician多径信道同步检测
+try
+    rng(84);
+    mp_delays = [0, 5, 15, 40, 80];
+    n_mp = length(mp_delays);
+    rician_K = [0, 20, 10, 5, 2];  % 0=纯AWGN(无多径)
+    snr_ric = 15;
+    n_mc = 20;
+
+    % 构建TX帧
+    neg_pos_ric = offset_true + L_hfm + guard + 1;
+    tx_ric = zeros(1, total_len);
+    tx_ric(offset_true+1 : offset_true+L_hfm) = hfm_bb_pos;
+    tx_ric(neg_pos_ric : neg_pos_ric+L_hfm-1) = hfm_bb_neg;
+
+    fprintf('\n  Rician多径同步检测 (SNR=%ddB, %d径, %d次MC)\n', snr_ric, n_mp, n_mc);
+    fprintf('  %-10s | %-15s | %-15s | %-15s\n', ...
+        'K因子', 'HFM+偏差RMSE', '双HFM偏差RMSE', 'alpha估计bias');
+    fprintf('  %s\n', repmat('-', 1, 62));
+
+    all_rician_ok = true;
+    for ki = 1:length(rician_K)
+        Kval = rician_K(ki);
+        errs_hfm = zeros(1, n_mc);
+        errs_dual = zeros(1, n_mc);
+        alpha_bias = zeros(1, n_mc);
+
+        for trial = 1:n_mc
+            rng(840 + ki*100 + trial);
+
+            % 生成Rician多径信道
+            if Kval == 0
+                rx_ric = tx_ric;  % 纯AWGN基线
+            else
+                hch = zeros(1, max(mp_delays)+1);
+                hch(mp_delays(1)+1) = sqrt(Kval/(Kval+1));
+                sc_g = (randn(1,n_mp-1) + 1j*randn(1,n_mp-1)) / sqrt(2*(n_mp-1));
+                sc_g = sc_g * sqrt(1/(Kval+1));
+                for pp = 2:n_mp
+                    hch(mp_delays(pp)+1) = hch(mp_delays(pp)+1) + sc_g(pp-1);
+                end
+                rx_ric = conv(tx_ric, hch);
+                rx_ric = rx_ric(1:total_len);
+            end
+
+            % 加噪
+            sig_seg = rx_ric(offset_true+1 : min(offset_true+L_hfm, total_len));
+            pwr_ric = mean(abs(sig_seg).^2);
+            nv_ric = max(pwr_ric * 10^(-snr_ric/10), 1e-10);
+            frame_n = rx_ric + sqrt(nv_ric/2)*(randn(1,total_len)+1j*randn(1,total_len));
+
+            % HFM+同步
+            [pos_h, ~, ~] = sync_detect(frame_n, hfm_bb_pos, 0.2);
+            errs_hfm(trial) = pos_h - (offset_true + 1);
+
+            % 双HFM消偏同步（α应≈0，因无多普勒）
+            sp_r = struct('S_bias', S_bias, 'alpha_max', 0.02, ...
+                        'search_win', length(frame_n), ...
+                        'sep_samples', L_hfm + guard, 'frame_gap', guard);
+            [tau_d, a_d, ~, ~] = sync_dual_hfm(frame_n, hfm_bb_pos, hfm_bb_neg, fs, sp_r);
+            errs_dual(trial) = tau_d - (offset_true + 1);
+            alpha_bias(trial) = a_d;
+        end
+
+        rmse_hfm = sqrt(mean(errs_hfm.^2));
+        rmse_dual = sqrt(mean(errs_dual.^2));
+        mean_alpha = mean(alpha_bias);
+
+        if Kval == 0, K_str = 'AWGN';
+        else, K_str = sprintf('K=%d', Kval); end
+        fprintf('  %-10s | %10.1f samp | %10.1f samp | %+.2e\n', ...
+            K_str, rmse_hfm, rmse_dual, mean_alpha);
+
+        % K>=5时双HFM RMSE应<30样本
+        if Kval >= 5 && rmse_dual > 30, all_rician_ok = false; end
+    end
+
+    assert(all_rician_ok, 'Rician信道K>=5时双HFM同步RMSE过大(>30样本)');
+    fprintf('[通过] 8.4 Rician多径同步 | K>=5时RMSE<30样本\n');
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 8.4 Rician多径同步 | %s\n', e.message);
+    if ~isempty(e.stack)
+        for si_err = 1:min(3, length(e.stack))
+            fprintf('  at line %d in %s\n', e.stack(si_err).line, e.stack(si_err).name);
+        end
+    end
+    fail_count = fail_count + 1;
 end
 
 %% --- 可视化：多普勒同步误差分析（独立于测试） --- %%

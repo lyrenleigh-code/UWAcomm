@@ -8,6 +8,11 @@
 %   在MATLAB命令行执行 >> run('test_channel_coding.m')
 
 clc; close all;
+
+% 添加跨模块依赖路径（Turbo编码需要交织模块）
+proj_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))));
+addpath(fullfile(proj_root, '03_Interleaving', 'src', 'Matlab'));
+
 fprintf('========================================\n');
 fprintf('  信道编解码模块 — 单元测试\n');
 fprintf('========================================\n\n');

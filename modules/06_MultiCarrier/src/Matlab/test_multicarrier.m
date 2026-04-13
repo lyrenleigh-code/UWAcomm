@@ -324,6 +324,93 @@ catch e
     fail_count = fail_count + 1;
 end
 
+%% --- OTFS 脉冲成形 V4.0 新增 ---
+%% 路径A: CP-only窗化(降PAPR)  路径B: 数据脉冲成形(降旁瓣)
+
+N_p = 8; M_p = 32; cp_p = 8;
+constellation_p = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
+
+%% 3.9 路径A: CP-only窗化回环（应bit-exact, CP丢弃后数据不变）
+try
+    rng(39);
+    dd_data_p = (randn(N_p, M_p) + 1j*randn(N_p, M_p)) / sqrt(2);
+    [sig_cpwin, ~] = otfs_modulate(dd_data_p, N_p, M_p, cp_p, 'dft', 'rect', 'raised_cosine');
+    [dd_rx_cpwin, ~] = otfs_demodulate(sig_cpwin, N_p, M_p, cp_p, 'dft');
+    err_cpwin = max(abs(dd_rx_cpwin(:) - dd_data_p(:)));
+    assert(err_cpwin < 1e-8, sprintf('CP窗回环误差=%.2e过大', err_cpwin));
+    fprintf('[通过] 3.9 CP-only窗回环 | 误差=%.2e (bit-exact)\n', err_cpwin);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.9 CP-only窗回环 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 3.10 路径A: CP-only窗化PAPR测量（信息输出, 不断言改善）
+try
+    N_mc_papr = 100;
+    papr_rect_arr = zeros(1, N_mc_papr);
+    papr_cpwin_arr = zeros(1, N_mc_papr);
+    for ti = 1:N_mc_papr
+        rng(3100 + ti);
+        dd_qpsk = constellation_p(randi(4, N_p, M_p));
+        [s_r, ~] = otfs_modulate(dd_qpsk, N_p, M_p, cp_p, 'dft', 'rect', 'none');
+        [s_c, ~] = otfs_modulate(dd_qpsk, N_p, M_p, cp_p, 'dft', 'rect', 'raised_cosine');
+        papr_rect_arr(ti) = papr_calculate(s_r);
+        papr_cpwin_arr(ti) = papr_calculate(s_c);
+    end
+    papr_diff_cp = mean(papr_rect_arr) - mean(papr_cpwin_arr);
+    % CP-only窗化对PAPR影响微小（PAPR主因是IFFT随机叠加, 非CP边界跳变）
+    fprintf('[通过] 3.10 CP-only PAPR | rect=%.1fdB, cp_win=%.1fdB, 差值=%+.2fdB (信息项)\n', ...
+        mean(papr_rect_arr), mean(papr_cpwin_arr), papr_diff_cp);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.10 CP-only PAPR | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 3.11 路径B: Hann脉冲频谱旁瓣（直接测窗函数频率响应）
+try
+    % 对比rect和hann脉冲的频谱旁瓣电平
+    N_fft = 8 * M_p;  % 256点零填充FFT
+    [g_rect_t, ~] = otfs_pulse(M_p, 'rect');
+    [g_hann_t, ~] = otfs_pulse(M_p, 'hann');
+
+    G_rect = fftshift(abs(fft(g_rect_t, N_fft)));
+    G_hann = fftshift(abs(fft(g_hann_t, N_fft)));
+    G_rect_db = 20*log10(G_rect / max(G_rect));
+    G_hann_db = 20*log10(G_hann / max(G_hann));
+
+    % 峰值旁瓣电平: 主瓣外最高点
+    [~, pk_r] = max(G_rect); [~, pk_h] = max(G_hann);
+    % 旁瓣区域: 距主瓣>M/2个FFT bin
+    sl_range = [1:pk_r-M_p/2, pk_r+M_p/2:N_fft];
+    sl_range_h = [1:pk_h-M_p/2, pk_h+M_p/2:N_fft];
+    psl_rect = max(G_rect_db(sl_range));
+    psl_hann = max(G_hann_db(sl_range_h));
+    psl_improve = psl_rect - psl_hann;
+
+    assert(psl_improve > 10, sprintf('旁瓣改善仅%.1fdB', psl_improve));
+    fprintf('[通过] 3.11 Hann频谱旁瓣 | rect PSL=%.1fdB, hann PSL=%.1fdB, 改善=%.1fdB\n', ...
+        psl_rect, psl_hann, psl_improve);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.11 Hann频谱旁瓣 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 3.12 向后兼容（默认参数=rect+none）
+try
+    [sig_default, ~] = otfs_modulate(dd_data_p, N_p, M_p, cp_p, 'dft');
+    [sig_rect_ex, ~] = otfs_modulate(dd_data_p, N_p, M_p, cp_p, 'dft', 'rect', 'none');
+    err_compat = max(abs(sig_default - sig_rect_ex));
+    assert(err_compat < 1e-15, sprintf('向后兼容误差=%.2e', err_compat));
+    fprintf('[通过] 3.12 向后兼容 | 默认参数bit-exact, 误差=%.2e\n', err_compat);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 3.12 向后兼容 | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
 %% ==================== 四、PAPR ==================== %%
 fprintf('\n--- 4. PAPR计算与抑制 ---\n\n');
 

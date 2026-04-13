@@ -1,15 +1,21 @@
 function [dd_symbols, Y_tf] = otfs_demodulate(signal, N, M, cp_len, method)
-% 功能：OTFS解调——去整帧CP + Wigner变换 + SFFT + 频率→延迟转换恢复DD域符号
-% 版本：V3.0.0 — Per-sub-block CP + DD域修正(V2.0)
+% 功能：OTFS解调——去per-sub-block CP + Wigner变换 + SFFT + 恢复DD域符号
+% 版本：V4.0.0 — 与V3.0解调逻辑相同（RX不做窗补偿，窗效应由均衡器处理）
 % 输入：
-%   signal  - 接收时域信号 (1xL 数组，含整帧CP)
+%   signal  - 接收时域信号 (1xL 数组，含per-sub-block CP)
 %   N       - 多普勒格点数（须与调制端一致）
 %   M       - 时延格点数（须与调制端一致）
-%   cp_len  - 整帧CP长度（须与调制端一致）
-%   method  - 实现方式（'dft' 或 'zak'，须与调制端一致，默认'dft'）
+%   cp_len  - CP长度（须与调制端一致）
+%   method  - 实现方式（'dft' 或 'zak'，默认'dft'）
 % 输出：
 %   dd_symbols - DD域符号 (NxM 复数矩阵)
 %   Y_tf       - 时频域信号 (NxM，Wigner变换输出)
+%
+% 备注：
+%   TX端脉冲成形(pulse_type)和CP窗化(cp_window)的效应：
+%   - CP窗化: 丢弃CP时一并移除，RX无需处理
+%   - 数据脉冲成形: 窗效应纳入等效信道，由eq_otfs_lmmse补偿
+%   因此解调器与V3.0完全相同，无需知道TX使用了哪种脉冲
 
 %% ========== 1. 入参解析 ========== %%
 if nargin < 5 || isempty(method), method = 'dft'; end

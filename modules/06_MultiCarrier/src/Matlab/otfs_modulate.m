@@ -1,6 +1,6 @@
-function [signal, params_out] = otfs_modulate(dd_symbols, N, M, cp_len, method)
-% 功能：OTFS调制——DD域符号经延迟→频率转换+ISFFT+Heisenberg变换生成时域信号
-% 版本：V3.0.0 — Per-sub-block CP + DD域修正(V2.0)
+function [signal, params_out] = otfs_modulate(dd_symbols, N, M, cp_len, method, pulse_type, cp_window)
+% 功能：OTFS调制——DD域符号经ISFFT+Heisenberg变换+脉冲成形+CP窗化生成时域信号
+% 版本：V4.0.0 — 双路径: 数据脉冲成形(降旁瓣) + CP窗化(降PAPR)
 % 输入：
 %   dd_symbols - DD域数据符号 (NxM 矩阵 或 1x(N*M) 向量)
 %                N=多普勒维度(行), M=时延维度(列)
@@ -8,6 +8,14 @@ function [signal, params_out] = otfs_modulate(dd_symbols, N, M, cp_len, method)
 %   M          - 时延格点数（子载波数，默认 32）
 %   cp_len     - 整帧CP长度（采样点数，默认 M/4）
 %   method     - 实现方式（'dft'标准DFT(默认) 或 'zak' Zak域实现）
+%   pulse_type - 数据脉冲类型（默认 'rect'，向后兼容）
+%                'rect' : 矩形（V3.0行为）
+%                'hann' : Hann窗（降旁瓣33dB, 需均衡器补偿）
+%                'tukey': Tukey窗（温和锥削）
+%                'rrc'  : 根升余弦窗
+%   cp_window  - CP段窗化（默认 'none'）
+%                'none'          : 不窗化（V3.0行为）
+%                'raised_cosine' : 升余弦ramp-up（降PAPR, 不影响数据）
 % 输出：
 %   signal     - 时域OTFS帧信号 (1xL 数组，含整帧CP)
 %   params_out - 参数结构体
@@ -25,6 +33,8 @@ function [signal, params_out] = otfs_modulate(dd_symbols, N, M, cp_len, method)
 %   - 信道延迟d在DD域表现为时延维位移（非相位旋转）
 
 %% ========== 1. 入参解析 ========== %%
+if nargin < 7 || isempty(cp_window), cp_window = 'none'; end
+if nargin < 6 || isempty(pulse_type), pulse_type = 'rect'; end
 if nargin < 5 || isempty(method), method = 'dft'; end
 if nargin < 4 || isempty(cp_len), cp_len = floor(M/4); end
 if nargin < 3 || isempty(M), M = 32; end
@@ -52,16 +62,30 @@ switch method
         error('不支持的方法: %s！支持 dft/zak', method);
 end
 
-%% ========== 4. 添加CP ========== %%
-% Per-sub-block CP: 每个子块(M样本)独立加CP
-% 优势: 信道在每子块内精确循环卷积 → BCCB结构成立 → LMMSE/UAMP精确
-% 代价: N*cp_len样本开销 (vs 帧CP仅cp_len)
+%% ========== 4. 脉冲成形 + CP插入 + CP窗化 ========== %%
+% 路径B: 生成发射脉冲 g_tx（'rect'时为全1，不影响信号）
+[g_tx, ~] = otfs_pulse(M, pulse_type);
+
+% 路径A: 生成CP段窗函数
+if strcmp(cp_window, 'raised_cosine') && cp_len > 0
+    ramp_len = cp_len;
+    cp_ramp = 0.5 * (1 - cos(pi * (0:ramp_len-1) / ramp_len));  % 0→1
+else
+    cp_ramp = [];
+end
+
+% Per-sub-block: 数据脉冲成形(B) → CP插入 → CP窗化(A)
 signal = zeros(1, N * (M + cp_len));
 for n = 1:N
     sub_block = signal_no_cp((n-1)*M+1 : n*M);
+    sub_block = sub_block .* g_tx;  % 路径B: 数据脉冲成形
     offset = (n-1) * (M + cp_len);
-    signal(offset+1 : offset+cp_len) = sub_block(end-cp_len+1 : end);  % CP
-    signal(offset+cp_len+1 : offset+cp_len+M) = sub_block;              % 数据
+    cp_seg = sub_block(end-cp_len+1 : end);  % CP = 数据尾部拷贝
+    if ~isempty(cp_ramp)
+        cp_seg = cp_seg .* cp_ramp;           % 路径A: CP段升余弦ramp-up
+    end
+    signal(offset+1 : offset+cp_len) = cp_seg;
+    signal(offset+cp_len+1 : offset+cp_len+M) = sub_block;
 end
 
 %% ========== 5. 输出参数 ========== %%
@@ -69,6 +93,9 @@ params_out.N = N;
 params_out.M = M;
 params_out.cp_len = cp_len;
 params_out.method = method;
+params_out.pulse_type = pulse_type;
+params_out.cp_window = cp_window;
+params_out.g_tx = g_tx;
 params_out.X_tf = X_tf;
 params_out.total_len = length(signal);
 
