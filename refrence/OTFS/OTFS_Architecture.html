@@ -1,0 +1,1263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OTFS 技术架构文档</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&family=Noto+Serif+SC:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0d1117;
+  --bg2: #161b22;
+  --bg3: #1c2128;
+  --bg4: #21262d;
+  --border: #30363d;
+  --border2: #3d444d;
+  --text: #e6edf3;
+  --text2: #9198a1;
+  --text3: #656d76;
+  --accent: #4fc3f7;
+  --accent2: #26a69a;
+  --accent3: #7c8cf8;
+  --amber: #e8a745;
+  --coral: #ef6c57;
+  --green: #56c27b;
+  --purple: #b185db;
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'IBM Plex Sans', sans-serif;
+  --serif: 'Noto Serif SC', serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.7;
+  min-height: 100vh;
+}
+
+/* ---- Layout ---- */
+.layout { display: flex; min-height: 100vh; }
+
+/* ---- Sidebar ---- */
+.sidebar {
+  width: 260px;
+  flex-shrink: 0;
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+  padding: 0;
+}
+
+.sidebar-header {
+  padding: 24px 20px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-logo {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+
+.sidebar-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.sidebar-sub {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 4px;
+}
+
+nav { padding: 12px 0; }
+
+.nav-section {
+  padding: 8px 20px 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--text3);
+  text-transform: uppercase;
+}
+
+nav a {
+  display: block;
+  padding: 7px 20px 7px 28px;
+  font-size: 13px;
+  color: var(--text2);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+  transition: all 0.15s;
+  position: relative;
+}
+
+nav a:hover { color: var(--text); background: var(--bg3); }
+nav a.active { color: var(--accent); border-left-color: var(--accent); background: rgba(79,195,247,0.05); }
+
+nav a::before {
+  content: '';
+  position: absolute;
+  left: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--border2);
+  transition: background 0.15s;
+}
+nav a:hover::before, nav a.active::before { background: var(--accent); }
+
+/* ---- Main Content ---- */
+main {
+  flex: 1;
+  max-width: 900px;
+  padding: 48px 52px;
+  overflow-x: hidden;
+}
+
+/* ---- Header ---- */
+.doc-header {
+  padding-bottom: 36px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 48px;
+}
+
+.doc-tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(79,195,247,0.08);
+  border: 1px solid rgba(79,195,247,0.2);
+  padding: 3px 10px;
+  border-radius: 3px;
+  margin-bottom: 16px;
+}
+
+.doc-title {
+  font-family: var(--serif);
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+
+.doc-title em {
+  font-style: normal;
+  color: var(--accent);
+}
+
+.doc-desc {
+  font-size: 15px;
+  color: var(--text2);
+  max-width: 620px;
+  line-height: 1.75;
+}
+
+.doc-meta {
+  display: flex;
+  gap: 24px;
+  margin-top: 20px;
+  flex-wrap: wrap;
+}
+
+.meta-item {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.meta-item span { color: var(--text2); }
+
+/* ---- Sections ---- */
+section { margin-bottom: 56px; scroll-margin-top: 24px; }
+
+.section-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  color: var(--text3);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+h2 {
+  font-family: var(--sans);
+  font-size: 22px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+h2 .h2-num {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text3);
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  padding: 2px 7px;
+  border-radius: 3px;
+}
+
+h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  margin: 28px 0 12px;
+}
+
+p { color: var(--text2); margin-bottom: 14px; }
+
+/* ---- Cards & Grids ---- */
+.card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 20px 0; }
+.card-grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin: 20px 0; }
+.card-grid-4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin: 20px 0; }
+
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 18px;
+  transition: border-color 0.2s, transform 0.15s;
+}
+
+.card:hover { border-color: var(--border2); transform: translateY(-1px); }
+
+.card-accent { border-top: 2px solid var(--accent); }
+.card-amber  { border-top: 2px solid var(--amber); }
+.card-coral  { border-top: 2px solid var(--coral); }
+.card-green  { border-top: 2px solid var(--green); }
+.card-purple { border-top: 2px solid var(--purple); }
+.card-teal   { border-top: 2px solid var(--accent2); }
+
+.card-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-bottom: 6px;
+}
+
+.card-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 8px;
+}
+
+.card p { font-size: 13px; color: var(--text2); margin: 0; }
+
+/* ---- Signal Chain ---- */
+.signal-chain {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  margin: 24px 0;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.chain-block {
+  flex: 1;
+  min-width: 110px;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 14px 12px;
+  text-align: center;
+  position: relative;
+}
+
+.chain-block + .chain-block::before {
+  content: '→';
+  position: absolute;
+  left: -14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text3);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.chain-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text3);
+  margin-bottom: 4px;
+  letter-spacing: 0.08em;
+}
+
+.chain-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+.chain-sub {
+  font-size: 11px;
+  color: var(--text3);
+  font-family: var(--mono);
+}
+
+.chain-block.highlight { border-color: var(--accent); background: rgba(79,195,247,0.05); }
+.chain-block.highlight .chain-name { color: var(--accent); }
+
+/* ---- Equation Block ---- */
+.eq-block {
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent3);
+  border-radius: 6px;
+  padding: 16px 20px;
+  margin: 16px 0;
+  font-family: var(--mono);
+  font-size: 13px;
+  overflow-x: auto;
+}
+
+.eq-label {
+  font-size: 11px;
+  color: var(--text3);
+  margin-bottom: 6px;
+  letter-spacing: 0.05em;
+}
+
+.eq { color: var(--accent3); font-size: 14px; line-height: 1.8; }
+.eq-note { font-size: 12px; color: var(--text3); margin-top: 8px; }
+
+/* ---- Comparison Table ---- */
+.comp-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 20px 0;
+  font-size: 13px;
+}
+
+.comp-table th {
+  background: var(--bg3);
+  color: var(--text2);
+  font-weight: 600;
+  font-size: 12px;
+  padding: 10px 16px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+  letter-spacing: 0.05em;
+}
+
+.comp-table td {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text2);
+  vertical-align: top;
+}
+
+.comp-table tr:hover td { background: var(--bg3); }
+
+.badge {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+.badge-green  { background: rgba(86,194,123,0.1); color: var(--green); border: 1px solid rgba(86,194,123,0.25); }
+.badge-red    { background: rgba(239,108,87,0.1); color: var(--coral); border: 1px solid rgba(239,108,87,0.25); }
+.badge-amber  { background: rgba(232,167,69,0.1); color: var(--amber); border: 1px solid rgba(232,167,69,0.25); }
+.badge-blue   { background: rgba(79,195,247,0.1); color: var(--accent); border: 1px solid rgba(79,195,247,0.25); }
+.badge-purple { background: rgba(177,133,219,0.1); color: var(--purple); border: 1px solid rgba(177,133,219,0.25); }
+
+/* ---- Method List ---- */
+.method-list { list-style: none; margin: 14px 0; }
+.method-list li {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  font-size: 13px;
+}
+.method-list li:last-child { border-bottom: none; }
+
+.method-tag {
+  flex-shrink: 0;
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  margin-top: 2px;
+}
+
+.method-body { color: var(--text2); }
+.method-name { font-weight: 600; color: var(--text); font-size: 13px; margin-bottom: 3px; }
+
+/* ---- Feature Highlight ---- */
+.feature-row {
+  display: flex;
+  gap: 14px;
+  margin: 16px 0;
+  align-items: flex-start;
+}
+
+.feature-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.fi-blue   { background: rgba(79,195,247,0.1); color: var(--accent); }
+.fi-teal   { background: rgba(38,166,154,0.1); color: var(--accent2); }
+.fi-amber  { background: rgba(232,167,69,0.1); color: var(--amber); }
+.fi-purple { background: rgba(177,133,219,0.1); color: var(--purple); }
+
+.feature-text { flex: 1; }
+.feature-title { font-weight: 600; font-size: 14px; color: var(--text); margin-bottom: 4px; }
+.feature-desc { font-size: 13px; color: var(--text2); }
+
+/* ---- Reference block ---- */
+.ref-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 16px 0; }
+
+.ref-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 14px;
+  font-size: 12px;
+}
+
+.ref-key {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  margin-bottom: 4px;
+}
+
+.ref-title { color: var(--text2); line-height: 1.5; }
+.ref-venue { font-size: 11px; color: var(--text3); margin-top: 3px; }
+
+/* ---- Callout ---- */
+.callout {
+  border-radius: 6px;
+  padding: 14px 18px;
+  margin: 18px 0;
+  font-size: 13px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.callout-info   { background: rgba(79,195,247,0.06); border: 1px solid rgba(79,195,247,0.15); }
+.callout-warn   { background: rgba(232,167,69,0.06); border: 1px solid rgba(232,167,69,0.15); }
+.callout-icon   { font-size: 15px; flex-shrink: 0; margin-top: 1px; }
+.callout-body   { color: var(--text2); }
+.callout-head   { font-weight: 600; color: var(--text); margin-bottom: 3px; font-size: 13px; }
+
+/* ---- Footer ---- */
+footer {
+  margin-top: 64px;
+  padding-top: 24px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text3);
+  font-family: var(--mono);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+/* ---- Responsive ---- */
+@media (max-width: 840px) {
+  .sidebar { display: none; }
+  main { padding: 28px 20px; }
+  .card-grid, .card-grid-3, .card-grid-4 { grid-template-columns: 1fr; }
+  .ref-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  .card-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<div class="layout">
+
+<!-- ===== SIDEBAR ===== -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-logo">TECH / ARCH</div>
+    <div class="sidebar-title">OTFS 调制技术架构</div>
+    <div class="sidebar-sub">基于8篇核心文献综合整理</div>
+  </div>
+  <nav id="sidenav">
+    <div class="nav-section">概述</div>
+    <a href="#overview">技术背景与动机</a>
+    <a href="#channel">信道模型</a>
+
+    <div class="nav-section">核心架构</div>
+    <a href="#transceiver">收发机架构</a>
+    <a href="#io">输入输出关系</a>
+
+    <div class="nav-section">关键技术</div>
+    <a href="#estimation">信道估计</a>
+    <a href="#detection">检测与均衡</a>
+
+    <div class="nav-section">特性与扩展</div>
+    <a href="#properties">核心特性</a>
+    <a href="#extensions">扩展与应用</a>
+    <a href="#comparison">与OFDM对比</a>
+
+    <div class="nav-section">文献</div>
+    <a href="#references">参考文献</a>
+  </nav>
+</aside>
+
+<!-- ===== MAIN ===== -->
+<main>
+
+<!-- Header -->
+<div class="doc-header">
+  <div class="doc-tag">Technical Architecture Document</div>
+  <h1 class="doc-title">正交时频空间调制<br><em>OTFS</em> 完整技术框架</h1>
+  <p class="doc-desc">
+    本文档系统梳理了OTFS调制技术的完整架构，涵盖信道模型、收发机设计、信道估计、符号检测与均衡，以及面向6G的扩展方向。内容综合整理自8篇核心IEEE期刊/会议论文（2017—2022年）。
+  </p>
+  <div class="doc-meta">
+    <div class="meta-item">文献来源 <span>8篇 IEEE 论文</span></div>
+    <div class="meta-item">时间跨度 <span>2017 — 2022</span></div>
+    <div class="meta-item">应用场景 <span>5G / 6G 高移动性通信</span></div>
+    <div class="meta-item">核心域 <span>延迟-Doppler 域</span></div>
+  </div>
+</div>
+
+<!-- ===== 1. OVERVIEW ===== -->
+<section id="overview">
+  <div class="section-label">Section 01</div>
+  <h2><span class="h2-num">01</span> 技术背景与动机</h2>
+
+  <p>
+    OTFS（Orthogonal Time Frequency Space）调制由Hadani等人于2017年提出，核心出发点是解决高移动性场景下OFDM的根本性缺陷。当终端速度超过120 km/h时，OFDM的子载波正交性被Doppler频移破坏，产生严重的载波间干扰（ICI），导致系统性能急剧恶化；在500 km/h（高铁场景）时OFDM几乎完全失效。
+  </p>
+
+  <div class="card-grid">
+    <div class="card card-coral">
+      <div class="card-label">OFDM 核心问题</div>
+      <div class="card-title">时变信道下的ICI</div>
+      <p>时频域信道快速变化，相干时间短，导致子载波间干扰无法通过标准CP-OFDM消除。高速场景下信道估计精度急剧下降，链路自适应失效。</p>
+    </div>
+    <div class="card card-accent">
+      <div class="card-label">OTFS 核心思路</div>
+      <div class="card-title">在延迟-Doppler域调制</div>
+      <p>利用无线信道在延迟-Doppler域天然稀疏、缓变的特性，将信息符号调制于该域，使每个符号经历近似恒定的信道增益，彻底消除高Doppler的影响。</p>
+    </div>
+  </div>
+
+  <div class="callout callout-info">
+    <span class="callout-icon">◈</span>
+    <div class="callout-body">
+      <div class="callout-head">关键洞见：Delay-Doppler 域的物理特性</div>
+      延迟-Doppler域信道直接对应散射体的物理参数（延迟 ↔ 传播距离，Doppler ↔ 相对速度），在该域具有分离性（separability）、稳定性（stability，相干时间提升100倍）、紧凑性（compactness，4τ_max·ν_max ≤ 1）和稀疏性（sparsity）四大特性。这是OTFS一切优势的数学基础。
+    </div>
+  </div>
+</section>
+
+<!-- ===== 2. CHANNEL MODEL ===== -->
+<section id="channel">
+  <div class="section-label">Section 02</div>
+  <h2><span class="h2-num">02</span> 信道模型</h2>
+
+  <h3>2.1 窄带时变信道（OTFS基础模型）</h3>
+  <p>基于Bello（1963）的经典工作，窄带多径信道由延迟-Doppler扩散函数 h(τ,ν) 描述：</p>
+
+  <div class="eq-block">
+    <div class="eq-label">接收信号（时域连续）</div>
+    <div class="eq">r(t) = ∬ h(τ,ν) · s(t−τ) · e<sup>j2πν(t−τ)</sup> dν dτ + w(t)</div>
+    <div class="eq-note">其中 h(τ,ν) = Σᵢ hᵢ δ(τ−τᵢ) δ(ν−νᵢ)，P条离散多径，每条路径具有复增益 hᵢ、延迟 τᵢ、Doppler频移 νᵢ</div>
+  </div>
+
+  <div class="card-grid-3">
+    <div class="card card-accent">
+      <div class="card-label">延迟维度</div>
+      <div class="card-title">τᵢ = lᵢ / (M·Δf)</div>
+      <p>lᵢ 为整数延迟索引，M·Δf 为系统带宽。延迟分辨率 Δτ = 1/(M·Δf)</p>
+    </div>
+    <div class="card card-green">
+      <div class="card-label">Doppler维度</div>
+      <div class="card-title">νᵢ = kᵢ / (N·T)</div>
+      <p>kᵢ 为整数Doppler索引，N·T 为帧时长。Doppler分辨率 Δν = 1/(N·T)</p>
+    </div>
+    <div class="card card-amber">
+      <div class="card-label">分数Doppler</div>
+      <div class="card-title">νᵢ = (kᵢ+εᵢ) / (N·T)</div>
+      <p>εᵢ ∈ [−½, ½] 为分数Doppler，实际系统中普遍存在，导致信道在DD域扩展。窗函数设计可缓解此问题。</p>
+    </div>
+  </div>
+
+  <h3>2.2 宽带时变信道（UWA / UWB场景）</h3>
+  <p>当信号分数带宽 B/fc &gt; 0.25，或移动速度高到 vT/c 不可忽略时，窄带近似失效，Doppler效应表现为时间尺度缩放而非频移。此时采用延迟-尺度模型（K.P. & Murthy, 2022）：</p>
+
+  <div class="eq-block">
+    <div class="eq-label">宽带接收信号（时间尺度模型）</div>
+    <div class="eq">r(t) = ∬ h(τ,α) · √α · s(α(t−τ)) dτ dα</div>
+    <div class="eq-note">α = (c−v)/(c+v) 为时间压缩/扩张因子（v：散射体速度，c：波速）；宽带信道用 h(τ,α) 替代 h(τ,ν) 描述</div>
+  </div>
+
+  <div class="callout callout-warn">
+    <span class="callout-icon">▲</span>
+    <div class="callout-body">
+      <div class="callout-head">窄带 vs 宽带：两种信道模型的适用边界</div>
+      窄带近似成立需同时满足：① 小分数带宽 B/fc ≪ 1；② 移动位置变化远小于信号位置分辨率 v ≪ c/(2BT)。水声通信（fc≈15kHz，B/fc≈0.67）和UWB射频（BT≈10⁶）均违反上述条件，必须采用宽带信道模型，标准OTFS不适用，需改用ODSS（Orthogonal Delay Scale Space）调制。
+    </div>
+  </div>
+
+  <h3>2.3 Massive MIMO 3D结构化稀疏信道</h3>
+  <p>在多天线场景下，延迟-Doppler-角度三维信道 H^DDA 展现出三重结构化稀疏性（Shen et al., 2019）：</p>
+
+  <div class="card-grid-3">
+    <div class="card card-purple">
+      <div class="card-label">延迟维 ℓ</div>
+      <div class="card-title">普通稀疏</div>
+      <p>主导路径数 Nₚ 有限（典型值6条），沿延迟维稀疏分布，有限支撑 [0, M_max−1]</p>
+    </div>
+    <div class="card card-purple">
+      <div class="card-label">Doppler维 k</div>
+      <div class="card-title">块稀疏</div>
+      <p>仅一个非零块，中心在 k=0 附近。典型5%的Doppler维度包含有效能量，块长度未知</p>
+    </div>
+    <div class="card card-purple">
+      <div class="card-label">角度维 r</div>
+      <div class="card-title">突发稀疏</div>
+      <p>Nₚ个非零突发块（每路径的角度扩展），起始位置未知，突发长度 D 约为 Nₜ/10</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 3. TRANSCEIVER ===== -->
+<section id="transceiver">
+  <div class="section-label">Section 03</div>
+  <h2><span class="h2-num">03</span> 收发机架构</h2>
+
+  <h3>3.1 发射机信号链</h3>
+
+  <div class="signal-chain">
+    <div class="chain-block highlight">
+      <div class="chain-label">STEP 01</div>
+      <div class="chain-name">QAM映射</div>
+      <div class="chain-sub">x[k,l] ∈ DD域</div>
+    </div>
+    <div class="chain-block">
+      <div class="chain-label">STEP 02</div>
+      <div class="chain-name">ISFFT</div>
+      <div class="chain-sub">DD → TF</div>
+    </div>
+    <div class="chain-block">
+      <div class="chain-label">STEP 03</div>
+      <div class="chain-name">加窗</div>
+      <div class="chain-sub">W_tx[n,m]</div>
+    </div>
+    <div class="chain-block">
+      <div class="chain-label">STEP 04</div>
+      <div class="chain-name">Heisenberg</div>
+      <div class="chain-sub">TF → s(t)</div>
+    </div>
+    <div class="chain-block">
+      <div class="chain-label">STEP 05</div>
+      <div class="chain-name">加CP</div>
+      <div class="chain-sub">长度 ≥ l_max</div>
+    </div>
+    <div class="chain-block">
+      <div class="chain-label">STEP 06</div>
+      <div class="chain-name">发射</div>
+      <div class="chain-sub">over h(τ,ν)</div>
+    </div>
+  </div>
+
+  <div class="eq-block">
+    <div class="eq-label">ISFFT（逆辛有限傅里叶变换）</div>
+    <div class="eq">X[n,m] = (1/√MN) Σₖ Σₗ x[k,l] · e<sup>j2π(nk/N − ml/M)</sup></div>
+    <div class="eq-note">将DD域 N×M 符号网格映射到TF域 N×M 时频资源块</div>
+  </div>
+
+  <div class="eq-block">
+    <div class="eq-label">Heisenberg变换（TF → 时域）</div>
+    <div class="eq">s(t) = Σₙ Σₘ X[n,m] · g_tx(t−nT) · e<sup>j2πmΔf(t−nT)</sup></div>
+    <div class="eq-note">g_tx(t) 为发射脉冲整形函数；实际系统常用矩形窗（CP-OTFS）或理想双正交脉冲</div>
+  </div>
+
+  <h3>3.2 接收机信号链</h3>
+
+  <div class="signal-chain">
+    <div class="chain-block">
+      <div class="chain-label">STEP 01</div>
+      <div class="chain-name">去CP</div>
+      <div class="chain-sub">消除帧间干扰</div>
+    </div>
+    <div class="chain-block">
+      <div class="chain-label">STEP 02</div>
+      <div class="chain-name">Wigner变换</div>
+      <div class="chain-sub">时域 → TF</div>
+    </div>
+    <div class="chain-block">
+      <div class="chain-label">STEP 03</div>
+      <div class="chain-name">加窗</div>
+      <div class="chain-sub">W_rx[n,m]</div>
+    </div>
+    <div class="chain-block highlight">
+      <div class="chain-label">STEP 04</div>
+      <div class="chain-name">SFFT</div>
+      <div class="chain-sub">TF → DD</div>
+    </div>
+    <div class="chain-block">
+      <div class="chain-label">STEP 05</div>
+      <div class="chain-name">信道估计</div>
+      <div class="chain-sub">估计 H_eff</div>
+    </div>
+    <div class="chain-block">
+      <div class="chain-label">STEP 06</div>
+      <div class="chain-name">检测/均衡</div>
+      <div class="chain-sub">恢复 x[k,l]</div>
+    </div>
+  </div>
+
+  <div class="eq-block">
+    <div class="eq-label">Wigner变换（时域 → TF域，Heisenberg的逆）</div>
+    <div class="eq">Y[n,m] = A<sub>g_rx, r</sub>(τ,ν)|<sub>τ=nT, ν=mΔf</sub> = ∫ g*_rx(t'−nT) · r(t') · e<sup>−j2πmΔf(t'−nT)</sup> dt'</div>
+  </div>
+
+  <div class="eq-block">
+    <div class="eq-label">SFFT（辛有限傅里叶变换）</div>
+    <div class="eq">y[k,l] = (1/√MN) Σₙ Σₘ Y[n,m] · e<sup>−j2π(nk/N − ml/M)</sup></div>
+    <div class="eq-note">SFFT = SFFT⁻¹ 的逆操作；实际CP-OTFS中等价于 Y^DD = R_CP · R · F_N</div>
+  </div>
+
+  <h3>3.3 脉冲整形方案对比</h3>
+  <div class="card-grid">
+    <div class="card card-accent">
+      <div class="card-label">理想双正交脉冲</div>
+      <div class="card-title">Bi-orthogonal waveform</div>
+      <p>满足双正交条件 ∫g*_tx(t)g_rx(t−nT)e^{j2πmΔft}dt = δ(m)δ(n)，完全消除ISI/ICI，信道矩阵具有标准块循环结构（BCCB），但物理可实现性受限。</p>
+    </div>
+    <div class="card card-amber">
+      <div class="card-label">矩形脉冲（CP-OTFS）</div>
+      <div class="card-title">Rectangular waveform</div>
+      <p>工程实现简单，可复用OFDM硬件，每个子块前附加CP。代价是信道矩阵结构改变（块对角矩阵），均衡需要SVD或迭代方法。UAMP算法（Yuan 2022）专为此优化。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 4. IO RELATIONSHIP ===== -->
+<section id="io">
+  <div class="section-label">Section 04</div>
+  <h2><span class="h2-num">04</span> DD域输入输出关系</h2>
+
+  <p>OTFS最核心的特性是：经过双向变换后，在DD域得到一个二维循环卷积形式的输入输出关系，使时变信道转化为时不变（quasi-time-invariant）的二维等效信道。</p>
+
+  <div class="eq-block">
+    <div class="eq-label">DD域输入输出关系（理想脉冲，Raviteja 2018）</div>
+    <div class="eq">y[k,l] = Σₖ'Σₗ' x[k',l'] · h_w[(k−k')_N, (l−l')_M] + z[k,l]</div>
+    <div class="eq-note">
+      h_w：加窗后的等效DD域信道；(·)_N 和 (·)_M 分别为模N和模M运算<br>
+      本质为二维循环卷积，每个符号 x[k,l] 对 y[k,l] 的贡献由 h_w 决定
+    </div>
+  </div>
+
+  <div class="eq-block">
+    <div class="eq-label">矩阵向量形式（有效信道矩阵）</div>
+    <div class="eq">y = H·x + w，　H ∈ ℂ^(MN×MN)</div>
+    <div class="eq-note">
+      H 的关键结构特性：<br>
+      ① 双正交脉冲：H 为块循环块循环矩阵（BCCB），可用2D DFT对角化：H = F^H · Λ · F<br>
+      ② 矩形脉冲（CP-OTFS）：H = (F_N ⊗ I_M) · H_T · (F^H_N ⊗ I_M)，H_T为块对角矩阵<br>
+      ③ 两种情况下 H 每行非零元素数 S 均等于路径数 P（整数Doppler），分数Doppler时 S 可达数倍 P
+    </div>
+  </div>
+
+  <div class="callout callout-info">
+    <span class="callout-icon">◈</span>
+    <div class="callout-body">
+      <div class="callout-head">BCCB结构的算法意义</div>
+      BCCB矩阵可用2D FFT精确对角化（H = F^H Λ F，F = F_N ⊗ F_M），这使得矩阵向量乘积 Hx 的计算复杂度从 O(M²N²) 降至 O(MN·log(MN))。UAMP检测算法（Yuan et al. 2022）正是利用这一结构，将检测复杂度与路径数 P 解耦，实现对分数Doppler和富散射环境的鲁棒检测。
+    </div>
+  </div>
+</section>
+
+<!-- ===== 5. CHANNEL ESTIMATION ===== -->
+<section id="estimation">
+  <div class="section-label">Section 05</div>
+  <h2><span class="h2-num">05</span> 信道估计方法</h2>
+
+  <p>
+    由于DD域信道稀疏且缓变，OTFS的信道估计相比OFDM有天然优势：理论上只需一个导频符号即可估计全部信道参数 {hᵢ, lᵢ, kᵢ}。各方案的核心差异在于如何处理导频与数据之间的干扰。
+  </p>
+
+  <ul class="method-list">
+
+    <li>
+      <span class="method-tag badge badge-blue">EP</span>
+      <div class="method-body">
+        <div class="method-name">嵌入导频法（Raviteja et al., 2019, IEEE TVT）</div>
+        在DD域单个位置 (k_p, l_p) 放置高功率导频，四周插入 (4k_max+1)(2l_max+1)−1 个保护零符号，完全隔离数据干扰。接收端用门限法（阈值 γ = 3√N₀）直接检测路径。优点：实现简单，估计精度高；缺点：导频开销 η = (2l_max+1)(4k_max+1)/(MN) 随最大延迟/Doppler增大，高速场景频效损失显著（kmax=5，lmax=10时约占11%）。
+      </div>
+    </li>
+
+    <li>
+      <span class="method-tag badge badge-green">SP-NI</span>
+      <div class="method-body">
+        <div class="method-name">叠加导频非迭代（Mishra et al., 2022, IEEE TWC）</div>
+        导频以低功率叠加在全部MN个数据符号上，无需保护间隔，频谱效率 = log|A| bits/s/Hz（理论最大）。信道估计时将数据视为干扰，等效干扰协方差矩阵 C_w̃d = (Σσ²_hᵢ)(σ²_d + σ²_w)I_MN，用MMSE估计器 ĥ_NI = (Ω^H_p C^{-1}_{w̃d} Ω_p + C^{-1}_h)^{-1} Ω^H_p C^{-1}_{w̃d} y 进行估计。高SNR时因数据干扰饱和，性能有瓶颈。
+      </div>
+    </li>
+
+    <li>
+      <span class="method-tag badge badge-amber">SP-I</span>
+      <div class="method-body">
+        <div class="method-name">叠加导频迭代（Mishra et al., 2022；Yuan et al., 2021）</div>
+        以SP-NI结果为初始值，在信道估计和消息传递数据检测之间交替迭代。每轮用已检测数据辅助更新信道估计，干扰逐步消除。迭代收敛后性能趋近EP方案，但频效比EP提升 MN/(MN−N_guard−1)×100%（典型值约13%以上）。最优功率分配：σ²_p,opt ≈ 0.33，σ²_d,opt ≈ 0.67（Q=5，M=N=16的典型参数）。
+      </div>
+    </li>
+
+    <li>
+      <span class="method-tag badge badge-purple">3D-SOMP</span>
+      <div class="method-body">
+        <div class="method-name">三维结构正交匹配追踪（Shen et al., 2019, IEEE TSP）</div>
+        专为OTFS Massive MIMO下行设计。各天线导频完全重叠（非正交），利用3D结构化稀疏性（延迟稀疏→块稀疏→突发稀疏）逐路径一一估计3D支撑。需导频开销 ∝ N_max·Nₚ·D·log(N_g·M_g·Nₜ)，远小于正交冲激法的 ∝ Nₜ·N_max·M_max。32天线时传统方法失效，3D-SOMP仍稳定工作，NMSE比OMP方法低约6dB。
+      </div>
+    </li>
+
+  </ul>
+
+  <h3>方案频谱效率与MSE对比</h3>
+  <table class="comp-table">
+    <thead>
+      <tr>
+        <th>方案</th>
+        <th>导频结构</th>
+        <th>频谱效率</th>
+        <th>高SNR MSE</th>
+        <th>适用场景</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>EP（Raviteja'19）</td>
+        <td>独立时频槽 + 保护零</td>
+        <td><span class="badge badge-amber">中等（损失11%+）</span></td>
+        <td><span class="badge badge-green">优</span></td>
+        <td>通用 SISO/MIMO</td>
+      </tr>
+      <tr>
+        <td>CPA（Ramachandran'18）</td>
+        <td>整帧导频</td>
+        <td><span class="badge badge-red">最低（损失50%）</span></td>
+        <td><span class="badge badge-green">优</span></td>
+        <td>慢变信道</td>
+      </tr>
+      <tr>
+        <td>SP-NI</td>
+        <td>导频叠加数据</td>
+        <td><span class="badge badge-green">最高（无保护开销）</span></td>
+        <td><span class="badge badge-amber">中（受数据干扰限制）</span></td>
+        <td>低/中SNR</td>
+      </tr>
+      <tr>
+        <td>SP-I（迭代）</td>
+        <td>导频叠加数据</td>
+        <td><span class="badge badge-green">最高（无保护开销）</span></td>
+        <td><span class="badge badge-blue">接近EP</span></td>
+        <td>全SNR范围</td>
+      </tr>
+      <tr>
+        <td>3D-SOMP</td>
+        <td>非正交重叠（多天线）</td>
+        <td><span class="badge badge-blue">高（导频不随Nₜ增加）</span></td>
+        <td><span class="badge badge-green">优</span></td>
+        <td>Massive MIMO 专用</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ===== 6. DETECTION ===== -->
+<section id="detection">
+  <div class="section-label">Section 06</div>
+  <h2><span class="h2-num">06</span> 检测与均衡算法</h2>
+
+  <p>
+    OTFS检测本质上是在信道矩阵H已知的条件下，从 y = Hx + w 中恢复离散符号向量 x（元素取自有限星座）。最优MAP检测复杂度 O(|A|^MN) 不可实现，工程上围绕复杂度-性能权衡发展出多条技术路线。
+  </p>
+
+  <div class="card-grid">
+    <div class="card card-accent">
+      <div class="card-label">消息传递 · Raviteja 2018</div>
+      <div class="card-title">MP / 因子图检测</div>
+      <p>利用H的稀疏性（每行S=P个非零元）在因子图上传递Gaussian近似消息。复杂度 O(MN·S·|A|) 每次迭代，不依赖矩阵求逆。整数Doppler时性能接近最优，但分数Doppler下 S 显著增大（稀疏性被破坏），且阻尼因子 Δ 对收敛性敏感（需Monte Carlo确定）。</p>
+    </div>
+    <div class="card card-teal">
+      <div class="card-label">变分贝叶斯 · Yuan 2020</div>
+      <div class="card-title">VB检测器</div>
+      <p>在因子图框架下用变分推断代替loopy BP，自适应构建符号后验分布。相比MP收敛性更好，在 P=6 时性能相当，P 较大时有明显增益。复杂度与MP相近，均为 O(MN·S·|A|)，同样受分数Doppler影响。</p>
+    </div>
+    <div class="card card-amber">
+      <div class="card-label">酉近似消息传递 · Yuan 2022</div>
+      <div class="card-title">UAMP（最优综合方案）</div>
+      <p>利用BCCB结构令 H = F^H Λ F，对等效模型 r = ΛFx + ω' 运行UAMP。所有矩阵乘法用2D FFT实现，复杂度降至 O(MN·log(MN) + MN·|A|) 且与S无关。内置噪声精度自动估计，无需先验SNR。分数Doppler和高路径数（P=14）时显著优于MP/VB/MRC，性能接近最优MAP。</p>
+    </div>
+    <div class="card card-green">
+      <div class="card-label">MRC迭代检测 · Thaj 2020</div>
+      <div class="card-title">低复杂度Rake-DFE</div>
+      <p>利用多径分集通过MRC相干合并符号的多个副本，结合判决反馈均衡。复杂度 O(MN(P+log N)) 每迭代，收敛快（通常2-3次）。低阶调制和P较小时性能较好，高阶调制（16-QAM）时比UAMP差；优势在于无需矩阵存储，适合资源受限终端。</p>
+    </div>
+    <div class="card card-purple">
+      <div class="card-label">LMMSE / 带状LMMSE</div>
+      <div class="card-title">线性均衡</div>
+      <p>标准LMMSE：ĥ = H^H(HH^H + σ²I)^{-1}y，复杂度 O(N³M³)，实用性差。带状LMMSE（Tiwari 2019）利用H的带状结构降低矩阵求逆开销。性能次优（Gaussian近似）但实现稳定，适合作为迭代算法的初始化步骤。</p>
+    </div>
+    <div class="card card-coral">
+      <div class="card-label">BDFE Turbo · Zhang 2022</div>
+      <div class="card-title">块判决反馈Turbo均衡</div>
+      <p>专为编码OTFS系统设计。将DD域信道矩阵变换到延迟-时间域（块对角带状），用LDL^H分解设计前馈滤波器F和反馈滤波器B，复杂度 O((3log₂N + 8L²+ 22L+6)NM)。结合信道译码器迭代交换软信息，迭代3次后相比BDFE单次获得约5.8dB的FER增益（水声场景验证）。</p>
+    </div>
+  </div>
+
+  <h3>算法复杂度与适用条件汇总</h3>
+  <table class="comp-table">
+    <thead>
+      <tr>
+        <th>算法</th>
+        <th>复杂度（每迭代每帧）</th>
+        <th>整数Doppler</th>
+        <th>分数Doppler</th>
+        <th>大P场景</th>
+        <th>编码OTFS</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>MP (Raviteja)</td>
+        <td>O(MN·S·|A|)</td>
+        <td><span class="badge badge-green">优</span></td>
+        <td><span class="badge badge-red">差</span></td>
+        <td><span class="badge badge-red">差</span></td>
+        <td><span class="badge badge-amber">可</span></td>
+      </tr>
+      <tr>
+        <td>VB (Yuan'20)</td>
+        <td>O(MN·S·|A|)</td>
+        <td><span class="badge badge-green">优</span></td>
+        <td><span class="badge badge-amber">中</span></td>
+        <td><span class="badge badge-amber">中</span></td>
+        <td><span class="badge badge-amber">可</span></td>
+      </tr>
+      <tr>
+        <td>UAMP (Yuan'22)</td>
+        <td>O(MN·log(MN) + MN·|A|)</td>
+        <td><span class="badge badge-green">优</span></td>
+        <td><span class="badge badge-green">优</span></td>
+        <td><span class="badge badge-green">优</span></td>
+        <td><span class="badge badge-green">优（集成Turbo）</span></td>
+      </tr>
+      <tr>
+        <td>MRC-DFE (Thaj)</td>
+        <td>O(MN(P+logN))</td>
+        <td><span class="badge badge-green">优</span></td>
+        <td><span class="badge badge-amber">中</span></td>
+        <td><span class="badge badge-amber">中</span></td>
+        <td><span class="badge badge-amber">可</span></td>
+      </tr>
+      <tr>
+        <td>LMMSE</td>
+        <td>O(N³M³)</td>
+        <td><span class="badge badge-amber">中</span></td>
+        <td><span class="badge badge-amber">中</span></td>
+        <td><span class="badge badge-amber">中</span></td>
+        <td><span class="badge badge-amber">可</span></td>
+      </tr>
+      <tr>
+        <td>BDFE Turbo (Zhang)</td>
+        <td>O((8L²+22L)NM)</td>
+        <td><span class="badge badge-green">优</span></td>
+        <td><span class="badge badge-green">优</span></td>
+        <td><span class="badge badge-amber">中</span></td>
+        <td><span class="badge badge-green">最优（专为编码设计）</span></td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ===== 7. PROPERTIES ===== -->
+<section id="properties">
+  <div class="section-label">Section 07</div>
+  <h2><span class="h2-num">07</span> 核心特性</h2>
+
+  <div class="feature-row">
+    <div class="feature-icon fi-blue">D</div>
+    <div class="feature-text">
+      <div class="feature-title">全分集增益（Full Diversity）</div>
+      <div class="feature-desc">每个DD域符号通过ISFFT扩展到整个时频平面，每个TF域资源单元承载所有符号的叠加，使每个符号经历全部可分辨路径的独立衰落，获得最大可用分集增益。实测：64QAM速率下，500km/h时OTFS比OFDM BLER改善4dB以上；OFDM在此速度下完全失效（Hadani 2017）。</div>
+    </div>
+  </div>
+
+  <div class="feature-row">
+    <div class="feature-icon fi-teal">S</div>
+    <div class="feature-text">
+      <div class="feature-title">信道准稳态性（Quasi-Stationarity）</div>
+      <div class="feature-desc">DD域信道 h(τ,ν) 只有当散射体物理位置或速度发生显著变化时才改变，典型相干时间约100ms（约为TF域相干时间的100倍）。这使得信道估计开销极低，甚至可以跨帧复用信道参数（OTFS超帧架构），极大降低导频密度。频分双工（FDD）下也可从上行推断下行信道，大幅减少反馈开销。</div>
+    </div>
+  </div>
+
+  <div class="feature-row">
+    <div class="feature-icon fi-amber">C</div>
+    <div class="feature-text">
+      <div class="feature-title">信道紧凑稀疏性（Compact Sparsity）</div>
+      <div class="feature-desc">典型无线信道在DD域支撑集极为有限：4τ_max·ν_max ≤ 1（doubly-underspread条件），有效路径数P=3~6。相较于TF域的密集时变特性，DD域用极少参数完整描述信道，这是所有高效信道估计算法（EP、3D-SOMP、SP系列）的基础，也使OTFS信号处理的整体复杂度保持实用水平。</div>
+    </div>
+  </div>
+
+  <div class="feature-row">
+    <div class="feature-icon fi-purple">P</div>
+    <div class="feature-text">
+      <div class="feature-title">低PAPR特性</div>
+      <div class="feature-desc">OTFS波形在时域表现为幅度调制的脉冲序列，局部类似TDMA（时域脉冲），在Doppler维类似OFDM，在时频面整体类似CDMA扩频。实测PAPR比OFDM和GFDM均低，对功率受限终端（IoT、卫星、UUV）尤为有利，功放可工作在更接近饱和点的区域，提升功率效率。</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 8. EXTENSIONS ===== -->
+<section id="extensions">
+  <div class="section-label">Section 08</div>
+  <h2><span class="h2-num">08</span> 扩展方向与应用</h2>
+
+  <div class="card-grid">
+    <div class="card card-accent">
+      <div class="card-label">扩展 01 · Shen 2019</div>
+      <div class="card-title">OTFS Massive MIMO</div>
+      <p>将OTFS扩展至Nₜ天线基站。多天线引入角度维度，形成延迟-Doppler-角度3D稀疏信道。下行FDD信道估计通过3D-SOMP算法，导频开销不随天线数线性增长，相比冲激法减少约50%开销（32天线时），适合支持超大阵列的6G NR系统。</p>
+    </div>
+    <div class="card card-coral">
+      <div class="card-label">扩展 02 · K.P. & Murthy 2022</div>
+      <div class="card-title">ODSS 宽带调制</div>
+      <p>水声（UWA）和超宽带（UWB）信道需用时间尺度模型替代频移模型。ODSS（Orthogonal Delay Scale Space）用Mellin变换替代OTFS中的Fourier变换处理尺度维，引入ω-卷积，子载波带宽正比于频率（类wavelet），仿真显示SNR=24dB时BER比OFDM和OTFS低100倍以上。</p>
+    </div>
+    <div class="card card-green">
+      <div class="card-label">扩展 03 · Wei 2021</div>
+      <div class="card-title">V2X / 高铁 / LEO卫星</div>
+      <p>OTFS在500km/h、LEO卫星（几十km/s）场景下保持稳定性能。DD域信道稳定性可支持预测性资源调度（predictive scheduling）。IEEE 802.11bd和5G NR V2X标准中OFDM在高速下需频繁增大子载波间距，OTFS天然不受此约束。</p>
+    </div>
+    <div class="card card-purple">
+      <div class="card-label">扩展 04 · Zhang 2022</div>
+      <div class="card-title">水声通信（UWA）</div>
+      <p>水声信道延迟扩展大（τ_max=6ms，L=24），Doppler扩展有限（v=2m/s，k_max=2）。BDFE Turbo均衡专为此场景优化：利用延迟-时间域带状矩阵结构，LDL^H分解替代矩阵求逆，3次Turbo迭代获得5.8dB FER增益，是实现水声OTFS工程化的关键技术。</p>
+    </div>
+    <div class="card card-teal">
+      <div class="card-label">扩展 05 · 待探索</div>
+      <div class="card-title">ISAC 一体化感通</div>
+      <p>DD域信道直接对应距离和速度物理量，OTFS信号本身即为理想雷达波形，天然适合感知-通信一体化（ISAC）。通信符号可兼作雷达探测，获得目标点云同时完成数据传输。最优感通性能权衡仍为开放问题。</p>
+    </div>
+    <div class="card card-amber">
+      <div class="card-label">扩展 06 · 待探索</div>
+      <div class="card-title">编码OTFS系统设计</div>
+      <p>分集增益与编码增益存在基本权衡（Wei 2021, Li 2021）：路径数增加时分集增益提升但编码增益下降（信号能量分散于多路径）。如何设计联合优化DD域调制参数和信道编码码率/码字结构的编码OTFS体制，是6G波形标准化的核心问题。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 9. COMPARISON ===== -->
+<section id="comparison">
+  <div class="section-label">Section 09</div>
+  <h2><span class="h2-num">09</span> 与OFDM的全面对比</h2>
+
+  <table class="comp-table">
+    <thead>
+      <tr>
+        <th>维度</th>
+        <th>OTFS</th>
+        <th>OFDM</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>调制域</td>
+        <td>延迟-Doppler（DD）域，2D ISFFT+Heisenberg</td>
+        <td>时频（TF）域，IDFT per subcarrier</td>
+      </tr>
+      <tr>
+        <td>基函数</td>
+        <td>2D Sinc函数（DD域2D局域化脉冲）</td>
+        <td>复指数子载波（频域Sinc / 时域矩形）</td>
+      </tr>
+      <tr>
+        <td>高速Doppler下性能</td>
+        <td><span class="badge badge-green">强健，500km/h仍趋近容量</span></td>
+        <td><span class="badge badge-red">ICI严重，500km/h下完全失效</span></td>
+      </tr>
+      <tr>
+        <td>信道估计开销</td>
+        <td><span class="badge badge-green">极低（DD域稀疏，跨帧复用）</span></td>
+        <td><span class="badge badge-red">高（TF域密集导频，逐帧估计）</span></td>
+      </tr>
+      <tr>
+        <td>PAPR</td>
+        <td><span class="badge badge-green">低（低于OFDM）</span></td>
+        <td><span class="badge badge-red">高（多子载波叠加峰值大）</span></td>
+      </tr>
+      <tr>
+        <td>接收机复杂度</td>
+        <td><span class="badge badge-amber">较高（需2D均衡）</span></td>
+        <td><span class="badge badge-green">低（单抽头频域均衡）</span></td>
+      </tr>
+      <tr>
+        <td>帧延迟</td>
+        <td><span class="badge badge-amber">较高（需整帧处理）</span></td>
+        <td><span class="badge badge-green">低（逐OFDM符号处理）</span></td>
+      </tr>
+      <tr>
+        <td>MIMO兼容性</td>
+        <td><span class="badge badge-green">线性吞吐量随天线数扩展（全Doppler）</span></td>
+        <td><span class="badge badge-amber">低Doppler下良好，高Doppler时MIMO容量损失严重</span></td>
+      </tr>
+      <tr>
+        <td>实现兼容性</td>
+        <td>可作为OFDM前/后处理模块叠加实现</td>
+        <td>成熟标准（4G/5G/WiFi）</td>
+      </tr>
+      <tr>
+        <td>目标场景</td>
+        <td><span class="badge badge-blue">6G：高铁/V2X/LEO/mmWave/ISAC</span></td>
+        <td><span class="badge badge-blue">4G/5G：低中速宽带接入</span></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="callout callout-info">
+    <span class="callout-icon">◈</span>
+    <div class="callout-body">
+      <div class="callout-head">关键性能数据（Hadani et al., 2017 仿真）</div>
+      在3GPP TDL-C信道模型（DS=300ns，Rural Macro）下：120km/h时OTFS比OFDM改善2–3dB BLER；短包（4/50 PRB）时改善超过4dB；500km/h 2×2 MIMO时，OFDM 64QAM完全失效（BLER=1.0），OTFS成功支持MIMO空间复用并趋近信道容量；500km/h场景下OTFS吞吐量随天线数线性扩展，OFDM几乎无增益。
+    </div>
+  </div>
+</section>
+
+<!-- ===== 10. REFERENCES ===== -->
+<section id="references">
+  <div class="section-label">Section 10</div>
+  <h2><span class="h2-num">10</span> 核心参考文献</h2>
+
+  <div class="ref-grid">
+    <div class="ref-card">
+      <div class="ref-key">[Hadani 2017]</div>
+      <div class="ref-title">Orthogonal Time Frequency Space Modulation<br><em>R. Hadani, S. Rakib, et al.</em></div>
+      <div class="ref-venue">IEEE WCNC 2017 · 奠基性原始论文，提出OTFS基本框架</div>
+    </div>
+    <div class="ref-card">
+      <div class="ref-key">[K.P. & Murthy 2022]</div>
+      <div class="ref-title">Orthogonal Delay Scale Space Modulation<br><em>Arunkumar K.P., Chandra R. Murthy</em></div>
+      <div class="ref-venue">IEEE TSP 2022 · 宽带信道扩展，ODSS调制</div>
+    </div>
+    <div class="ref-card">
+      <div class="ref-key">[Mishra 2022]</div>
+      <div class="ref-title">OTFS Channel Estimation and Data Detection Designs with Superimposed Pilots<br><em>H. B. Mishra, P. Singh, et al.</em></div>
+      <div class="ref-venue">IEEE TWC 2022 · 叠加导频SP-NI/SP-I，功率优化</div>
+    </div>
+    <div class="ref-card">
+      <div class="ref-key">[Shen 2019]</div>
+      <div class="ref-title">Channel Estimation for OTFS Massive MIMO<br><em>W. Shen, L. Dai, J. An, P. Fan, R. W. Heath Jr.</em></div>
+      <div class="ref-venue">IEEE TSP 2019 · 3D结构稀疏，3D-SOMP算法</div>
+    </div>
+    <div class="ref-card">
+      <div class="ref-key">[Wei 2021]</div>
+      <div class="ref-title">OTFS: A Promising Next-Generation Waveform<br><em>Z. Wei, W. Yuan, S. Li, J. Yuan, G. Bharatula, R. Hadani, L. Hanzo</em></div>
+      <div class="ref-venue">IEEE Wireless Commun. 2021 · 综述性文章，6G应用前景</div>
+    </div>
+    <div class="ref-card">
+      <div class="ref-key">[Yuan W. 2021]</div>
+      <div class="ref-title">Data-Aided Channel Estimation for OTFS with Superimposed Pilot<br><em>W. Yuan, S. Li, Z. Wei, J. Yuan, D. W. K. Ng</em></div>
+      <div class="ref-venue">IEEE WCL 2021 · 单导频数据辅助迭代估计</div>
+    </div>
+    <div class="ref-card">
+      <div class="ref-key">[Yuan Z. 2022]</div>
+      <div class="ref-title">Iterative Detection for OTFS with Unitary Approximate Message Passing<br><em>Z. Yuan, F. Liu, W. Yuan, Q. Guo, Z. Wang, J. Yuan</em></div>
+      <div class="ref-venue">IEEE TWC 2022 · UAMP检测，2D FFT，Turbo接收机</div>
+    </div>
+    <div class="ref-card">
+      <div class="ref-key">[Zhang 2022]</div>
+      <div class="ref-title">Delay-Doppler Domain Decision Feedback Turbo Equalization for OTFS<br><em>Y. Zhang, Q. Zhang, C. He, Y. Zhou, L. Jing</em></div>
+      <div class="ref-venue">Phys. Commun. 2022 · BDFE Turbo，LDL^H，水声通信</div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <span>OTFS Tech Architecture Doc · 综合整理自8篇IEEE论文</span>
+  <span>2017–2022 · 延迟-Doppler域调制框架</span>
+</footer>
+
+</main>
+</div>
+
+<script>
+const sections = document.querySelectorAll('section[id]');
+const navLinks = document.querySelectorAll('#sidenav a');
+
+function updateNav() {
+  let current = '';
+  sections.forEach(s => {
+    const top = s.getBoundingClientRect().top;
+    if (top <= 80) current = s.id;
+  });
+  navLinks.forEach(a => {
+    a.classList.toggle('active', a.getAttribute('href') === '#' + current);
+  });
+}
+
+window.addEventListener('scroll', updateNav, { passive: true });
+updateNav();
+
+navLinks.forEach(a => {
+  a.addEventListener('click', e => {
+    e.preventDefault();
+    const id = a.getAttribute('href').slice(1);
+    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+});
+</script>
+</body>
+</html>

@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 UWAcomm — 水声通信（Underwater Acoustic Communication）算法仿真项目。MATLAB开发，覆盖6种通信体制：SC-TDE / SC-FDE / DSSS / OFDM / OTFS / FH-MFSK + 阵列增强接收。
 
-框架参考：`framework/framework_v6.html`
-同步技术框架：`08_Sync/sync_framework.html` + `08_Sync/sync_documentation.md`
-多普勒技术规范：`10_DopplerProc/UWA_Doppler_MATLAB_Spec.md`
+框架参考：`wiki/architecture/system-framework.md`（历史版本：`raw/notes/framework-history/`）
+同步技术框架：`modules/08_Sync/sync_framework.html` + `modules/08_Sync/sync_documentation.md`
+多普勒技术规范：`modules/10_DopplerProc/UWA_Doppler_MATLAB_Spec.md`
 开发进度：`todo.md`
 调试记录：`D:\Obsidian\workspace\1-Projects\UWAcomm\{模块名}\` (按模块分文件夹，PARA架构)
 
@@ -19,25 +19,28 @@ UWAcomm/
 ├── .claude/                         # Claude Code harness（hooks/rules）
 ├── .obsidian/                       # Obsidian vault 配置 + wiki 页面模板
 ├── wiki/                            # 项目知识层（概念、架构、摘要、探索）
+│   └── architecture/               # 系统框架文档
 ├── raw/                             # 只读原始资料（论文、文章、笔记等）
+│   └── notes/framework-history/    # 框架图历史版本（v2~v6）
 ├── scripts/                         # 自动化脚本（lint_wiki/sync_index/scrape/transcribe）
 ├── workflows/                       # 操作流程文档（知识闭环 + 开发闭环）
-├── 01_SourceCoding/src/Matlab/      # 信源编解码
-├── 02_ChannelCoding/src/Matlab/     # 信道编解码（含SISO/BCJR）
-├── 03_Interleaving/src/Matlab/      # 交织/解交织
-├── 04_Modulation/src/Matlab/        # 符号映射/判决
-├── 05_SpreadSpectrum/src/Matlab/    # 扩频/解扩
-├── 06_MultiCarrier/src/Matlab/      # 多载波变换+CP
-├── 07_ChannelEstEq/src/Matlab/      # 信道估计与均衡（最大模块）
-├── 08_Sync/src/Matlab/              # 同步+帧组装
-├── 09_Waveform/src/Matlab/          # 脉冲成形/上下变频
-├── 10_DopplerProc/src/Matlab/       # 多普勒估计补偿
-├── 11_ArrayProc/src/Matlab/         # 阵列接收预处理
-├── 12_IterativeProc/src/Matlab/     # Turbo迭代调度
-├── 13_SourceCode/src/Matlab/        # 端到端仿真（集成测试）
-│   ├── common/                      # 公共函数
-│   └── tests/{SC-FDE,OFDM,SC-TDE,...}  # 各体制测试
-├── framework/                       # 框架图
+├── modules/                         # === 所有算法模块 ===
+│   ├── 01_SourceCoding/src/Matlab/  # 信源编解码
+│   ├── 02_ChannelCoding/src/Matlab/ # 信道编解码（含SISO/BCJR）
+│   ├── 03_Interleaving/src/Matlab/  # 交织/解交织
+│   ├── 04_Modulation/src/Matlab/    # 符号映射/判决
+│   ├── 05_SpreadSpectrum/src/Matlab/# 扩频/解扩
+│   ├── 06_MultiCarrier/src/Matlab/  # 多载波变换+CP
+│   ├── 07_ChannelEstEq/src/Matlab/  # 信道估计与均衡（最大模块）
+│   ├── 08_Sync/src/Matlab/          # 同步+帧组装
+│   ├── 09_Waveform/src/Matlab/      # 脉冲成形/上下变频
+│   ├── 10_DopplerProc/src/Matlab/   # 多普勒估计补偿
+│   ├── 11_ArrayProc/src/Matlab/     # 阵列接收预处理
+│   ├── 12_IterativeProc/src/Matlab/ # Turbo迭代调度
+│   └── 13_SourceCode/src/Matlab/    # 端到端仿真（集成测试）
+│       ├── common/                  # 公共函数
+│       └── tests/{SC-FDE,OFDM,...}  # 各体制测试
+├── CLAUDE.md
 └── todo.md                          # 开发进度
 ```
 
@@ -125,7 +128,7 @@ raw/ → ingest → wiki/ → query → promote → Ohmybrain Hub wiki/
 clear functions; clear all;
 
 % 2. 切换到测试所在目录
-cd('D:\TechReq\UWAcomm\XX_模块\src\Matlab');
+cd('D:\TechReq\UWAcomm\modules\XX_模块\src\Matlab');
 
 % 3. 用diary输出测试结果到txt
 diary('test_xxx_results.txt');
@@ -301,11 +304,12 @@ addpath(fullfile(proj_root, '07_ChannelEstEq', 'src', 'Matlab'));
 
 ## Reference Materials
 
-- `framework/framework_v6.html` — 系统框架图（6种体制+阵列）
-- `08_Sync/sync_framework.html` — 三层同步技术框架（帧/符号/位同步）
-- `08_Sync/sync_documentation.md` — 同步技术文档（时变信道下）
-- `10_DopplerProc/UWA_Doppler_MATLAB_Spec.md` — 多普勒估计补偿规范v2.0
-- `12_IterativeProc/turbo_equalizer_implementation.md` — Turbo均衡实现方案
+- `wiki/architecture/system-framework.md` — 系统框架文档（v6）
+- `raw/notes/framework-history/` — 框架图历史版本（v2~v6 HTML）
+- `modules/08_Sync/sync_framework.html` — 三层同步技术框架（帧/符号/位同步）
+- `modules/08_Sync/sync_documentation.md` — 同步技术文档（时变信道下）
+- `modules/10_DopplerProc/UWA_Doppler_MATLAB_Spec.md` — 多普勒估计补偿规范v2.0
+- `modules/12_IterativeProc/turbo_equalizer_implementation.md` — Turbo均衡实现方案
 - `refrence/` — 哈工程殷敬伟课题组学位论文 + Turbo_VAMP参考实现
 - `D:\ProjectTask\Turbo Equalization/` — SC-TDE工程参考
 

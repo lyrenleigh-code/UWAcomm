@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import fitz; print\\('pymupdf available'\\)\")",
+      "Bash(python -c \"import PyPDF2; print\\('pypdf2 available'\\)\")",
+      "Bash(pdftotext -f 1 -l 8 \"D:/TechReq/UWAcomm/refrence/OTFS/Zhang 等 - 2022 - Delay-Doppler domain decision feedback turbo equal.pdf\" -)",
+      "Bash(pdftotext -f 1 -l 8 \"D:/TechReq/UWAcomm/refrence/OTFS/Yuan 等 - 2022 - Iterative Detection for Orthogonal Time Frequency .pdf\" -)",
+      "Bash(pdftotext -f 3 -l 8 \"D:/TechReq/UWAcomm/refrence/OTFS/Zhang 等 - 2022 - Delay-Doppler domain decision feedback turbo equal.pdf\" -)",
+      "Bash(pdftotext -f 5 -l 10 \"D:/TechReq/UWAcomm/refrence/OTFS/Yuan 等 - 2022 - Iterative Detection for Orthogonal Time Frequency .pdf\" -)",
+      "Bash(matlab -batch \"clear functions; clear all; cd\\('13_SourceCode/src/Matlab/tests/OTFS'\\); diary\\('test_otfs_results.txt'\\); run\\('test_otfs_timevarying.m'\\); diary off;\")",
+      "Read(//d/Obsidian/workspace/**)",
+      "Bash(cp UWAcomm/01_SourceCoding/*.md \"1-Projects/UWAcomm/01_SourceCoding/\")",
+      "Bash(cp UWAcomm/02_ChannelCoding/*.md \"1-Projects/UWAcomm/02_ChannelCoding/\")",
+      "Bash(cp UWAcomm/03_Interleaving/*.md \"1-Projects/UWAcomm/03_Interleaving/\")",
+      "Bash(cp UWAcomm/04_Modulation/*.md \"1-Projects/UWAcomm/04_Modulation/\")",
+      "WebSearch",
+      "Bash(sqlite3:*)",
+      "Bash(where sqlite3:*)",
+      "Bash(where python:*)",
+      "Bash(npm install:*)",
+      "Bash(npm root:*)",
+      "Bash(node -e ':*)",
+      "Bash(cp \"D:/Zotero/zotero.sqlite\" \"D:/Zotero/zotero.sqlite.$\\(date +%Y%m%d_%H%M%S\\).bak\")",
+      "Read(//d/Zotero/**)",
+      "Bash(NODE_PATH=$\\(npm root -g\\) node \"D:/TechReq/UWAcomm/_zotero_restructure.js\")",
+      "Bash(mkdir:*)",
+      "Bash($PYTHON:*)",
+      "Bash(curl -s \"http://localhost:23119/api/users/0/items?q=%E6%9C%B1%E5%B9%BF%E5%86%9B&limit=3\")",
+      "WebFetch(domain:gist.github.com)",
+      "Bash(find \"D:\\\\Obsidian\\\\workspace\" -type f -name \"*.md\" -exec dirname {} \\\\;)",
+      "Bash(bash /tmp/find_orphans.sh)",
+      "Bash(bash /tmp/final_stats.sh)",
+      "Bash(find . -type f -name \"*.md\" ! -path \"*/.obsidian/*\" ! -path \"*/Templates/*\" ! -path \"*/DailyNotes/*\" -exec grep -l \"\\\\[\\\\[\" {} \\\\;)",
+      "Bash(find . -type f -name \"*.md\" ! -path \"*/.obsidian/*\" ! -path \"*/Templates/*\" ! -path \"*/DailyNotes/*\" -exec cat {} \\\\;)",
+      "Bash(git:*)",
+      "Bash(find . -name \"*.m\" -not -path \"./.claude/*\" -exec cat {} +)",
+      "Bash(claude --version)",
+      "Bash(npm update:*)"
+    ]
+  }
+}

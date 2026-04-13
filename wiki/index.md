@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
 > 最后更新：2026-04-13
-> 页面总数：0
+> 页面总数：1
 
 ## Concepts（概念页）
 
@@ -13,7 +13,7 @@
 
 ## Architecture（架构页）
 
-<!-- 系统架构、模块关系 -->
+- [system-framework](architecture/system-framework.md) — 系统框架文档 v6，6 种通信体制 + 阵列增强接收
 
 ## Topics（专题页）
 
