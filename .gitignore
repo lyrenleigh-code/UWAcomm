@@ -26,3 +26,24 @@ desktop.ini
 .vscode/
 .idea/
 *.txt
+
+# Obsidian runtime
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/graph.json
+.obsidian/cache
+.obsidian/plugins/
+.trash/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Sensitive
+.env
+*.key
+*.pem
+credentials.*
+.mcp.json

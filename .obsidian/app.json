@@ -1,1 +1,16 @@
-{}
+{
+  "interfaceFontSize": 14,
+  "defaultViewMode": "source",
+  "livePreview": true,
+  "strictLineBreaks": false,
+  "showLineNumber": true,
+  "useTab": false,
+  "tabSize": 2,
+  "readableLineLength": true,
+  "attachmentFolderPath": "raw/assets",
+  "newFileLocation": "folder",
+  "newFileFolderPath": "wiki/concepts",
+  "alwaysUpdateLinks": true,
+  "useMarkdownLinks": false,
+  "showFrontmatter": true
+}
