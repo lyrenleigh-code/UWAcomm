@@ -186,12 +186,11 @@ if ~isfield(cfg, 'seq_root'), cfg.seq_root = 1; end
 pk = cfg.pilot_k; pl = cfg.pilot_l;
 gk = cfg.guard_k; gl = cfg.guard_l;
 
-% 生成导频序列（沿时延维度放置）
-seq_len = 2*gl + 1;                   % 序列长度=保护区时延宽度
+% 序列长度=2gl+1, 充分CAZAC覆盖
+seq_len = 2*gl + 1;
 switch cfg.seq_type
     case 'zc'
         if seq_len < 2, seq_len = 3; end
-        % ZC序列长度须为奇素数或>=2
         seq = exp(-1j * pi * cfg.seq_root * (0:seq_len-1) .* (1:seq_len) / seq_len);
     case 'random'
         rng_state = rng; rng(cfg.seq_root);
@@ -201,9 +200,9 @@ switch cfg.seq_type
     otherwise
         error('不支持的序列类型: %s', cfg.seq_type);
 end
-seq = seq * cfg.pilot_value;          % 功率缩放
+seq = seq * cfg.pilot_value;
 
-% 保护区（导频行的上下gk行全部保护）
+% 保护区: cols [pl-gl, pl+gl]（仅pilot占用范围）
 gmask = false(N, M);
 pilot_cols = mod(pl - 1 + (-gl:gl), M) + 1;
 for dk = -gk:gk
@@ -215,7 +214,6 @@ didx = find(~gmask);
 data_padded = pad_data(data, length(didx));
 
 dd = zeros(N, M);
-% 放置序列（在导频行pk，沿时延方向）
 for i = 1:seq_len
     ll = pilot_cols(i);
     dd(pk, ll) = seq(i);
@@ -227,6 +225,7 @@ info.positions = [pk * ones(seq_len,1), pilot_cols(:)];
 info.values = seq(:);
 info.seq_type = cfg.seq_type;
 info.guard_mask = gmask;
+info.seq_len = seq_len;
 end
 
 % --------------- 5. 保护区自适应导频 --------------- %

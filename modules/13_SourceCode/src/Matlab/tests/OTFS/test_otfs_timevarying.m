@@ -1,15 +1,16 @@
 %% test_otfs_timevarying.m — OTFS通带仿真 时变信道测试
-% TX: 编码→交织→QPSK→DD域导频→OTFS调制→FFT上采样→上变频→通带实信号
+% TX: 编码→交织→QPSK→DD域导频→OTFS调制→frame_assemble_otfs(两级同步)→通带
 % 信道: 等效基带(离散Doppler/Rician混合/Jakes)
-% RX: 下变频→FFT降采样→OTFS解调→DD域信道估计→LMMSE+Turbo→译码
-% 版本：V4.0.0 — 通带仿真 + 离散/混合/Jakes信道对比
-% 特点：通带实噪声, FFT零延迟重采样(无RRC,保持DD域关系)
+% RX: frame_parse_otfs(sync_dual_hfm+LFM精定时)→OTFS解调→DD估计→LMMSE+Turbo→译码
+% 版本：V5.0.0 — 集成frame_assemble/parse_otfs V2.0 两级同步架构
+% 特点：[HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|OTFS] + 双HFM粗同步+LFM精定时
 
 clc; close all;
 use_oracle = false;
 eq_type = 'lmmse';
 uamp_inner = 5;
 passband_mode = true;  % true=通带仿真, false=基带仿真
+pilot_mode = 'sequence';  % 'impulse'=A冲激, 'sequence'=B ZC, 'superimposed'=C叠加
 
 fprintf('========================================\n');
 if passband_mode
@@ -53,12 +54,24 @@ fs_pb = sym_rate * sps;     % 通带采样率 36kHz
 constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
 bits_per_sym = 2;
 
-% 导频 (per-sub-block CP已消除β因子，无需delay_guard)
-pilot_config = struct('mode','impulse', 'guard_k',4, 'guard_l',max(delay_bins)+2, ...
-    'pilot_value',1);
+% 导频配置（根据 pilot_mode 切换）
+switch pilot_mode
+    case 'impulse'
+        pilot_config = struct('mode','impulse', 'guard_k',4, 'guard_l',max(delay_bins)+2, ...
+            'pilot_value',1);
+    case 'sequence'  % B: ZC 序列 pilot
+        pilot_config = struct('mode','sequence', 'seq_type','zc', 'seq_root',1, ...
+            'guard_k',4, 'guard_l',max(delay_bins)+2, 'pilot_value',1);
+    case 'superimposed'  % C: 叠加 pilot
+        pilot_config = struct('mode','superimposed', 'pilot_power',0.2);
+    otherwise
+        error('不支持的 pilot_mode: %s', pilot_mode);
+end
 [~,~,~,data_indices] = otfs_pilot_embed(zeros(1,1), N, M, pilot_config);
 N_data_slots = length(data_indices);
-pilot_config.pilot_value = sqrt(N_data_slots);
+if ismember(pilot_mode, {'impulse','sequence'})
+    pilot_config.pilot_value = sqrt(N_data_slots);
+end
 
 % 编解码
 codec = struct('gen_polys',[7,5], 'constraint_len',3, 'interleave_seed',7, 'decode_mode','max-log');
@@ -149,35 +162,20 @@ for fi = 1:size(fading_cfgs,1)
     %% ===== 1) 信道(等效基带) ===== %%
     rx_clean = apply_channel(otfs_signal, delay_bins, gains_raw, ftype, fparams, sym_rate, fc);
 
-    %% ===== 2) 通带帧组装: [LFM|guard|OTFS|guard|LFM] ===== %%
+    %% ===== 2) 通带帧组装 V5.0: 两级同步架构 ===== %%
     if passband_mode
-        % LFM同步信号 (通带)
-        lfm_dur = 0.02; guard_dur = 0.005;
-        N_guard_pb = round(guard_dur * fs_pb);
-        [lfm_pb, ~] = gen_lfm(fs_pb, lfm_dur, fc-sym_rate/2, fc+sym_rate/2);
-        lfm_bb = hilbert(lfm_pb);  % LFM基带版本(供RX匹配)
-        lfm_bb = lfm_bb .* exp(-1j*2*pi*fc*(0:length(lfm_bb)-1)/fs_pb);  % 下变频到基带
+        % 使用 frame_assemble_otfs V2.0: [HFM+|g|HFM-|g|LFM1|g|LFM2|g|OTFS]
+        frame_p = struct('N',N, 'M',M, 'cp_len',cp_len, ...
+                         'sps',sps, 'fs_bb',sym_rate, 'fc',fc, ...
+                         'bw',sym_rate*1.3, ...  % 同步序列带宽(略大于OTFS基带)
+                         'T_hfm',0.05, 'T_lfm',0.02, 'guard_ms',5, ...
+                         'sync_gain',0.7);
 
-        % OTFS逐子块上采样(消除Gibbs振铃) + 升余弦过渡
-        [otfs_pb, tx_up] = otfs_to_passband(otfs_signal, N, M, cp_len, sps, fs_pb, fc);
-        % RX侧同理
-        [rx_otfs_pb, ~] = otfs_to_passband(rx_clean, N, M, cp_len, sps, fs_pb, fc);
-
-        % 功率匹配
-        lfm_pb = lfm_pb * sqrt(mean(otfs_pb.^2)) / sqrt(mean(lfm_pb.^2));
-
-        % 帧组装
-        guard_pb = zeros(1, N_guard_pb);
-        frame_tx_pb = [lfm_pb, guard_pb, otfs_pb, guard_pb, lfm_pb];
-        frame_rx_pb = [lfm_pb, guard_pb, rx_otfs_pb, guard_pb, lfm_pb];
-        data_offset_pb = length(lfm_pb) + N_guard_pb;
+        % TX帧（仅用于获取info, 不实际传输）
+        [frame_tx_pb, info] = frame_assemble_otfs(otfs_signal, frame_p);
+        % RX帧: 将信道后的OTFS装入同样结构的帧中
+        [frame_rx_pb, ~] = frame_assemble_otfs(rx_clean, frame_p);
         sig_pwr_pb = mean(frame_rx_pb.^2);
-
-        % 无噪声同步(一次性, 确定LFM定时位置)
-        [bb_sync,~] = downconvert(frame_rx_pb, fs_pb, fc, sym_rate*0.45);
-        [~,~,corr_sync] = sync_detect(bb_sync, lfm_bb(1:min(end,500)), 0.3);
-        % 找第1个LFM峰→数据起始
-        [~, sync_pos] = max(corr_sync(1:length(lfm_pb)+N_guard_pb));
     else
         sig_pwr = mean(abs(rx_clean).^2);
     end
@@ -186,9 +184,7 @@ for fi = 1:size(fading_cfgs,1)
     if fi == 1
         if passband_mode
             vis_frame_tx = frame_tx_pb;
-            vis_frame_info = struct('data_offset', data_offset_pb, ...
-                'data_len', length(otfs_pb), 'lfm_len', length(lfm_pb), ...
-                'guard_len', N_guard_pb);
+            vis_frame_info = info;
         end
         vis_tx_bb = otfs_signal;
     end
@@ -211,13 +207,12 @@ for fi = 1:size(fading_cfgs,1)
             % 通带帧加实噪声
             noise_pwr = sig_pwr_pb * 10^(-snr_db/10);
             frame_rx_noisy = frame_rx_pb + sqrt(noise_pwr) * randn(size(frame_rx_pb));
-            % LFM匹配定时 → 提取OTFS数据段
-            rx_otfs_seg = frame_rx_noisy(data_offset_pb+1 : data_offset_pb+length(rx_otfs_pb));
-            % 逐子块下变频+降采样
-            rx_noisy = passband_to_otfs(rx_otfs_seg, N, M, cp_len, sps, fs_pb, fc);
+            % 使用 frame_parse_otfs V2.0: 两级同步+多普勒补偿+基带提取
+            [rx_noisy, sync_info] = frame_parse_otfs(frame_rx_noisy, info);
             noise_var = mean(abs(rx_clean).^2) * 10^(-snr_db/10);
             if fi == 1 && si == length(snr_list)
                 vis_frame_rx = frame_rx_noisy;
+                vis_sync_info = sync_info;
             end
         else
             noise_var = mean(abs(rx_clean).^2) * 10^(-snr_db/10);
@@ -226,9 +221,16 @@ for fi = 1:size(fading_cfgs,1)
 
         % 1. OTFS解调
         [Y_dd, ~] = otfs_demodulate(rx_noisy, N, M, cp_len, 'dft');
-        pk_pos = pilot_info.positions(1,1);
-        pl_pos = pilot_info.positions(1,2);
-        pv_val = pilot_info.values(1);
+        % pilot 参考位置（impulse/sequence 用, superimposed 用 ceil(N/2), ceil(M/2)）
+        if ~isempty(pilot_info.positions)
+            pk_pos = pilot_info.positions(1,1);
+            pl_pos = pilot_info.positions(1,2);
+            pv_val = pilot_info.values(1);
+        else  % superimposed
+            pk_pos = ceil(N/2);
+            pl_pos = ceil(M/2);
+            pv_val = 1;
+        end
 
         % 2. 信道获取：Oracle模式(真实信道) 或 估计模式
         if use_oracle
@@ -254,33 +256,76 @@ for fi = 1:size(fading_cfgs,1)
             path_info.num_paths = length(oracle_gains);
             nv_dd = max(noise_var, 1e-8);
         else
-            % 估计模式
-            [h_dd, path_info] = ch_est_otfs_dd(Y_dd, pilot_info, N, M);
+            % 估计模式（按 pilot_mode 选择估计器）
+            switch pilot_mode
+                case 'impulse'
+                    [h_dd, path_info] = ch_est_otfs_dd(Y_dd, pilot_info, N, M);
+                case 'sequence'
+                    [h_dd, path_info] = ch_est_otfs_zc(Y_dd, pilot_info, N, M);
+                case 'superimposed'
+                    [h_dd, path_info] = ch_est_otfs_superimposed(Y_dd, pilot_info, N, M, ...
+                        struct('iter',3, 'guard_k',4, 'guard_l',max(delay_bins)+2));
+            end
             % 噪声方差估计
-            detected_dl = unique(path_info.delay_idx);
-            noise_mask = false(N, M);
-            for dk_n = -pilot_config.guard_k:pilot_config.guard_k
-                for dl_n = 0:pilot_config.guard_l
-                    if ~ismember(dl_n, detected_dl)
-                        kk_n = mod(pk_pos-1+dk_n, N)+1;
-                        ll_n = mod(pl_pos-1+dl_n, M)+1;
-                        noise_mask(kk_n, ll_n) = true;
+            nv_dd = max(noise_var, 1e-8);
+            if strcmp(pilot_mode, 'impulse')
+                detected_dl = unique(path_info.delay_idx);
+                noise_mask = false(N, M);
+                for dk_n = -pilot_config.guard_k:pilot_config.guard_k
+                    for dl_n = 0:pilot_config.guard_l
+                        if ~ismember(dl_n, detected_dl)
+                            kk_n = mod(pk_pos-1+dk_n, N)+1;
+                            ll_n = mod(pl_pos-1+dl_n, M)+1;
+                            noise_mask(kk_n, ll_n) = true;
+                        end
                     end
                 end
-            end
-            if any(noise_mask(:))
-                nv_dd = max(mean(abs(Y_dd(noise_mask)).^2), 1e-8);
-            else
-                nv_dd = max(noise_var, 1e-8);
+                if any(noise_mask(:))
+                    nv_dd = max(mean(abs(Y_dd(noise_mask)).^2), 1e-8);
+                end
             end
         end
 
-        % 3. 导频贡献去除
+        % 3. 导频贡献去除（按 pilot_mode 分别处理）
         Y_dd_eq = Y_dd;
-        for pp_r = 1:path_info.num_paths
-            kk_r = mod(pk_pos-1+path_info.doppler_idx(pp_r), N)+1;
-            ll_r = mod(pl_pos-1+path_info.delay_idx(pp_r), M)+1;
-            Y_dd_eq(kk_r, ll_r) = Y_dd_eq(kk_r, ll_r) - path_info.gain(pp_r) * pv_val;
+        switch pilot_mode
+            case {'impulse', 'sequence'}
+                % 冲激/ZC: pilot 在特定位置, 减去每个检测路径的 pilot 贡献
+                if strcmp(pilot_mode, 'sequence')
+                    % ZC: pilot 分布在 seq_len 列, 对每路径需要在多列减去
+                    for pp_r = 1:path_info.num_paths
+                        dl_p = path_info.delay_idx(pp_r);
+                        dk_p = path_info.doppler_idx(pp_r);
+                        % pilot_info.positions 是 seq_len×2 矩阵
+                        for pc_i = 1:size(pilot_info.positions, 1)
+                            pk_c = pilot_info.positions(pc_i, 1);
+                            pl_c = pilot_info.positions(pc_i, 2);
+                            pv_c = pilot_info.values(pc_i);
+                            kk_r = mod(pk_c-1+dk_p, N)+1;
+                            ll_r = mod(pl_c-1+dl_p, M)+1;
+                            Y_dd_eq(kk_r, ll_r) = Y_dd_eq(kk_r, ll_r) - path_info.gain(pp_r) * pv_c;
+                        end
+                    end
+                else
+                    % impulse
+                    for pp_r = 1:path_info.num_paths
+                        kk_r = mod(pk_pos-1+path_info.doppler_idx(pp_r), N)+1;
+                        ll_r = mod(pl_pos-1+path_info.delay_idx(pp_r), M)+1;
+                        Y_dd_eq(kk_r, ll_r) = Y_dd_eq(kk_r, ll_r) - path_info.gain(pp_r) * pv_val;
+                    end
+                end
+            case 'superimposed'
+                % 叠加: pilot 遍布 NM 所有位置, 从 Y 中减去 channel ⊛ pilot_pattern
+                h_origin = zeros(N, M);
+                for p_idx = 1:path_info.num_paths
+                    dk_p = path_info.doppler_idx(p_idx);
+                    dl_p = path_info.delay_idx(p_idx);
+                    kk_o = mod(dk_p, N) + 1;
+                    ll_o = mod(dl_p, M) + 1;
+                    h_origin(kk_o, ll_o) = path_info.gain(p_idx);
+                end
+                Y_pilot_contrib = ifft2(fft2(pilot_info.pilot_pattern) .* fft2(h_origin));
+                Y_dd_eq = Y_dd - Y_pilot_contrib;
         end
 
         % 诊断标记（最高SNR时保存eq_info）
@@ -399,15 +444,31 @@ try
         xlabel('时间 (ms)'); ylabel('幅度'); grid on;
         title(sprintf('TX 通带帧 (%.1fms, fc=%dkHz)', dur_ms, fc/1000));
         hold on;
-        % 标注帧结构
-        lfm_end = vfi.lfm_len / fs_pb * 1000;
-        data_start = vfi.data_offset / fs_pb * 1000;
-        data_end = (vfi.data_offset + vfi.data_len) / fs_pb * 1000;
+        % 标注V2.0帧结构 [HFM+|g|HFM-|g|LFM1|g|LFM2|g|OTFS]
+        s = vfi.seg;
+        pos_ms = @(idx) (idx-1)/fs_pb*1000;
+        hfm_pos_end = pos_ms(s.guard1_start);
+        hfm_neg_end = pos_ms(s.guard2_start);
+        lfm1_end = pos_ms(s.guard3_start);
+        lfm2_end = pos_ms(s.guard4_start);
+        data_start = pos_ms(s.otfs_start);
+        data_end = pos_ms(s.otfs_start + vfi.otfs_pb_len);
         yl = ylim;
-        patch([0 lfm_end lfm_end 0], [yl(1) yl(1) yl(2) yl(2)], 'g', 'FaceAlpha',0.1,'EdgeColor','none');
-        patch([data_start data_end data_end data_start], [yl(1) yl(1) yl(2) yl(2)], 'b', 'FaceAlpha',0.08,'EdgeColor','none');
-        text(lfm_end/2, yl(2)*0.9, 'LFM', 'HorizontalAlignment','center','FontSize',8);
-        text((data_start+data_end)/2, yl(2)*0.9, 'OTFS data', 'HorizontalAlignment','center','FontSize',8);
+        patch([pos_ms(s.hfm_pos_start) hfm_pos_end hfm_pos_end pos_ms(s.hfm_pos_start)], ...
+            [yl(1) yl(1) yl(2) yl(2)], 'g', 'FaceAlpha',0.1,'EdgeColor','none');
+        patch([pos_ms(s.hfm_neg_start) hfm_neg_end hfm_neg_end pos_ms(s.hfm_neg_start)], ...
+            [yl(1) yl(1) yl(2) yl(2)], 'r', 'FaceAlpha',0.1,'EdgeColor','none');
+        patch([pos_ms(s.lfm1_start) lfm1_end lfm1_end pos_ms(s.lfm1_start)], ...
+            [yl(1) yl(1) yl(2) yl(2)], 'c', 'FaceAlpha',0.1,'EdgeColor','none');
+        patch([pos_ms(s.lfm2_start) lfm2_end lfm2_end pos_ms(s.lfm2_start)], ...
+            [yl(1) yl(1) yl(2) yl(2)], 'c', 'FaceAlpha',0.1,'EdgeColor','none');
+        patch([data_start data_end data_end data_start], [yl(1) yl(1) yl(2) yl(2)], ...
+            'b', 'FaceAlpha',0.08,'EdgeColor','none');
+        text((pos_ms(s.hfm_pos_start)+hfm_pos_end)/2, yl(2)*0.9, 'HFM+', 'HorizontalAlignment','center','FontSize',7);
+        text((pos_ms(s.hfm_neg_start)+hfm_neg_end)/2, yl(2)*0.9, 'HFM-', 'HorizontalAlignment','center','FontSize',7);
+        text((pos_ms(s.lfm1_start)+lfm1_end)/2, yl(2)*0.9, 'LFM1', 'HorizontalAlignment','center','FontSize',7);
+        text((pos_ms(s.lfm2_start)+lfm2_end)/2, yl(2)*0.9, 'LFM2', 'HorizontalAlignment','center','FontSize',7);
+        text((data_start+data_end)/2, yl(2)*0.9, 'OTFS', 'HorizontalAlignment','center','FontSize',8);
 
         % (1,2) RX通带帧波形 (完整)
         subplot(3,2,2);
@@ -485,8 +546,12 @@ try
     % --- Figure 2: DD域信道 真实vs估计 (前3配置 × 3列) ---
     n_vis = min(n_cfg, 3);  % 最多显示3行
     figure('Position',[50 50 1400 250*n_vis], 'Name','DD域信道: 真实 vs 估计');
-    pk_pos = pilot_info.positions(1,1);
-    pl_pos = pilot_info.positions(1,2);
+    if ~isempty(pilot_info.positions)
+        pk_pos = pilot_info.positions(1,1);
+        pl_pos = pilot_info.positions(1,2);
+    else
+        pk_pos = ceil(N/2); pl_pos = ceil(M/2);
+    end
     dk_range = -pilot_config.guard_k:pilot_config.guard_k;
     dl_range = -2:pilot_config.guard_l+3;
     cmax = max(abs(gains_raw)) * 1.1;
