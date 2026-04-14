@@ -267,7 +267,7 @@ RX：①LFM相位+训练精估α ②resample补偿 ③LFM精确定时 ④残余C
 | ✅ | DSSS端到端V1.0 | **完成** | Rake+DCD |
 | ✅ | FH-MFSK端到端V1.0 | **完成** | 跳频+能量检测 |
 | ✅ | OTFS端到端V2.0 | **完成** | 通带+离散Doppler验证+UAMP |
-| 🔶 进行 | SC-TDE端到端V5.1优化 | **待优化** | nv_post兜底+时变跳过训练精估 |
+| ✅ | SC-TDE V5.2优化 | **完成(2026-04-14)** | 时变跳过训练精估+nv_post兜底; Jakes目标因伪瓶颈失效，改动保留 |
 | ✅ | **离散Doppler信道全体制对比** | **完成(2026-04-13)** | apply_channel提取到common, 6体制×6信道BER矩阵, Jakes瓶颈确认为伪问题 |
 | ✅ | SC-FDE离散Doppler测试 | **完成** | disc-5Hz 0.88%@10dB, hyb-K10 0%@10dB+ |
 | ✅ | OFDM离散Doppler测试 | **完成** | disc-5Hz/hyb全部 0%@10dB+, Jakes仍~50% |
@@ -276,7 +276,7 @@ RX：①LFM相位+训练精估α ②resample补偿 ③LFM精确定时 ④残余C
 | ✅ | FH-MFSK离散Doppler测试 | **完成** | 全部6种信道 0%@0~5dB+, 最鲁棒 |
 | 🔶 进行 | OTFS通带2D脉冲整形 | **Phase2完成** | Hann旁瓣降13.8dB+模糊度PSL降33dB; PAPR无法通过窗化降低(根因是IFFT叠加); 待Phase4端到端BER验证 |
 | 🔴 高 | OTFS两级同步架构 | **待做** | 对齐其他体制HFM+LFM帧结构 |
-| 🟡 中 | 模块07 doppler_rate=0修正 | **待做** | 时变均衡测试应含真实Doppler频偏 |
+| ✅ | 模块07 doppler_rate=0修正 | **完成(2026-04-12)** | fd/fc换算+oracle α补偿; fd=1/5Hz oracle 5dB+基本不变; fd=10Hz确认ICI极限 |
 | 🟡 中 | OTFS PAPR专项降低 | **待做** | 需SLM/PTS/削峰等专用技术, 当前papr_clip可用 |
 
 ---

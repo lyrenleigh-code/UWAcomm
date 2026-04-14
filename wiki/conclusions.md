@@ -12,28 +12,31 @@ updated: 2026-04-14
 1. **散布导频是精度决定性因素**：比算法选择影响大10-20dB
 2. **BEM(DCT)+散布导频最优**：高fd下全面优于CE-BEM和DD-BEM
 3. **接收端禁用发射端参数**：Oracle只作性能对比基准
+4. **模块07 doppler_rate 修正后基线 (2026-04-12)**：fd≤5Hz 下 oracle α 补偿后 5dB+ 基本不变；fd=10Hz 是系统 ICI 极限（oracle 在高 SNR 非单调反弹 0.73%→3.65%，非算法问题）；DD-BEM 在 fd=5Hz@20dB 有 0.26% 判决误差传播地板
 
 ## 均衡
 
-4. **FDE在长时延信道下全面优于TDE**：有5dB编码增益优势
-5. **两级分离架构有效**：多普勒估计与精确定时解耦
-6. **UAMP对BCCB无优势**：LMMSE per-frequency权重已最优，UAMP Turbo不稳定
+5. **FDE在长时延信道下全面优于TDE**：有5dB编码增益优势
+6. **两级分离架构有效**：多普勒估计与精确定时解耦
+7. **UAMP对BCCB无优势**：LMMSE per-frequency权重已最优，UAMP Turbo不稳定
+8. **时变信道需 nv_post 实测噪声兜底 nv_eq (2026-04-14)**：BEM+散布导频有残余模型误差，高 SNR 时名义噪声远小于实际残差；MMSE 公式 (|h0|² + nv_eq) 过度去噪 → LLR 过度自信 → BER 在高 SNR 反弹。对策：从训练段用 h_tv 重构 y_pred，`nv_eq = max(nv_eq, nv_post_meas)`，该策略已在 OFDM V4.3 / SC-TDE V5.2 落地
+9. **时变信道应跳过训练/CP 精估 (2026-04-14)**：训练段相位差 R_t1/R_t2 在 Jakes 多普勒扩散下被污染，训练精估 α 误差可达 88%；时变只用 LFM 相位粗估 + BEM 跟踪残余即可
 
 ## 信道模型
 
-7. **Jakes ≠ 实际水声信道**：Jakes连续Doppler谱过度悲观，实际水声是Rician混合(离散强径+弱散射)
-8. **Jakes连续谱确认为伪瓶颈(2026-04-13)**：6体制×6信道对比，离散Doppler下全部可工作
+10. **Jakes ≠ 实际水声信道**：Jakes连续Doppler谱过度悲观，实际水声是Rician混合(离散强径+弱散射)
+11. **Jakes连续谱确认为伪瓶颈(2026-04-13)**：6体制×6信道对比，离散Doppler下全部可工作
 
 ## 体制对比（2026-04-13 离散Doppler全体制对比）
 
-9. **离散Doppler下全部6体制可工作**：disc-5Hz/Rician混合信道，高速体制5-10dB达0%BER
-10. **SC-TDE在离散Doppler下逆袭**：Jakes ~48%@全SNR → disc-5Hz **0%@5dB+**，改善最大
-11. **FH-MFSK唯一全信道可工作**：Jakes也在0dB即0%，跳频分集+能量检测天然抗Doppler
-12. **OTFS在离散Doppler下完美工作**：含分数频移(max 5Hz)→0% BER@10dB+，BCCB模型精确
+12. **离散Doppler下全部6体制可工作**：disc-5Hz/Rician混合信道，高速体制5-10dB达0%BER
+13. **SC-TDE在离散Doppler下逆袭**：Jakes ~48%@全SNR → disc-5Hz **0%@5dB+**，改善最大
+14. **FH-MFSK唯一全信道可工作**：Jakes也在0dB即0%，跳频分集+能量检测天然抗Doppler
+15. **OTFS在离散Doppler下完美工作**：含分数频移(max 5Hz)→0% BER@10dB+，BCCB模型精确
 
 ## OTFS 专项（2026-04-13~14）
 
-13. **OTFS PAPR无法窗化降低**：PAPR=7.1dB根因IFFT随机叠加，CP-only和数据脉冲成形均无效
-14. **Hann脉冲成形降旁瓣有效**：频谱PSL降13.8dB，模糊度多普勒PSL降33dB，分辨力展宽2.3x(水声可接受)
-15. **OTFS冲激pilot导致时域尖刺**：pilot_value=sqrt(N_data)能量集中单DD点，产生32×sub_block的周期性峰值，PAPR达20dB
-16. **ZC序列pilot显著降PAPR**：sequence模式PAPR降9.2dB(21→12dB)，但边缘延迟阴影落入数据区造成估计偏差
+16. **OTFS PAPR无法窗化降低**：PAPR=7.1dB根因IFFT随机叠加，CP-only和数据脉冲成形均无效
+17. **Hann脉冲成形降旁瓣有效**：频谱PSL降13.8dB，模糊度多普勒PSL降33dB，分辨力展宽2.3x(水声可接受)
+18. **OTFS冲激pilot导致时域尖刺**：pilot_value=sqrt(N_data)能量集中单DD点，产生32×sub_block的周期性峰值，PAPR达20dB
+19. **ZC序列pilot显著降PAPR**：sequence模式PAPR降9.2dB(21→12dB)，但边缘延迟阴影落入数据区造成估计偏差

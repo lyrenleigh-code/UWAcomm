@@ -96,6 +96,19 @@ specs/active/ → plans/ → 改代码 → 跑测试 → 更新wiki → 归档sp
 
 任何新增/修改/删除模块函数时，必须同步更新模块 README（模板：`wiki/conventions/module-readme-template.md`）。
 
+### 6. 知识闭环（读+写）
+
+**任务启动前必查**（避免重复踩坑/重复造轮子）：
+- `wiki/conclusions.md` — 已有的技术结论
+- `wiki/debug-logs/{相关模块}/` — 是否踩过相同坑
+- `wiki/function-index.md` — 是否已有可复用实现
+- 跨项目领域问题 → Hub `D:\Claude\Ohmybrain\wiki\index.md`
+
+**结论产出回流**：
+- 项目内结论 → 写入 `wiki/conclusions.md`，同步 `wiki/index.md` + `wiki/log.md`（Stop hook 会拦截未同步）
+- 调试经验 → `wiki/debug-logs/{模块}/` 追加带日期章节
+- 跨项目价值（算法卡片/领域知识/工具经验）→ `/promote` 回流 Hub
+
 ## MATLAB 测试调试流程
 
 每次运行 `test_*.m` 单元测试**必须**按此流程：

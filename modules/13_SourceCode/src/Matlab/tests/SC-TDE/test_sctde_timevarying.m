@@ -5,14 +5,16 @@
 % RX: 09下变频 → ①LFM相位粗估多普勒 → ②粗补偿+训练精估 → ③LFM精确定时 →
 %     提取数据 → 09 RRC匹配 → 残余CFO补偿(alpha_est*fc) →
 %     12 Turbo均衡(GAMP+DFE或BEM+ISI消除) → 译码
-% 版本：V5.1.0 — 修复LFM检测（跳过HFM区域+全局max替代窗口搜索）
-% 变更：V4→V5 帧结构[HFM+|HFM-|LFM1|LFM2|data]，去oracle dop_rate+无噪声sync
+% 版本：V5.2.0 — 时变跳过训练精估 + nv_post 实测噪声兜底 nv_eq
+% 变更：V5.1→V5.2 对齐 OFDM V4.3 策略（修复fd=1Hz高SNR反弹）
+%   1. 时变信道：alpha_est = alpha_lfm（跳过训练精估，训练相位差被Jakes污染）
+%   2. BEM估计后：从训练段实测 nv_post_meas，nv_eq = max(nv_eq, nv_post_meas)
 %   静态路径: GAMP+turbo_equalizer_sctde（不变）
-%   时变路径: BEM(DCT)+散布导频+ISI消除+MMSE Turbo（不变）
+%   时变路径: BEM(DCT)+散布导频+ISI消除+MMSE Turbo（nv_eq 兜底后进 Turbo）
 
 clc; close all;
 fprintf('========================================\n');
-fprintf('  SC-TDE 通带仿真 — 时变信道测试 V5.1\n');
+fprintf('  SC-TDE 通带仿真 — 时变信道测试 V5.2\n');
 fprintf('========================================\n\n');
 
 proj_root = fileparts(fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))))));
@@ -267,11 +269,16 @@ for fi = 1:size(fading_cfgs,1)
         elseif length(rc)<N_tx, rc=[rc,zeros(1,N_tx-length(rc))]; end
 
         % 训练精估（替代CP精估：训练分两半，计算相位差→残余alpha）
-        T_half = floor(train_len / 2);
-        R_t1 = sum(rc(1:T_half) .* conj(training(1:T_half)));
-        R_t2 = sum(rc(T_half+1:2*T_half) .* conj(training(T_half+1:2*T_half)));
-        alpha_train = angle(R_t2 * conj(R_t1)) / (2*pi*fc*T_half/sym_rate);
-        alpha_est = alpha_lfm + alpha_train;
+        % V5.2：仅静态信道精估；时变信道下训练段被Jakes多普勒扩散污染，跳过精估
+        if strcmpi(ftype, 'static')
+            T_half = floor(train_len / 2);
+            R_t1 = sum(rc(1:T_half) .* conj(training(1:T_half)));
+            R_t2 = sum(rc(T_half+1:2*T_half) .* conj(training(T_half+1:2*T_half)));
+            alpha_train = angle(R_t2 * conj(R_t1)) / (2*pi*fc*T_half/sym_rate);
+            alpha_est = alpha_lfm + alpha_train;
+        else
+            alpha_est = alpha_lfm;  % 时变：仅用LFM粗估，残余由BEM跟踪
+        end
 
         % ===== 阶段2: 精补偿 + LFM精确定时 =====
         if abs(alpha_est) > 1e-10
@@ -386,11 +393,30 @@ for fi = 1:size(fading_cfgs,1)
             [h_tv, ~, bem_info] = ch_est_bem(obs_y(:), obs_x, obs_n(:), N_tx, ...
                 sym_delays, fd_hz, sym_rate, nv_eq, 'dct', bem_opts);
 
+            % V5.2：从训练段实测 nv_post 并兜底 nv_eq
+            % 原因：高SNR时BEM+散布导频有残余模型误差，名义 nv_eq 远小于实际残差噪声，
+            % MMSE公式 (|h0|² + nv_eq) 过度去噪 → LLR 过度自信 → 20dB反弹
+            nv_post_sum = 0; nv_post_cnt = 0;
+            for n = max(sym_delays)+1 : train_len
+                y_pred = 0;
+                for pp = 1:P_paths
+                    idx = n - sym_delays(pp);
+                    if idx >= 1
+                        y_pred = y_pred + h_tv(pp, n) * training(idx);
+                    end
+                end
+                nv_post_sum = nv_post_sum + abs(rx_sym_recv(n) - y_pred)^2;
+                nv_post_cnt = nv_post_cnt + 1;
+            end
+            nv_post_meas = nv_post_sum / max(nv_post_cnt, 1);
+            nv_eq_orig = nv_eq;
+            nv_eq = max(nv_eq, nv_post_meas);
+
             if si == 1
                 align_corr = abs(sum(rx_sym_recv(1:min(50,train_len)) .* conj(training(1:min(50,train_len))))) / ...
                              (norm(rx_sym_recv(1:min(50,train_len))) * norm(training(1:min(50,train_len))) + 1e-30);
-                fprintf('\n  [对齐] corr=%.3f, off=%d | [BEM] Q=%d, obs=%d, cond=%.0f | ', ...
-                    align_corr, best_off, bem_info.Q, length(obs_y), bem_info.cond_num);
+                fprintf('\n  [对齐] corr=%.3f, off=%d | [BEM] Q=%d, obs=%d, cond=%.0f | nv_post=%.2e/nv_eq_orig=%.2e\n', ...
+                    align_corr, best_off, bem_info.Q, length(obs_y), bem_info.cond_num, nv_post_meas, nv_eq_orig);
             end
 
             % --- Turbo迭代 --- %
@@ -602,7 +628,7 @@ fprintf('\n完成\n');
 %% ========== 保存结果到txt ========== %%
 result_file = fullfile(fileparts(mfilename('fullpath')), 'test_sctde_timevarying_results.txt');
 fid = fopen(result_file, 'w');
-fprintf(fid, 'SC-TDE 通带时变信道测试结果 V5.1 — %s\n', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
+fprintf(fid, 'SC-TDE 通带时变信道测试结果 V5.2 — %s\n', datestr(now, 'yyyy-mm-dd HH:MM:SS'));
 fprintf(fid, '帧结构: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]\n');
 fprintf(fid, 'fs=%dHz, fc=%dHz, HFM/LFM=%.0f~%.0fHz, sps=%d\n', fs, fc, f_lo, f_hi, sps);
 fprintf(fid, '信道: %d径, delays=[%s], guard=%d\n', length(sym_delays), num2str(sym_delays), guard_samp);

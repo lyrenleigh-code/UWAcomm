@@ -1,9 +1,9 @@
 ---
 project: uwacomm
 type: task
-status: active
+status: archived
 created: 2026-04-12
-updated: 2026-04-12
+updated: 2026-04-14
 tags: [模块07, 多普勒, 测试]
 ---
 

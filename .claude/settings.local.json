@@ -35,7 +35,9 @@
       "Bash(git:*)",
       "Bash(find . -name \"*.m\" -not -path \"./.claude/*\" -exec cat {} +)",
       "Bash(claude --version)",
-      "Bash(npm update:*)"
+      "Bash(npm update:*)",
+      "Bash(python scripts/check_index_log_sync.py)",
+      "Bash(echo \"exit=$?\")"
     ]
   }
 }
