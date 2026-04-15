@@ -41,8 +41,12 @@ updated: 2026-04-14
 18. **OTFS冲激pilot导致时域尖刺**：pilot_value=sqrt(N_data)能量集中单DD点，产生32×sub_block的周期性峰值，PAPR达20dB
 19. **ZC序列pilot显著降PAPR**：sequence模式PAPR降9.2dB(21→12dB)，但边缘延迟阴影落入数据区造成估计偏差
 
-## 流式仿真框架（2026-04-15 P1 完成）
+## 流式仿真框架（2026-04-15 P1 + P2 完成）
 
 20. **方案 A passband 原生信道有效**：`gen_uwa_channel_pb` 直接在 passband 做多径（real FIR + 载波相位 tap）+ Jakes 时变 + spline Doppler，避免 channel 内部 down/up convert 的概念混乱；与 baseband 等价模型数学一致
 21. **Doppler 漂移随帧长线性累积**：长帧 N_body × α 样本漂移，超过半个符号即解码失败；P1 用 oracle 补偿（chinfo 读 α 反 resample），P5/P6 应改用 LFM1/LFM2 相位差盲估计
 22. **MATLAB R2025b 静态分析陷阱**：`uilabel(...).Layout.Row = X` 链式赋值让 MATLAB 把函数名误判为变量，整函数所有该名调用失败；必须 `lbl = uilabel(...); lbl.Layout.Row = X`
+23. **流式帧检测 hybrid 优于纯阈值**（P2）：纯阈值检测对 Jakes 衰落首帧不鲁棒（peak 远低于 peak_max 被过滤）；hybrid 模式 = 首帧在预期窗口取绝对最大锚定 + 后续帧用 frame_len 预测 ±5% 窗口取本地最大，深衰落漏检不连锁
+24. **FH-MFSK 软判决 LLR 显著改善衰落鲁棒性**（P2）：硬判决 1 位错即 CRC 挂；改用每符号 8 频率能量算 per-bit LLR `(max_e_b1 - max_e_b0) / median(e)` 送 Viterbi，配合 [7,5] 卷积码 dfree=5 能纠多位错
+25. **FH-MFSK 无均衡，多径展宽 > 50% 符号时长即崩**：FFT 能量检测对 ISI 无能为力；延时展宽 1.5ms vs 符号 2ms (75%) 时连软 LLR 也救不回；OFDM/SC-FDE 自带均衡器才能扛大延时展宽
+26. **downconvert LPF 暖机吃首帧**：64 阶 FIR 前 ~64 样本是瞬态会损伤 frame 1 HFM；流式 RX 必须**预填零给 LPF 暖机**（rx_pb_padded = [zeros(N_warmup), rx_pb]，再 trim 输出）

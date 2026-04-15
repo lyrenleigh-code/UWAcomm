@@ -1,6 +1,6 @@
 function [bits, info] = modem_decode_fhmfsk(body_bb, sys, meta)
-% 功能：FH-MFSK 解调（FFT 能量检测 + 去跳频 + 解交织 + 硬判决 Viterbi）
-% 版本：V1.0.0（P1 临时命名，P3 统一 API）
+% 功能：FH-MFSK 解调（FFT 能量检测 + 去跳频 + 软 LLR + Viterbi 译码）
+% 版本：V1.1.0（软判决 LLR 替代硬判决，对 Jakes 衰落鲁棒）
 % 输入：
 %   body_bb - 基带复信号（已下变频+LFM 精确定时，长度 ≈ N_sym*samples_per_sym）
 %   sys     - 系统参数
@@ -9,12 +9,15 @@ function [bits, info] = modem_decode_fhmfsk(body_bb, sys, meta)
 %   bits - 信息比特 (1×N_info)
 %   info - 结构体
 %       .energy_matrix      N_sym × num_freqs
-%       .detected_indices   0..M-1
+%       .detected_indices   0..M-1（硬判决，用于可视化）
+%       .soft_llr           1×M_coded LLR（软 bit 信息）
 %       .N_info_out         = length(bits)
 %
-% 依赖：
-%   02_ChannelCoding/siso_decode_conv
-%   03_Interleaving/random_interleave, random_deinterleave
+% 软 LLR 公式（非相干 M-FSK）：
+%   对 8-FSK 每符号 3 bit，每位 j：
+%     LLR(b_j) ≈ (max_e_b1 - max_e_b0) / N0_est
+%   其中 max_e_bX 是该位为 X 的所有 M-FSK 符号对应频率的最大能量
+%   sign 约定：正→bit=1（与 siso_decode_conv 兼容）
 
 cfg = sys.fhmfsk;
 codec = sys.codec;
@@ -30,10 +33,8 @@ elseif length(body_bb) > N_samples_needed
     body_bb = body_bb(1:N_samples_needed);
 end
 
-% ---- 1. FFT 能量检测（每 sym 一个 FFT，长度 = samples_per_sym） ----
-% 基带频率对应的 FFT bin
+% ---- 1. FFT 能量检测 ----
 fft_bin_idx = mod(round(cfg.fb_base * cfg.samples_per_sym / sys.fs), cfg.samples_per_sym) + 1;
-
 energy_matrix = zeros(N_sym, cfg.num_freqs);
 for k = 1:N_sym
     seg = body_bb((k-1)*cfg.samples_per_sym+1 : k*cfg.samples_per_sym);
@@ -41,30 +42,57 @@ for k = 1:N_sym
     energy_matrix(k, :) = psd(fft_bin_idx);
 end
 
-% ---- 2. 去跳频（循环移位回 0..M-1 窗口，取能量最大） ----
+% ---- 2. 去跳频 + 计算软 LLR + 硬判决索引（备份）----
+% 预计算 bit-symbol mapping（哪些 M-FSK 符号的 bit j 是 0/1）
+M = cfg.M;
+bps = cfg.bits_per_sym;
+sym_indices = (0:M-1).';
+bit_table = zeros(M, bps);   % 行=符号, 列=bit 位（MSB first）
+for j = 1:bps
+    bit_table(:, j) = bitget(sym_indices, bps - j + 1);
+end
+sym_with_bit0 = cell(1, bps);
+sym_with_bit1 = cell(1, bps);
+for j = 1:bps
+    sym_with_bit0{j} = find(bit_table(:, j) == 0);   % 1-based for indexing
+    sym_with_bit1{j} = find(bit_table(:, j) == 1);
+end
+
+soft_llr = zeros(1, N_sym * bps);
 detected_indices = zeros(1, N_sym);
+
 for k = 1:N_sym
     shift = meta.hop_pattern(k);
     e_shifted = circshift(energy_matrix(k, :), -shift);
-    [~, idx_max] = max(e_shifted(1:cfg.M));
+    e_freqs = e_shifted(1:M);   % M 个有效频率的能量
+
+    % 硬判决（兼容旧 info）
+    [~, idx_max] = max(e_freqs);
     detected_indices(k) = idx_max - 1;   % 0-based
+
+    % 软 LLR：用本符号 M 个能量值的中位数作为 N0 估计（避免极端值）
+    n0_est = max(median(e_freqs), 1e-12);
+
+    for j = 1:bps
+        max_e0 = max(e_freqs(sym_with_bit0{j}));
+        max_e1 = max(e_freqs(sym_with_bit1{j}));
+        % LLR 正→bit=1（与 siso_decode_conv 约定一致）
+        soft_llr((k-1)*bps + j) = (max_e1 - max_e0) / n0_est;
+    end
 end
 
-% ---- 3. 解映射 → 比特 ----
-detected_bits = zeros(1, N_sym * cfg.bits_per_sym);
-for k = 1:N_sym
-    b3 = de2bi(detected_indices(k), cfg.bits_per_sym, 'left-msb');
-    detected_bits((k-1)*cfg.bits_per_sym+1 : k*cfg.bits_per_sym) = b3;
-end
-detected_bits = detected_bits(1:meta.M_coded);
+% trim 到 M_coded
+soft_llr = soft_llr(1:meta.M_coded);
 
-% ---- 4. 解交织 ----
+% ---- 3. 解交织（直接对 LLR 做置换）----
 [~, perm] = random_interleave(zeros(1, meta.M_coded), codec.interleave_seed);
-deint_bits = random_deinterleave(detected_bits, perm);
+deint_llr = random_deinterleave(soft_llr, perm);
 
-% ---- 5. 硬判决 → LLR → Viterbi 译码 ----
-hard_llr = (2*deint_bits - 1) * 10;  % bit=1→+10, bit=0→-10
-[~, Lp_info, ~] = siso_decode_conv(hard_llr, [], codec.gen_polys, ...
+% saturate 防 Viterbi 溢出
+deint_llr = max(min(deint_llr, 30), -30);
+
+% ---- 4. SISO Viterbi（软输入）----
+[~, Lp_info, ~] = siso_decode_conv(deint_llr, [], codec.gen_polys, ...
     codec.constraint_len, codec.decode_mode);
 bits = double(Lp_info > 0);
 
@@ -78,6 +106,7 @@ end
 info = struct();
 info.energy_matrix    = energy_matrix;
 info.detected_indices = detected_indices;
+info.soft_llr         = soft_llr;
 info.N_info_out       = length(bits);
 
 end

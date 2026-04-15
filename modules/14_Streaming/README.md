@@ -46,7 +46,7 @@ session_<timestamp>/
 | Phase | 目标 | 状态 |
 |-------|------|------|
 | P1 | 单体制串行 loopback (FH-MFSK) + GUI demo | ✅ 完成 (2026-04-15) |
-| P2 | RX 流式帧检测 | 待开始 |
+| P2 | RX 流式帧检测 + 多帧 + 软判决 LLR + GUI | ✅ 完成 (2026-04-15) |
 | P3 | 6 体制统一 modem API | 待 P2 |
 | P4 | 帧头 FH-MFSK + payload 异构体制路由 | 待 P3 |
 | P5 | 三进程并发 | 待 P4 |
@@ -66,6 +66,28 @@ p1_demo_ui
 ```
 
 GUI 含：TX 文本输入 + 信道参数（SNR / Doppler / 衰落类型 / Jakes fd / 预设 / 帧长度）+ RX 解码显示 + 7 个可视化 tab。
+
+## P2 用法
+
+```matlab
+% 命令行测试
+clear functions; clear all;
+cd modules/14_Streaming/src/Matlab/tests
+run('test_p2_multiframe.m');
+
+% 交互式 GUI demo（多帧）
+cd modules/14_Streaming/src/Matlab/ui
+p2_demo_ui
+```
+
+GUI 含：长文本输入 + 容量提示自动算帧数 + RX 解码文本 + 帧明细 uitable + 7 个可视化 tab（含"帧检测"匹配滤波 panel）。
+
+P2 vs P1 关键差异：
+- 文本任意长度自动按 UTF-8 字节边界切多帧
+- 多帧串联在单 wav 文件内
+- RX 用滑动 HFM+ 匹配滤波自动检测帧边界（hybrid 模式：首帧锚定 + 后续帧预测窗口）
+- FH-MFSK 解码改软判决 LLR（对 Jakes 衰落更鲁棒）
+- 缺帧用 `[missing frame N]` 占位，CRC 失败的帧不影响其他帧
 
 ## 统一 modem API（P3 目标）
 
