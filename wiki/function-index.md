@@ -180,3 +180,53 @@ last-sync: 2026-04-11
 | `gen_uwa_channel` | 13_SourceCode | 简化水声信道仿真（多径时变+Jakes衰落+宽带多普勒伸缩+AWGN）。 |
 | `adaptive_block_len` | 13_SourceCode | 自适应块长选择（从接收信号估计多普勒扩展fd，计算最优FFT块长）。 |
 | `main_sim_single` | 13_SourceCode | 单SNR点6体制仿真脚本（直接运行，输出BER柱状图+表格）。 |
+
+## 14_Streaming（流式仿真框架，2026-04-15 P1+P2 完成）
+
+### common/
+
+| 函数 | 用途 |
+|------|------|
+| `sys_params_default` | 14_Streaming 默认系统参数（fs/fc/FH-MFSK/帧协议） |
+| `text_to_bits` / `bits_to_text` | UTF-8 字符串 ↔ 比特流（MSB first）|
+| `crc16` | CRC-16-CCITT（poly 0x1021, init 0xFFFF）|
+| `frame_header` | 16 字节帧头 pack/unpack（含 magic/scheme/idx/len/flags/src/dst/CRC）|
+| `create_session_dir` | 创建会话目录（raw_frames/channel_frames/rx_out）|
+| `wav_write_frame` / `wav_read_frame` | 写/读 NNNN.wav int16 + .ready 标记 |
+| `assemble_physical_frame` | 组装物理帧 [HFM+\|HFM-\|LFM1\|LFM2\|body] |
+| `gen_uwa_channel_pb` | passband 原生水声信道（方案A，含 Jakes 时变 + 宽带 Doppler）|
+| `visualize_p1_frame` | P1 单帧 7 panels 可视化 |
+| `visualize_p2_frames` | P2 多帧 7 panels 可视化（含帧检测匹配滤波）|
+
+### tx/
+
+| 函数 | 用途 |
+|------|------|
+| `modem_encode_fhmfsk` | FH-MFSK 调制（卷积编码+交织+8FSK+跳频+复指数波形）|
+| `tx_stream_p1` | P1 单帧 TX：text → 1 帧 wav |
+| `text_chunker` | UTF-8 文本按字节边界切分（不切断字符）|
+| `tx_stream_p2` | P2 多帧 TX：text → N 帧串联 → 单 wav |
+
+### rx/
+
+| 函数 | 用途 |
+|------|------|
+| `modem_decode_fhmfsk` | FH-MFSK 解调（FFT 能量 + 软判决 LLR + Viterbi）V1.1 |
+| `detect_lfm_start` | LFM2 匹配滤波定位（窗口搜索）|
+| `rx_stream_p1` | P1 单帧 RX：wav → 解码 text |
+| `frame_detector` | 滑动 HFM+ 多帧检测（hybrid: 首帧锚定 + 后续预测窗口）V1.1 |
+| `text_assembler` | 按 idx 排序拼接 + 缺帧 [missing frame N] 占位 |
+| `rx_stream_p2` | P2 多帧流式 RX：wav → 检测 → 逐帧解 → text |
+
+### channel/
+
+| 函数 | 用途 |
+|------|------|
+| `channel_simulator_p1` | 信道模拟（pb→pb，调用 gen_uwa_channel_pb，存 chinfo.mat）|
+
+### ui/
+
+| 函数 | 用途 |
+|------|------|
+| `p1_demo_ui` | P1 单帧交互 GUI（uifigure，7 viz tab）|
+| `p2_demo_ui` | P2 多帧交互 GUI（uitable 帧明细 + 7 viz tab 含帧检测）|

@@ -216,14 +216,14 @@ close → touch 0002.ready        close → touch 0001.ready           write 000
 
 ## Phase 规划
 
-| Phase | 目标 | 验收 | spec |
+| Phase | 目标 | 状态 | spec |
 |-------|------|------|------|
-| **P1** | 单体制串行 loopback (FH-MFSK) | "Hello 水声" 单帧闭环 | `2026-04-15-streaming-p1-loopback-fhmfsk.md` |
-| **P2** | RX 流式帧检测 | 多帧长文本不依赖帧起点 | `2026-04-15-streaming-p2-stream-detect.md` |
-| **P3** | 6 体制统一 API | 所有体制可切换且 BER 与 13_SourceCode 基线一致 | `2026-04-15-streaming-p3-unified-modem.md` |
-| **P4** | scheme 路由 | 帧头 FH-MFSK / payload 异构体制，自动分发 | `2026-04-15-streaming-p4-scheme-routing.md` |
-| **P5** | 三进程并发 | TX/Channel/RX 独立启动，边发边收 | `2026-04-15-streaming-p5-concurrent.md` |
-| **P6** | 物理层 AMC | 根据 sync_peak+SNR+信道展宽自动选体制 | `2026-04-15-streaming-p6-amc.md` |
+| **P1** | 单体制串行 loopback (FH-MFSK) | ✅ 完成 (2026-04-15) | `archive/2026-04-15-streaming-p1-loopback-fhmfsk.md` |
+| **P2** | RX 流式帧检测 + 多帧 + 软判决 LLR | ✅ 完成 (2026-04-15) | `archive/2026-04-15-streaming-p2-stream-detect.md` |
+| **P3** | 6 体制统一 API | ⬜ 待开始 | `2026-04-15-streaming-p3-unified-modem.md` |
+| **P4** | scheme 路由 | ⬜ 待 P3 | `2026-04-15-streaming-p4-scheme-routing.md` |
+| **P5** | 三进程并发 | ⬜ 待 P4 | `2026-04-15-streaming-p5-concurrent.md` |
+| **P6** | 物理层 AMC | ⬜ 待 P5 | `2026-04-15-streaming-p6-amc.md` |
 
 ---
 

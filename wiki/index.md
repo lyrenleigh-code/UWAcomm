@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
 > 最后更新：2026-04-15
-> 页面总数：38（14_Streaming P1 + P2 完成）
+> 页面总数：39（14_Streaming P1 + P2 完成 + 流式调试日志）
 
 ## Architecture（架构页）
 
@@ -27,7 +27,7 @@
 - [13 函数索引](modules/13_SourceCode/函数索引.md) + [框架v5](modules/13_SourceCode/水声通信算法模块化框架v5.md)
 - [SC-TDE调试日志](modules/13_SourceCode/SC-TDE调试日志.md) + [SC-FDE调试日志](modules/13_SourceCode/SC-FDE调试日志.md) + [OFDM调试日志](modules/13_SourceCode/OFDM调试日志.md)
 - [端到端帧组装调试笔记](modules/13_SourceCode/端到端帧组装调试笔记.md) + [离散Doppler全体制对比](modules/13_SourceCode/离散Doppler全体制对比.md)
-- [14_流式仿真框架](modules/14_Streaming/14_流式仿真框架.md)
+- [14_流式仿真框架](modules/14_Streaming/14_流式仿真框架.md) + [流式调试日志](debug-logs/14_Streaming/流式调试日志.md)
 
 ## Concepts（概念页）
 

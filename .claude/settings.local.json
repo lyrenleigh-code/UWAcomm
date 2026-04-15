@@ -37,7 +37,10 @@
       "Bash(claude --version)",
       "Bash(npm update:*)",
       "Bash(python scripts/check_index_log_sync.py)",
-      "Bash(echo \"exit=$?\")"
+      "Bash(echo \"exit=$?\")",
+      "Bash(mkdir -p _debug)",
+      "Bash(mv diag_uilabel.m diag_uilabel_results.txt diag_ui_error.m diag_ui_error.txt _debug/)",
+      "Bash(echo \"=== 硬编码路径 ===\" grep -nE \"D:\\\\\\\\\\\\\\\\|/d/|H:\\\\\\\\\\\\\\\\|C:\\\\\\\\\\\\\\\\Users\" modules/14_Streaming/src/Matlab/**/*.m)"
     ]
   }
 }
