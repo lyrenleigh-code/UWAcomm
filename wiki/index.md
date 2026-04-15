@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
 > 最后更新：2026-04-15
-> 页面总数：38
+> 页面总数：38（14_Streaming P1 完成）
 
 ## Architecture（架构页）
 

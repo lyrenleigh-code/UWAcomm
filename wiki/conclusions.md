@@ -40,3 +40,9 @@ updated: 2026-04-14
 17. **Hann脉冲成形降旁瓣有效**：频谱PSL降13.8dB，模糊度多普勒PSL降33dB，分辨力展宽2.3x(水声可接受)
 18. **OTFS冲激pilot导致时域尖刺**：pilot_value=sqrt(N_data)能量集中单DD点，产生32×sub_block的周期性峰值，PAPR达20dB
 19. **ZC序列pilot显著降PAPR**：sequence模式PAPR降9.2dB(21→12dB)，但边缘延迟阴影落入数据区造成估计偏差
+
+## 流式仿真框架（2026-04-15 P1 完成）
+
+20. **方案 A passband 原生信道有效**：`gen_uwa_channel_pb` 直接在 passband 做多径（real FIR + 载波相位 tap）+ Jakes 时变 + spline Doppler，避免 channel 内部 down/up convert 的概念混乱；与 baseband 等价模型数学一致
+21. **Doppler 漂移随帧长线性累积**：长帧 N_body × α 样本漂移，超过半个符号即解码失败；P1 用 oracle 补偿（chinfo 读 α 反 resample），P5/P6 应改用 LFM1/LFM2 相位差盲估计
+22. **MATLAB R2025b 静态分析陷阱**：`uilabel(...).Layout.Row = X` 链式赋值让 MATLAB 把函数名误判为变量，整函数所有该名调用失败；必须 `lbl = uilabel(...); lbl.Layout.Row = X`

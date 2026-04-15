@@ -278,6 +278,12 @@ RX：①LFM相位+训练精估α ②resample补偿 ③LFM精确定时 ④残余C
 | 🔴 高 | OTFS两级同步架构 | **待做** | 对齐其他体制HFM+LFM帧结构 |
 | ✅ | 模块07 doppler_rate=0修正 | **完成(2026-04-12)** | fd/fc换算+oracle α补偿; fd=1/5Hz oracle 5dB+基本不变; fd=10Hz确认ICI极限 |
 | 🟡 中 | OTFS PAPR专项降低 | **待做** | 需SLM/PTS/削峰等专用技术, 当前papr_clip可用 |
+| ✅ | **14_Streaming P1 (FH-MFSK loopback + GUI demo)** | **完成(2026-04-15)** | 17 文件，方案A passband 信道，Jakes 时变，Doppler oracle 补偿，UI 含 7 viz tab |
+| 🔴 高 | 14_Streaming P2 流式帧检测 | **待开始** | RX 不依赖 chinfo.mat 推 frame_meta，滑动 LFM 检测 |
+| 🔴 高 | 14_Streaming P3 6 体制统一 modem API | **待 P2** | 取代临时 modem_encode_fhmfsk |
+| 🟡 中 | 14_Streaming P4 帧头/payload 异构调制路由 | **待 P3** | header FH-MFSK + payload 按 scheme 分发 |
+| 🟡 中 | 14_Streaming P5 三进程并发 | **待 P4** | TX/Channel/RX 独立 MATLAB |
+| 🟡 中 | 14_Streaming P6 物理层 AMC | **待 P5** | LFM peak/SNR/delay/Doppler → 自适应切体制 |
 
 ---
 

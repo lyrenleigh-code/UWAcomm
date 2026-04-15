@@ -2,7 +2,8 @@
 
 ## 2026-04-15
 
-- 新增 `modules/14_Streaming/14_流式仿真框架.md` 占位页（Phase 1 实施中）
+- 新增 `modules/14_Streaming/14_流式仿真框架.md`，P1 完成补完整实施记录
+- conclusions.md 加 #20–22（流式框架方案A、Doppler漂移、MATLAB链式赋值陷阱）
 
 ## 2026-04-14
 

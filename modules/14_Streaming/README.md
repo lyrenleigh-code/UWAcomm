@@ -45,12 +45,27 @@ session_<timestamp>/
 
 | Phase | 目标 | 状态 |
 |-------|------|------|
-| P1 | 单体制串行 loopback (FH-MFSK) | 实施中 |
-| P2 | RX 流式帧检测 | 待 P1 |
+| P1 | 单体制串行 loopback (FH-MFSK) + GUI demo | ✅ 完成 (2026-04-15) |
+| P2 | RX 流式帧检测 | 待开始 |
 | P3 | 6 体制统一 modem API | 待 P2 |
 | P4 | 帧头 FH-MFSK + payload 异构体制路由 | 待 P3 |
 | P5 | 三进程并发 | 待 P4 |
 | P6 | 物理层 AMC | 待 P5 |
+
+## P1 用法
+
+```matlab
+% 命令行测试
+clear functions; clear all;
+cd modules/14_Streaming/src/Matlab/tests
+run('test_p1_loopback_fhmfsk.m');
+
+% 交互式 GUI demo
+cd modules/14_Streaming/src/Matlab/ui
+p1_demo_ui
+```
+
+GUI 含：TX 文本输入 + 信道参数（SNR / Doppler / 衰落类型 / Jakes fd / 预设 / 帧长度）+ RX 解码显示 + 7 个可视化 tab。
 
 ## 统一 modem API（P3 目标）
 

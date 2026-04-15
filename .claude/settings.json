@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python scripts/check_raw_write.py"
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/check_raw_write.py\""
           }
         ]
       }
@@ -17,7 +17,16 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python scripts/lint_wiki.py --quick"
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/lint_wiki.py\" --quick"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/raw_ingest_reminder.py\""
           }
         ]
       }
@@ -27,11 +36,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python scripts/check_index_log_sync.py"
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/check_index_log_sync.py\""
           },
           {
             "type": "command",
-            "command": "python scripts/validate_task.py"
+            "command": "python \"$CLAUDE_PROJECT_DIR/scripts/validate_task.py\""
           }
         ]
       }

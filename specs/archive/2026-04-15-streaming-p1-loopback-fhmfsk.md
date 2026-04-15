@@ -1,7 +1,7 @@
 ---
 project: uwacomm
 type: task
-status: active
+status: archived
 created: 2026-04-15
 updated: 2026-04-15
 parent: 2026-04-15-streaming-framework-master.md
@@ -221,10 +221,52 @@ end
 
 ## Log
 
-（执行时追加）
+### 2026-04-15 实施
 
----
+- 17 个源码文件按 plan 15 步顺序落地（实际比 plan 多 2 个：detect_lfm_start 独立成文件，gen_uwa_channel_pb 加入 common）
+- 首跑 PASS：text "Hello 水声通信测试帧 001" → raw.wav (1.09s) → static 5径 SNR=15dB → channel.wav → 文本完美复原，CRC 全过，sync_peak=0.907
+
+### 增量改进（同日完成）
+
+| # | 改进 | 涉及文件 |
+|---|------|---------|
+| 1 | RX 波形 + 同步 标注 panel | visualize_p1_frame, p1_demo_ui |
+| 2 | gen_uwa_channel_pb V1.1 加 Jakes 时变（slow/fast）支持 | gen_uwa_channel_pb |
+| 3 | 信道 CIR panel 时变时画 2D 热图 |h(t,τ)| | visualize_p1_frame |
+| 4 | UI 加"衰落类型 / Jakes fd / 帧长度"字段 | p1_demo_ui, sys_params_default |
+| 5 | 默认帧长度 512→2048 bits（~3s） | sys_params_default |
+| 6 | 容量提示动态更新（按下拉+文本） | p1_demo_ui |
+| 7 | TX 容量预检（超出 abort + 友好提示） | p1_demo_ui |
+| 8 | RX 加 Doppler oracle 补偿（chinfo 读 α） | rx_stream_p1, gen_uwa_channel_pb |
+| 9 | append_log 修复初始空行 + scroll try-catch | p1_demo_ui |
+
+### 调试经验
+
+1. **MATLAB 静态分析陷阱**：`uilabel(...).Layout.Row = 1` 链式赋值让 MATLAB 把 uilabel 误判为变量，整函数所有 uilabel 调用失败；必须 `lbl = uilabel(...); lbl.Layout.Row = 1`
+2. **uigridlayout 不接受 CSS 语法**：`'1fr'` 会报错，应用 `'1x'`
+3. **混合类型 cell 必须用 `{}`**：`segs = [num1, num2, 'str']` 会把 'str' 当 ASCII 数组拼成 numeric matrix，`segs{i,j}` 索引就崩
+4. **Doppler 漂移随帧长累积**：长帧 + 大 fd 时 RX 必须做时间轴反 resample，否则符号边界错位
 
 ## Result
 
-（完成后填写）
+### 验收（全部通过）
+
+- [x] `test_p1_loopback_fhmfsk.m` 一次过 PASS
+- [x] 输入文本完美复原（含中英文混合 UTF-8）
+- [x] header CRC + payload CRC 全过，magic 验证通过
+- [x] 帧头 scheme=6 (FH-MFSK), idx=1, flags.last=1
+- [x] 可视化 7 panels 全部正常（含交互 UI demo）
+- [x] 4 种帧长度（短/中/长/超长）支持，~1s ~ ~12s
+- [x] 4 种信道预设 + 静态/Jakes 慢/快衰落 + Doppler 任意值
+
+### 关键产出
+
+- `modules/14_Streaming/` 17 个 .m 源文件 + UI demo
+- 会话目录方案 B：每帧独立 wav + .ready 标记，避开 Windows 文件锁
+- passband 原生信道 `gen_uwa_channel_pb`（方案 A），TX→Channel→RX 全程 pb，无下变频混入
+- 交互式 GUI `p1_demo_ui` (R2018b+ uifigure)，含 7 个可视化 tab + 实时容量提示
+
+### Promote 到 wiki
+
+- `wiki/conclusions.md` 加 #20–22 条（streaming 框架 / 方案 A pb 信道 / Doppler oracle 补偿）
+- `wiki/modules/14_Streaming/14_流式仿真框架.md` 标 P1 完成，补关键调试经验

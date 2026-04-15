@@ -41,6 +41,9 @@ __pycache__/
 .venv/
 venv/
 
+# 14_Streaming session 输出（demo 运行生成的 wav/meta，不入库）
+modules/14_Streaming/sessions/
+
 # Sensitive
 .env
 *.key
