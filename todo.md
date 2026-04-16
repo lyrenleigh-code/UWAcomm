@@ -282,7 +282,7 @@ RX：①LFM相位+训练精估α ②resample补偿 ③LFM精确定时 ④残余C
 | ✅ | **14_Streaming P2 流式帧检测 + 多帧 + GUI** | **完成(2026-04-15)** | 6 文件，hybrid 检测，软判决 LLR FH-MFSK，多帧 GUI 含 uitable 帧明细 |
 | ✅ | **14_Streaming P3.1 统一 modem API + FH-MFSK + SC-FDE** | **完成(2026-04-16)** | `modem_dispatch` 架构 + SC-FDE 抽取 + 3 个 bug 修复 + UI V3(历史/信道拆分/音频监听) |
 | ✅ | **14_Streaming P3.2 OFDM + SC-TDE 统一 API** | **完成(2026-04-16)** | OMP/BEM+crossblock Turbo(OFDM) + GAMP/BEM+turbo_sctde(SC-TDE), 静态6径 0%@15dB+ |
-| 🟡 中 | 14_Streaming P3.3 DSSS + OTFS 统一 API | **待 P3.2** | 按 P3.1 模板抽取 |
+| ✅ | **14_Streaming P3.3 DSSS + OTFS 统一 API** | **完成(2026-04-16)** | Gold31 Rake+DCD(DSSS) + DD域LMMSE Turbo(OTFS), sps=4提速到177bps(DSSS) |
 | 🟡 中 | 14_Streaming P4 帧头/payload 异构调制路由 | **待 P3** | header FH-MFSK + payload 按 scheme 分发 |
 | 🟡 中 | 14_Streaming P5 三进程并发 | **待 P4** | TX/Channel/RX 独立 MATLAB |
 | 🟡 中 | 14_Streaming P6 物理层 AMC | **待 P5** | LFM peak/SNR/delay/Doppler → 自适应切体制 |

@@ -231,10 +231,12 @@ for bi = 1:N_blocks
 end
 La_dec_info   = [];
 bits_decoded  = [];
+eq_syms_iters = cell(1, turbo_iter);
 
 for titer = 1:turbo_iter
     % 1. 逐子载波 MMSE-IC → LLR
     LLR_all = zeros(1, M_total);
+    eq_syms_t = [];
     for bi = 1:N_blocks
         H_eff    = H_cur_blocks{bi} * ofdm_norm;
         var_x_bi = var_x_blks(bi);
@@ -262,7 +264,9 @@ for titer = 1:turbo_iter
         Le_eq_blk(1:2:end) = Lp_I_data;
         Le_eq_blk(2:2:end) = Lp_Q_data;
         LLR_all((bi-1)*M_per_blk+1 : bi*M_per_blk) = Le_eq_blk;
+        eq_syms_t = [eq_syms_t, X_hat_freq(data_idx)]; %#ok<AGROW>
     end
+    eq_syms_iters{titer} = eq_syms_t;
 
     % 2. 解交织 + BCJR
     Le_eq_deint = random_deinterleave(LLR_all, meta.perm_all);
@@ -400,12 +404,7 @@ for bi = 1:N_blocks
 end
 info.pre_eq_syms = pre_eq_syms;
 
-% 均衡后：用最终判决比特反推 QPSK 符号
-constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
-coded_re = conv_encode(bits, codec.gen_polys, codec.constraint_len);
-coded_re = coded_re(1:M_total);
-[inter_re, ~] = random_interleave(coded_re, codec.interleave_seed);
-idx_re = bi2de(reshape(inter_re, 2, []).', 'left-msb') + 1;
-info.post_eq_syms = constellation(idx_re);
+info.post_eq_syms = eq_syms_iters{end};
+info.eq_syms_iters = eq_syms_iters;
 
 end

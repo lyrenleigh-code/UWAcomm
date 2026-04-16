@@ -86,6 +86,34 @@ sys.sctde.num_fb             = 90;
 sys.sctde.lambda             = 0.998;
 sys.sctde.total_bw           = sys.sym_rate * (1 + sys.sctde.rolloff);
 
+%% DSSS 子结构（P3.3 新增）
+sys.dsss.code_poly     = [5, 0];            % Gold 码多项式对 (degree=5, shift=0) — Gold31
+sys.dsss.code_len      = 31;               % 每符号码片数（扩频增益 ~15dB）
+sys.dsss.sps           = 4;                % DSSS 专属 sps（chip_rate=fs/sps=12000, 数据率翻倍）
+sys.dsss.train_len     = 50;               % 训练符号数
+sys.dsss.rolloff       = 0.35;
+sys.dsss.span          = 6;
+sys.dsss.chip_delays   = [0, 1, 3, 5, 8];  % 多径时延（单位：码片）
+sys.dsss.gains_raw     = [1, 0.6*exp(1j*0.3), 0.45*exp(1j*0.9), ...
+                           0.3*exp(1j*1.5), 0.2*exp(1j*2.1)];
+sys.dsss.fading_type   = 'static';
+sys.dsss.fd_hz         = 0;
+sys.dsss.chip_rate     = sys.fs / sys.dsss.sps;        % 12000 chips/s
+sys.dsss.total_bw      = sys.dsss.chip_rate * (1 + 0.35);  % 16200 Hz
+
+%% OTFS 子结构（P3.3 新增）
+sys.otfs.N             = 32;                % 多普勒格点
+sys.otfs.M             = 64;                % 时延格点
+sys.otfs.cp_len        = 32;                % per-subblock CP
+sys.otfs.turbo_iter    = 3;
+sys.otfs.pilot_mode    = 'impulse';         % 'impulse' | 'sequence' | 'superimposed'
+sys.otfs.fading_type   = 'static';
+sys.otfs.fd_hz         = 0;
+sys.otfs.sym_delays    = [0, 1, 3, 5, 8];  % DD 域时延（格点）
+sys.otfs.gains_raw     = [1, 0.6*exp(1j*0.3), 0.45*exp(1j*0.9), ...
+                           0.3*exp(1j*1.5), 0.2*exp(1j*2.1)];
+sys.otfs.total_bw      = sys.sym_rate;      % OTFS 基带带宽 = sym_rate
+
 %% 帧协议
 sys.frame.magic             = uint16(hex2dec('A5C3'));
 sys.frame.header_bytes      = 16;

@@ -326,13 +326,21 @@ info.noise_var        = nv_eq;
 info.sym_offset       = best_off;
 
 % 星座图数据（UI 用）
-info.pre_eq_syms  = rx_sym_recv(T+1:end);
-% 均衡后：用最终判决比特反推
-constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
-coded_re = conv_encode(bits, codec.gen_polys, codec.constraint_len);
-coded_re = coded_re(1:M_coded);
-[inter_re, ~] = random_interleave(coded_re, codec.interleave_seed);
-idx_re = bi2de(reshape(inter_re, 2, []).', 'left-msb') + 1;
-info.post_eq_syms = constellation(idx_re);
+info.pre_eq_syms = rx_sym_recv(T+1:end);
+if exist('iter_info_out', 'var') && isfield(iter_info_out, 'x_hat_per_iter')
+    xh_all = iter_info_out.x_hat_per_iter;
+    info.post_eq_syms = xh_all{end}(T+1:min(end, T+N_dsym));
+    eq_iters = cell(1, length(xh_all));
+    for ki = 1:length(xh_all)
+        eq_iters{ki} = xh_all{ki}(T+1:min(end, T+N_dsym));
+    end
+    info.eq_syms_iters = eq_iters;
+elseif exist('data_eq', 'var')
+    info.post_eq_syms = data_eq;
+    info.eq_syms_iters = {};
+else
+    info.post_eq_syms = [];
+    info.eq_syms_iters = {};
+end
 
 end

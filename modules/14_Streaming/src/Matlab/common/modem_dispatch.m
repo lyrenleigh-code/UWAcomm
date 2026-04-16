@@ -59,8 +59,25 @@ switch key
                 error('modem_dispatch: op 必须为 encode 或 decode，得到 %s', op);
         end
 
-    case {'DSSS', 'OTFS'}
-        error('modem_dispatch: scheme %s 计划在 P3.3 实现', scheme);
+    case 'DSSS'
+        switch lower(op)
+            case 'encode'
+                [varargout{1}, varargout{2}] = modem_encode_dsss(varargin{:});
+            case 'decode'
+                [varargout{1}, varargout{2}] = modem_decode_dsss(varargin{:});
+            otherwise
+                error('modem_dispatch: op 必须为 encode 或 decode，得到 %s', op);
+        end
+
+    case 'OTFS'
+        switch lower(op)
+            case 'encode'
+                [varargout{1}, varargout{2}] = modem_encode_otfs(varargin{:});
+            case 'decode'
+                [varargout{1}, varargout{2}] = modem_decode_otfs(varargin{:});
+            otherwise
+                error('modem_dispatch: op 必须为 encode 或 decode，得到 %s', op);
+        end
 
     otherwise
         error('modem_dispatch: 未知 scheme "%s"', scheme);

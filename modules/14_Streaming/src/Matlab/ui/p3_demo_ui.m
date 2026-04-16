@@ -29,6 +29,7 @@ addpath(fullfile(modules_root, '03_Interleaving',  'src', 'Matlab'));
 addpath(fullfile(modules_root, '05_SpreadSpectrum','src', 'Matlab'));
 addpath(fullfile(modules_root, '06_MultiCarrier',  'src', 'Matlab'));
 addpath(fullfile(modules_root, '07_ChannelEstEq',  'src', 'Matlab'));
+addpath(fullfile(modules_root, '08_Sync',          'src', 'Matlab'));
 addpath(fullfile(modules_root, '09_Waveform',      'src', 'Matlab'));
 addpath(fullfile(modules_root, '12_IterativeProc', 'src', 'Matlab'));
 
@@ -38,7 +39,7 @@ app.proj_root = proj_root;
 app.sys = sys_params_default();
 
 % FIFO（passband real 样本 ring buffer）
-app.fifo_capacity = round(8 * app.sys.fs);
+app.fifo_capacity = round(16 * app.sys.fs);   % 16 秒缓冲（DSSS 低速率信号需要更长）
 app.fifo = zeros(1, app.fifo_capacity);
 app.fifo_write = 0;
 app.fifo_read  = 0;
@@ -50,8 +51,9 @@ app.tx_meta_pending = struct();
 app.tx_h_tap        = [];
 app.tx_pending      = false;
 
-% 噪声底
-app.noise_var_pb = 0.05;
+% 噪声底（由 ref_sig_pwr 和当前 SNR 滑块实时计算）
+app.ref_sig_pwr  = 0.1;          % 参考信号功率（首次 Transmit 后更新为实际值）
+app.noise_var_pb = app.ref_sig_pwr * 10^(-15/10);  % 默认 SNR=15dB
 
 % RX 状态
 app.rx_running = false;
@@ -65,6 +67,7 @@ app.last_text_bits_len = 0;
 app.scope_line = [];
 app.scope_window_s = 0.4;
 app.last_body_bb_rx = [];
+app.tx_body_bb_clean = [];    % TX 干净基带（用于 TX/RX 对比 tab）
 
 % 信号检测
 app.det_status = '空闲';
@@ -110,7 +113,8 @@ sch_panel.RowSpacing = 2;
 uilabel(sch_panel, 'Text', '调制:', 'FontSize', 12, 'HorizontalAlignment', 'right');
 app.scheme_dd = uidropdown(sch_panel, ...
     'Items', {'FH-MFSK (8-FSK 跳频, 非相干)', 'SC-FDE (QPSK + Turbo, 相干)', ...
-              'OFDM (QPSK + Turbo, 相干)', 'SC-TDE (QPSK + Turbo, 相干)'}, ...
+              'OFDM (QPSK + Turbo, 相干)', 'SC-TDE (QPSK + Turbo, 相干)', ...
+              'DSSS (DBPSK + Rake, 非相干)'}, ...
     'Value', 'SC-FDE (QPSK + Turbo, 相干)', ...
     'FontSize', 12, ...
     'ValueChangedFcn', @(~,~) on_scheme_changed());
@@ -168,12 +172,11 @@ tx_grid.RowHeight = {25, 55, 25, 28, 28, 28, 28, 28, 28, 28, 28, 25, '1x'};
 tx_grid.ColumnWidth = {140, '1x'};
 tx_grid.RowSpacing = 4;
 
-% 文本输入
-lbl_txt = uilabel(tx_grid, 'Text', '发射文本:', 'FontWeight', 'bold');
-lbl_txt.Layout.Row = 1;
+% 文本输入 + 容量提示
+app.lbl_txt = uilabel(tx_grid, 'Text', '发射文本 (max ~512B):', 'FontWeight', 'bold');
+app.lbl_txt.Layout.Row = 1;
 app.text_in = uitextarea(tx_grid, ...
-    'Value', sprintf(['Hello 水声通信 P3.1 流式 demo\n' ...
-                      '点击 Transmit 启动一帧发射，RX 持续监听并解调']), ...
+    'Value', 'Hello UWAcomm', ...
     'FontSize', 12);
 app.text_in.Layout.Row = [1 2]; app.text_in.Layout.Column = 2;
 
@@ -307,30 +310,51 @@ app.lbl_rxb = uilabel(info_grid, 'Text', '—', 'FontName','Consolas','FontSize'
 bot = uitabgroup(main); bot.Layout.Row = 3;
 app.tabs = struct();
 
-% 带 axes 的 tab
+% 单 axes tab
 ax_tab_specs = {
     'scope',    '实时通带示波器';
-    'spectrum', '通带频谱';
-    'pre_eq',   '均衡前 / 能量矩阵';
-    'post_eq',  '均衡后 / 软 LLR';
-    'h_td',     '信道(时域)';
-    'h_fd',     '信道(频域)'};
+    'spectrum', '通带频谱'};
 for ti = 1:size(ax_tab_specs,1)
     tab = uitab(bot, 'Title', ax_tab_specs{ti,2});
     tg = uigridlayout(tab, [1 1]); tg.Padding = [8 8 8 8];
     ax = uiaxes(tg);
+    ax.Toolbar.Visible = 'on';
     if ti == 1
         text(ax, 0.5, 0.5, '打开 RX 监听并点 Transmit', ...
-            'Units','normalized','HorizontalAlignment','center', ...
-            'FontSize', 14, 'Color', [0.5 0.5 0.5]);
-    else
-        text(ax, 0.5, 0.5, '解码后显示', ...
             'Units','normalized','HorizontalAlignment','center', ...
             'FontSize', 14, 'Color', [0.5 0.5 0.5]);
     end
     ax.XColor = 'none'; ax.YColor = 'none';
     app.tabs.(ax_tab_specs{ti,1}) = ax;
 end
+
+% 均衡/解调 tab（4 列：Turbo 体制显示迭代星座，非 Turbo 体制显示 LLR/能量等）
+eq_tab = uitab(bot, 'Title', '均衡分析');
+eq_grid = uigridlayout(eq_tab, [1 4]); eq_grid.Padding = [6 6 6 6]; eq_grid.ColumnSpacing = 6;
+app.tabs.pre_eq = uiaxes(eq_grid);  app.tabs.pre_eq.Layout.Column = 1;
+app.tabs.eq_it1 = uiaxes(eq_grid);  app.tabs.eq_it1.Layout.Column = 2;
+app.tabs.eq_mid = uiaxes(eq_grid);  app.tabs.eq_mid.Layout.Column = 3;
+app.tabs.post_eq = uiaxes(eq_grid); app.tabs.post_eq.Layout.Column = 4;
+
+% TX/RX 对比 tab（双行：上 TX，下 RX）
+cmp_tab = uitab(bot, 'Title', 'TX/RX 对比');
+cmp_grid = uigridlayout(cmp_tab, [2 1]); cmp_grid.Padding = [8 8 8 8]; cmp_grid.RowSpacing = 6;
+app.tabs.compare_tx = uiaxes(cmp_grid);
+app.tabs.compare_tx.Toolbar.Visible = 'on';
+app.tabs.compare_tx.Layout.Row = 1;
+app.tabs.compare_rx = uiaxes(cmp_grid);
+app.tabs.compare_rx.Toolbar.Visible = 'on';
+app.tabs.compare_rx.Layout.Row = 2;
+
+% 信道 tab（两列：左时域 右频域，估计 vs 真实对比）
+ch_tab = uitab(bot, 'Title', '信道');
+ch_grid = uigridlayout(ch_tab, [1 2]); ch_grid.Padding = [8 8 8 8]; ch_grid.ColumnSpacing = 10;
+app.tabs.h_td = uiaxes(ch_grid);
+app.tabs.h_td.Toolbar.Visible = 'on';
+app.tabs.h_td.Layout.Column = 1;
+app.tabs.h_fd = uiaxes(ch_grid);
+app.tabs.h_fd.Toolbar.Visible = 'on';
+app.tabs.h_fd.Layout.Column = 2;
 
 % 日志 tab（uitextarea, 无 axes）
 log_tab = uitab(bot, 'Title', '日志');
@@ -362,12 +386,23 @@ end
 
 function on_scheme_changed()
     sch = current_scheme();
-    is_turbo = ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE'});
+    is_turbo = ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE', 'OTFS'});
     is_fhmfsk = strcmp(sch, 'FH-MFSK');
-    show(app.lbl_blk,  is_turbo); show(app.blk_dd,    is_turbo);
+    show(app.lbl_blk,  ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE'}));
+    show(app.blk_dd,   ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE'}));
     show(app.lbl_iter, is_turbo); show(app.iter_edit, is_turbo);
     show(app.lbl_pl,   is_fhmfsk); show(app.pl_dd,    is_fhmfsk);
-    append_log(sprintf('[UI] scheme -> %s', sch));
+    % 更新文本容量提示
+    switch sch
+        case 'SC-FDE',  nb = floor((128*32-2)/8);
+        case 'OFDM',    nb = floor(((256-8)*16-2)/8);
+        case 'SC-TDE',  nb = floor((2000-2)/8);
+        case 'DSSS',    nb = floor((1200-2)/8);
+        case 'FH-MFSK', nb = floor(2192/8);
+        otherwise,       nb = 200;
+    end
+    app.lbl_txt.Text = sprintf('发射文本 (max ~%dB):', nb);
+    append_log(sprintf('[UI] scheme -> %s (max %d bytes)', sch, nb));
 end
 
 function s = current_scheme()
@@ -375,6 +410,8 @@ function s = current_scheme()
     if startsWith(sel, 'SC-FDE'), s = 'SC-FDE';
     elseif startsWith(sel, 'OFDM'), s = 'OFDM';
     elseif startsWith(sel, 'SC-TDE'), s = 'SC-TDE';
+    elseif startsWith(sel, 'DSSS'), s = 'DSSS';
+    elseif startsWith(sel, 'OTFS'), s = 'OTFS';
     else, s = 'FH-MFSK';
     end
 end
@@ -433,11 +470,16 @@ function on_clear()
         delete(app.scope_line); app.scope_line = [];
     end
     cla(app.tabs.scope, 'reset');
+    cla(app.tabs.compare_tx, 'reset');
+    cla(app.tabs.compare_rx, 'reset');
     cla(app.tabs.spectrum, 'reset');
     cla(app.tabs.pre_eq, 'reset');
+    cla(app.tabs.eq_it1, 'reset');
+    cla(app.tabs.eq_mid, 'reset');
     cla(app.tabs.post_eq, 'reset');
     cla(app.tabs.h_td, 'reset');
     cla(app.tabs.h_fd, 'reset');
+    app.tx_body_bb_clean = [];
     append_log('[CLEAR] RX + FIFO + 历史 已清空');
 end
 
@@ -513,6 +555,21 @@ function on_transmit()
             app.sys.sctde.fd_hz       = 0;
             N_data_sym = 2000;
             N_info = N_data_sym - mem;
+        elseif strcmp(sch, 'DSSS')
+            app.sys.dsss.fading_type = 'static';
+            app.sys.dsss.fd_hz       = 0;
+            N_info = 1200;  % ~150 字节(~50 汉字), Gold31@12kchip/s 信号≈6.3s
+        elseif strcmp(sch, 'OTFS')
+            app.sys.otfs.turbo_iter = app.iter_edit.Value;
+            app.sys.otfs.fading_type = 'static';
+            app.sys.otfs.fd_hz       = 0;
+            % OTFS N_info 由数据格点决定
+            pc_tmp = struct('mode', app.sys.otfs.pilot_mode, ...
+                'guard_k', 4, 'guard_l', max(app.sys.otfs.sym_delays)+2, ...
+                'pilot_value', 1);
+            [~,~,~,di_tmp] = otfs_pilot_embed(zeros(1,1), ...
+                app.sys.otfs.N, app.sys.otfs.M, pc_tmp);
+            N_info = length(di_tmp) * 2 / 2 - mem;  % QPSK, R=1/2
         else
             pl = parse_lead_int(app.pl_dd.Value);
             app.sys.frame.payload_bits = pl;
@@ -542,46 +599,69 @@ function on_transmit()
         % --- modem encode ---
         [body_bb, meta_tx] = modem_encode(info_bits, sch, app.sys);
 
-        % --- 基带信道 ---
+        % --- 组装完整物理帧（加 HFM/LFM 前导码）---
+        [frame_bb, frame_meta] = assemble_physical_frame(body_bb, app.sys);
+        body_offset = length(frame_bb) - length(body_bb);  % 前导码占用样本数
+
+        % --- 基带信道（对完整帧施加）---
         [h_tap, ch_label] = build_channel_tap(sch);
-        rx_clean = conv(body_bb, h_tap);
-        rx_clean = rx_clean(1:length(body_bb));
+        frame_ch = conv(frame_bb, h_tap);
+        frame_ch = frame_ch(1:length(frame_bb));
 
         snr_db = app.snr_edit.Value;
         app.tx_meta_pending = meta_tx;
         app.tx_meta_pending.scheme = sch;
+        app.tx_meta_pending.body_offset = body_offset;
         app.tx_h_tap = h_tap;
+        app.tx_body_bb_clean = frame_bb;  % 保存原始帧（无信道无噪声）用于 TX/RX 对比
+
+        % --- FIFO 溢出保护 ---
+        signal_len = length(frame_ch);
+        if ~app.bypass_rf
+            signal_len = round(signal_len * 1.1);
+        end
+        remaining = app.fifo_capacity - app.fifo_write;
+        if remaining < signal_len + round(0.5 * app.sys.fs)
+            app.fifo(:) = 0;
+            if app.bypass_rf, app.fifo = complex(app.fifo); end
+            app.fifo_write = 0;
+            app.fifo_read  = 0;
+            app.last_decode_at = 0;
+            append_log('[FIFO] 容量不足，已重置 FIFO');
+        end
 
         if app.bypass_rf
-            sig_pwr_bb = mean(abs(rx_clean).^2);
+            sig_pwr_bb = mean(abs(frame_ch).^2);
             nv_bb = sig_pwr_bb * 10^(-snr_db/10);
-            app.noise_var_pb = nv_bb;
-            app.tx_signal = rx_clean;
+            app.ref_sig_pwr = sig_pwr_bb;
+            app.tx_signal = frame_ch;   % FIFO 推入的是信道后信号
             app.tx_signal_start = app.fifo_write + 1;
             app.tx_pending = true;
             app.tx_meta_pending.noise_var = nv_bb;
             app.tx_meta_pending.frame_start_write = app.tx_signal_start;
-            app.tx_meta_pending.frame_pb_samples  = length(rx_clean);
-            append_log(sprintf('[TX-BYPASS] %s %s body=%d, nv=%.3e (SNR=%gdB)', ...
-                sch, ch_label, length(body_bb), nv_bb, snr_db));
+            app.tx_meta_pending.frame_pb_samples  = length(frame_ch);
+            append_log(sprintf('[TX-BYPASS] %s %s frame=%d(pre=%d+body=%d), nv=%.3e (SNR=%gdB)', ...
+                sch, ch_label, length(frame_ch), body_offset, length(body_bb), nv_bb, snr_db));
         else
-            [tx_pb, ~] = upconvert(rx_clean, app.sys.fs, app.sys.fc);
+            [tx_pb, ~] = upconvert(frame_ch, app.sys.fs, app.sys.fc);
             tx_pb = real(tx_pb);
             sig_pwr_pb = mean(tx_pb.^2);
-            app.noise_var_pb = sig_pwr_pb * 10^(-snr_db/10);
+            app.ref_sig_pwr = sig_pwr_pb;
             app.tx_signal       = tx_pb;
             app.tx_signal_start = app.fifo_write + 1;
             app.tx_pending      = true;
             bw_tx = downconv_bandwidth(sch);
-            app.tx_meta_pending.noise_var = 8 * app.noise_var_pb * bw_tx / app.sys.fs;
+            nv_pb = sig_pwr_pb * 10^(-snr_db/10);
+            app.tx_meta_pending.noise_var = 8 * nv_pb * bw_tx / app.sys.fs;
             app.tx_meta_pending.frame_start_write = app.tx_signal_start;
             app.tx_meta_pending.frame_pb_samples  = length(tx_pb);
-            append_log(sprintf('[TX] %s %s body=%d pb=%d, nv=%.3e (SNR=%gdB)', ...
-                sch, ch_label, length(body_bb), length(tx_pb), app.noise_var_pb, snr_db));
+            append_log(sprintf('[TX] %s %s frame=%d(pre=%d+body=%d) pb=%d, nv=%.3e (SNR=%gdB)', ...
+                sch, ch_label, length(frame_ch), body_offset, length(body_bb), ...
+                length(tx_pb), nv_pb, snr_db));
         end
 
         % --- 更新 TX 信号信息面板 ---
-        update_txinfo_panel(sch, body_bb, h_tap, ch_label, snr_db, N_info, info_bits);
+        update_txinfo_panel(sch, body_bb, frame_bb, body_offset, h_tap, ch_label, snr_db, N_info);
         set_status('信号注入中...', [0.2 0.5 0.7]);
     catch ME
         append_log(sprintf('[TX-ERR] %s', ME.message));
@@ -591,43 +671,49 @@ function on_transmit()
     end
 end
 
-function update_txinfo_panel(sch, body_bb, h_tap, ch_label, snr_db, N_info, info_bits)
-    % 计算信号统计并显示在 TX 信息面板
-    dur_s = length(body_bb) / app.sys.sym_rate;
+function update_txinfo_panel(sch, body_bb, frame_bb, body_offset, h_tap, ch_label, snr_db, N_info)
+    if strcmp(sch, 'OTFS')
+        bb_fs = app.sys.sym_rate;
+    else
+        bb_fs = app.sys.fs;
+    end
+    frame_dur = length(frame_bb) / bb_fs;
+    body_dur  = length(body_bb) / bb_fs;
+    pre_dur   = body_offset / bb_fs;
+    data_rate = N_info / body_dur;
+
     if strcmp(sch, 'SC-FDE')
         bw_hz = app.sys.sym_rate * (1 + app.sys.scfde.rolloff);
         sym_count = sprintf('%d blk x %d sym', ...
             app.sys.scfde.N_blocks, app.sys.scfde.blk_fft);
-        code_rate = sprintf('1/%d (conv)', app.sys.codec.constraint_len);
-        total_coded = length(body_bb);
     elseif strcmp(sch, 'OFDM')
         bw_hz = app.sys.sym_rate * (1 + app.sys.ofdm.rolloff);
         sym_count = sprintf('%d blk x %d FFT', ...
             app.sys.ofdm.N_blocks, app.sys.ofdm.blk_fft);
-        code_rate = sprintf('1/%d (conv)', app.sys.codec.constraint_len);
-        total_coded = length(body_bb);
     elseif strcmp(sch, 'SC-TDE')
         bw_hz = app.sys.sym_rate * (1 + app.sys.sctde.rolloff);
         sym_count = sprintf('train=%d + data', app.sys.sctde.train_len);
-        code_rate = sprintf('1/%d (conv)', app.sys.codec.constraint_len);
-        total_coded = length(body_bb);
+    elseif strcmp(sch, 'DSSS')
+        bw_hz = app.sys.dsss.total_bw;
+        sym_count = sprintf('train=%d + data, Gold(%d)', ...
+            app.sys.dsss.train_len, app.sys.dsss.code_len);
+    elseif strcmp(sch, 'OTFS')
+        bw_hz = app.sys.otfs.total_bw;
+        sym_count = sprintf('N=%d x M=%d', app.sys.otfs.N, app.sys.otfs.M);
     else
         bw_hz = app.sys.fhmfsk.total_bw;
-        n_hops = floor(length(body_bb) / (app.sys.fhmfsk.samples_per_sym));
-        sym_count = sprintf('%d hops', n_hops);
-        code_rate = '—';
-        total_coded = N_info;
+        sym_count = sprintf('%d hops', floor(length(body_bb)/app.sys.fhmfsk.samples_per_sym));
     end
     lines = {
-        sprintf('体制:       %s', sch);
-        sprintf('信号时长:   %.3f s', dur_s);
-        sprintf('带宽:       %.0f Hz', bw_hz);
-        sprintf('样本数:     %d', length(body_bb));
-        sprintf('符号数:     %s', sym_count);
-        sprintf('码率:       %s', code_rate);
-        sprintf('信息比特:   %d / 编码 %d', N_info, total_coded);
-        sprintf('SNR:        %g dB', snr_db);
-        sprintf('信道:       %s (%d 抽头)', ch_label, length(h_tap));
+        sprintf('体制:     %s', sch);
+        sprintf('帧时长:   %.2fs (前导%.2fs + 数据%.2fs)', frame_dur, pre_dur, body_dur);
+        sprintf('帧结构:   [HFM+|g|HFM-|g|LFM|g|LFM|g|body]');
+        sprintf('数据速率: %.1f bps  (%.1f Bytes/s)', data_rate, data_rate/8);
+        sprintf('带宽:     %.0f Hz', bw_hz);
+        sprintf('符号:     %s', sym_count);
+        sprintf('信息比特: %d (max %d Bytes)', N_info, floor(N_info/8));
+        sprintf('SNR:      %g dB', snr_db);
+        sprintf('信道:     %s (%d 抽头)', ch_label, length(h_tap));
     };
     app.txinfo_area.Value = lines;
 end
@@ -635,6 +721,9 @@ end
 function on_tick()
     try
         if ~app.rx_running, return; end
+
+        % --- 实时 SNR → 噪声底（滑块改变立即生效）---
+        app.noise_var_pb = app.ref_sig_pwr * 10^(-app.snr_edit.Value / 10);
 
         % 监听模式下 chunk = tick 周期（1:1 实时），否则 50ms（2x 加速）
         if app.audio_monitor
@@ -769,15 +858,16 @@ function try_decode_frame()
     rx_seg = app.fifo(fs_pos : fs_pos + fn - 1);
     sch = app.tx_meta_pending.scheme;
     meta = app.tx_meta_pending;
+    body_offset = meta.body_offset;  % 前导码样本数
 
     if app.bypass_rf
-        body_bb_rx = rx_seg;
+        % 剥离前导码，只取 body 部分给 decoder
+        body_bb_rx = rx_seg(body_offset+1 : end);
     else
         bb_use = downconv_bandwidth(sch);
-        [body_bb_rx, ~] = downconvert(rx_seg, app.sys.fs, app.sys.fc, bb_use);
-        if length(body_bb_rx) > meta.frame_pb_samples
-            body_bb_rx = body_bb_rx(1:meta.frame_pb_samples);
-        end
+        [full_bb_rx, ~] = downconvert(rx_seg, app.sys.fs, app.sys.fc, bb_use);
+        % 剥离前导码（下变频后样本对齐）
+        body_bb_rx = full_bb_rx(body_offset+1 : end);
         if ~isfield(meta, 'noise_var') || isempty(meta.noise_var) || meta.noise_var <= 0
             n_noise_samp = min(round(0.1 * app.sys.fs), fs_pos - 1);
             if n_noise_samp >= round(0.02 * app.sys.fs)
@@ -786,7 +876,6 @@ function try_decode_frame()
                 skip = max(1, round(0.05 * length(noise_bb_seg)));
                 nv_meas = var(noise_bb_seg(skip:end));
                 meta.noise_var = max(nv_meas, 1e-12);
-                append_log(sprintf('[NV] 兜底实测 bb nv=%.3e', nv_meas));
             end
         end
     end
@@ -831,6 +920,9 @@ function try_decode_frame()
     entry.h_tap     = app.tx_h_tap;
     entry.meta      = meta;
     entry.pb_seg    = pb_seg;
+    entry.tx_body_bb_clean = app.tx_body_bb_clean;  % TX 干净基带（对比用）
+    entry.tx_signal = app.tx_signal;                 % TX 通带信号（对比用）
+    entry.bypass_rf = app.bypass_rf;                 % 记录当时的旁路模式
     entry.text_bits_len = app.last_text_bits_len;
 
     app.history{end+1} = entry;
@@ -879,6 +971,10 @@ function bw = downconv_bandwidth(sch)
         bw = app.sys.sym_rate * (1 + app.sys.ofdm.rolloff);
     elseif strcmp(sch, 'SC-TDE')
         bw = app.sys.sym_rate * (1 + app.sys.sctde.rolloff);
+    elseif strcmp(sch, 'DSSS')
+        bw = app.sys.dsss.total_bw;
+    elseif strcmp(sch, 'OTFS')
+        bw = app.sys.otfs.total_bw;
     else
         bw = app.sys.fhmfsk.total_bw;
     end
@@ -886,14 +982,42 @@ end
 
 function [h_tap, label] = build_channel_tap(sch)
     preset = app.preset_dd.Value;
-    if ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE'})
+    if startsWith(preset, 'AWGN')
+        h_tap = 1; label = 'AWGN'; return;
+    end
+
+    % DSSS 使用码片时延，OTFS 使用 DD 域格点时延，其余使用符号时延
+    if strcmp(sch, 'DSSS')
+        % DSSS: body_bb 采样率 = chip_rate * sps
+        % 信道时延以码片为单位，映射到样本 = chip_delays * sps
+        chip_d = app.sys.dsss.chip_delays;
+        gains  = app.sys.dsss.gains_raw;
+        gains  = gains / sqrt(sum(abs(gains).^2));
+        delays_samp = chip_d * app.sys.dsss.sps;
+        h_tap = zeros(1, max(delays_samp) + 1);
+        for p = 1:length(delays_samp)
+            h_tap(delays_samp(p)+1) = gains(p);
+        end
+        label = sprintf('DSSS 5径, %d 抽头', length(h_tap));
+        return;
+    elseif strcmp(sch, 'OTFS')
+        % OTFS: body_bb 采样率 = sym_rate, 时延以 DD 格点（=1/sym_rate 样本）为单位
+        sym_d = app.sys.otfs.sym_delays;
+        gains = app.sys.otfs.gains_raw;
+        delays_samp = sym_d;  % 1:1 映射
+        h_tap = zeros(1, max(delays_samp) + 1);
+        for p = 1:length(delays_samp)
+            h_tap(delays_samp(p)+1) = gains(p);
+        end
+        h_tap = h_tap / norm(h_tap);
+        label = sprintf('OTFS 5径, %d 抽头', length(h_tap));
+        return;
+    elseif ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE'})
         sps_use = app.sys.sps;
     else
         sps_use = app.sys.fhmfsk.samples_per_sym / 8;
     end
-    if startsWith(preset, 'AWGN')
-        h_tap = 1; label = 'AWGN'; return;
-    end
+
     if contains(preset, '6径 标准')
         sym_d = [0, 5, 15, 40, 60, 90];
         gains = [1, 0.6*exp(1j*0.3), 0.45*exp(1j*0.9), ...
@@ -949,11 +1073,20 @@ function update_rx_panel(sch, info, ber, n_err, n)
 
     app.lbl_esnr.Text = sprintf('%.2f dB', info.estimated_snr);
     app.lbl_eber.Text = sprintf('%.3e', info.estimated_ber);
-    app.lbl_iter_show.Text = sprintf('%d', info.turbo_iter);
-    if info.convergence_flag == 1
-        app.lbl_conv.Text = '1 (收敛)'; app.lbl_conv.FontColor = [0.1 0.6 0.1];
+    if info.turbo_iter <= 1
+        app.lbl_iter_show.Text = '—';
     else
-        app.lbl_conv.Text = '0 (未收敛)'; app.lbl_conv.FontColor = [0.7 0.3 0.1];
+        app.lbl_iter_show.Text = sprintf('%d', info.turbo_iter);
+    end
+    if info.convergence_flag == 1
+        if info.turbo_iter <= 1
+            app.lbl_conv.Text = 'OK'; app.lbl_conv.FontColor = [0.1 0.6 0.1];
+        else
+            app.lbl_conv.Text = sprintf('收敛 (iter %d)', info.turbo_iter);
+            app.lbl_conv.FontColor = [0.1 0.6 0.1];
+        end
+    else
+        app.lbl_conv.Text = '未收敛'; app.lbl_conv.FontColor = [0.7 0.3 0.1];
     end
     if isfield(info, 'noise_var')
         app.lbl_nv.Text = sprintf('%.3e', info.noise_var);
@@ -976,105 +1109,256 @@ function update_tabs_from_entry(entry)
     meta  = entry.meta;
     fs_val = app.sys.fs;
 
-    % --- 频谱 ---
+    % --- TX/RX 对比（双行：上 TX 原始，下 RX 含信道+噪声）---
+    ax_tx = app.tabs.compare_tx; cla(ax_tx,'reset');
+    ax_rx = app.tabs.compare_rx; cla(ax_rx,'reset');
+    try
+        % TX 始终用原始帧（无信道无噪声）
+        tx_clean = entry.tx_body_bb_clean;  % = frame_bb
+        rx_cmp   = entry.pb_seg;            % FIFO 提取（信道+噪声）
+        if isfield(entry, 'bypass_rf') && entry.bypass_rf
+            tx_cmp = real(tx_clean);
+            rx_cmp = real(rx_cmp);
+            sr = app.sys.fs;
+            if strcmp(sch, 'OTFS'), sr = app.sys.sym_rate; end
+            lbl_mode = '基带 Re';
+        else
+            % 非 bypass：TX 原始帧上变频到通带（无信道）
+            [tx_pb_clean, ~] = upconvert(tx_clean, app.sys.fs, app.sys.fc);
+            tx_cmp = real(tx_pb_clean);
+            rx_cmp = rx_cmp;   % 已是通带实信号
+            sr = fs_val;
+            lbl_mode = '通带';
+        end
+        if ~isempty(tx_cmp) && ~isempty(rx_cmp)
+            n_show = min(length(tx_cmp), length(rx_cmp));
+            t_s = (0:n_show-1) / sr;
+            plot(ax_tx, t_s, tx_cmp(1:n_show), 'b-', 'LineWidth', 0.5);
+            title(ax_tx, sprintf('TX %s（%.2fs, %d 样本）', lbl_mode, t_s(end), n_show));
+            xlabel(ax_tx, 's'); ylabel(ax_tx, 'amplitude');
+            grid(ax_tx, 'on'); ax_tx.XColor='k'; ax_tx.YColor='k';
+            plot(ax_rx, t_s, rx_cmp(1:n_show), 'Color', [0.8 0.2 0.2], 'LineWidth', 0.5);
+            title(ax_rx, sprintf('RX %s（含噪声+信道）', lbl_mode));
+            xlabel(ax_rx, 's'); ylabel(ax_rx, 'amplitude');
+            grid(ax_rx, 'on'); ax_rx.XColor='k'; ax_rx.YColor='k';
+            linkaxes([ax_tx, ax_rx], 'x');
+        end
+    catch
+    end
+
+    % --- 频谱（仅正频率）---
     ax = app.tabs.spectrum; cla(ax,'reset');
     rx_seg2 = entry.pb_seg;
     Nfft = 8192;
-    P = 20*log10(abs(fftshift(fft(rx_seg2, Nfft))) + 1e-9);
-    f = (-Nfft/2:Nfft/2-1) * fs_val / Nfft / 1000;
-    plot(ax, f, P, 'b'); grid(ax, 'on');
-    xlabel(ax, 'freq (kHz)'); ylabel(ax, 'dB');
+    Pf = abs(fft(rx_seg2, Nfft));
+    f_khz = (0:Nfft/2) / Nfft * fs_val / 1000;
+    P_pos = 20*log10(Pf(1:Nfft/2+1) + 1e-9);
+    plot(ax, f_khz, P_pos, 'b', 'LineWidth', 0.8); grid(ax, 'on');
+    xlabel(ax, '频率 (kHz)'); ylabel(ax, 'dB');
     title(ax, '通带频谱（接收信号）');
-    xline(ax,  app.sys.fc/1000, 'r--', 'fc');
-    xline(ax, -app.sys.fc/1000, 'r--');
+    xline(ax, app.sys.fc/1000, 'r--', 'fc');
+    bw_rx = downconv_bandwidth(sch);
+    xline(ax, (app.sys.fc - bw_rx/2)/1000, 'g:', 'f_L');
+    xline(ax, (app.sys.fc + bw_rx/2)/1000, 'g:', 'f_H');
+    xlim(ax, [0, fs_val/2/1000]);
     ax.XColor = 'k'; ax.YColor = 'k';
 
-    % --- 均衡前 ---
-    ax = app.tabs.pre_eq; cla(ax,'reset');
-    if ismember(sch, {'SC-FDE','OFDM','SC-TDE'}) && isfield(info,'pre_eq_syms') && ~isempty(info.pre_eq_syms)
-        s = info.pre_eq_syms;
-        ns = min(2000, length(s));
-        scatter(ax, real(s(1:ns)), imag(s(1:ns)), 8, [0.3 0.4 0.7], 'filled', ...
-            'MarkerFaceAlpha', 0.4);
-        axis(ax, 'equal');
-        title(ax, sprintf('均衡前星座 (%d sym)', ns));
-        xlabel(ax,'I'); ylabel(ax,'Q'); grid(ax,'on');
-    elseif strcmp(sch,'FH-MFSK') && isfield(info,'energy_matrix')
-        E = info.energy_matrix;
-        imagesc(ax, 10*log10(E.' + 1e-12)); axis(ax,'tight');
-        xlabel(ax,'符号 #'); ylabel(ax,'频点 #');
-        title(ax,'能量矩阵 (dB)'); colorbar(ax);
-    end
-    ax.XColor='k'; ax.YColor='k';
+    % --- 均衡分析（4 列，按体制类型分派）---
+    ax_cells = {app.tabs.pre_eq, app.tabs.eq_it1, app.tabs.eq_mid, app.tabs.post_eq};
+    for k = 1:4, cla(ax_cells{k}, 'reset'); end
+    ref_qpsk = [1+1j,1-1j,-1+1j,-1-1j]/sqrt(2);
+    ns_max = 3000;
+    has_iters = isfield(info, 'eq_syms_iters') && ~isempty(info.eq_syms_iters);
 
-    % --- 均衡后 ---
-    ax = app.tabs.post_eq; cla(ax,'reset');
-    if ismember(sch, {'SC-FDE','OFDM','SC-TDE'}) && isfield(info,'post_eq_syms') && ~isempty(info.post_eq_syms)
-        s = info.post_eq_syms;
-        ns = min(2000, length(s));
-        ref = [1+1j,1-1j,-1+1j,-1-1j]/sqrt(2);
-        scatter(ax, real(s(1:ns)), imag(s(1:ns)), 12, [0.7 0.2 0.3], 'filled', ...
-            'MarkerFaceAlpha', 0.5); hold(ax,'on');
-        plot(ax, real(ref), imag(ref), 'kx', 'MarkerSize', 14, 'LineWidth', 2);
-        axis(ax,'equal');
-        title(ax, sprintf('均衡后星座 (Turbo, %d sym)', ns));
-        xlabel(ax,'I'); ylabel(ax,'Q'); grid(ax,'on'); hold(ax,'off');
-    elseif strcmp(sch,'FH-MFSK') && isfield(info,'soft_llr')
-        L = info.soft_llr;
-        histogram(ax, L, 60, 'FaceColor', [0.4 0.6 0.8]);
-        xlabel(ax,'LLR'); ylabel(ax,'count');
-        title(ax, sprintf('软判决 LLR (median |LLR|=%.2f)', median(abs(L))));
-        grid(ax,'on');
-    end
-    ax.XColor='k'; ax.YColor='k';
-
-    % --- 信道(时域) ---
-    ax = app.tabs.h_td; cla(ax,'reset');
-    if length(h_tap) <= 1
-        text(ax, 0.5, 0.5, 'AWGN — 无信道抽头', ...
-            'Units','normalized','HorizontalAlignment','center','FontSize',13);
-        ax.XColor='none'; ax.YColor='none';
-    else
-        stem(ax, 0:length(h_tap)-1, abs(h_tap), 'filled', 'LineWidth', 1.5, ...
-            'Color', [0.2 0.4 0.7]);
-        xlabel(ax, '抽头索引 (样本)'); ylabel(ax, '|h_{tap}|');
-        title(ax, sprintf('信道冲激响应 (%d 抽头)', length(h_tap)));
-        grid(ax, 'on');
-        ax.XColor = 'k'; ax.YColor = 'k';
-    end
-
-    % --- 信道(频域) ---
-    ax = app.tabs.h_fd; cla(ax,'reset');
-    if length(h_tap) <= 1
-        text(ax, 0.5, 0.5, 'AWGN — 无频响', ...
-            'Units','normalized','HorizontalAlignment','center','FontSize',13);
-        ax.XColor='none'; ax.YColor='none';
-    else
-        if ismember(sch, {'SC-FDE','OFDM','SC-TDE'}) && isfield(info,'H_est_block1')
-            H = info.H_est_block1;
-            Nf = length(H);
-            f_norm = (0:Nf-1)/Nf - 0.5;
-            plot(ax, f_norm, abs(fftshift(H)), 'r-', 'LineWidth', 1.2);
-            hold(ax, 'on');
-            % 叠加理想信道频响做对比
-            H_true = fft(h_tap, Nf);
-            plot(ax, f_norm, abs(fftshift(H_true)), 'b--', 'LineWidth', 1.0);
-            hold(ax, 'off');
-            xlabel(ax, '归一化频率'); ylabel(ax, '|H(f)|');
-            title(ax, '信道频响: 估计(红) vs 真实(蓝虚线)');
-            legend(ax, 'H_{est}', 'H_{true}', 'Location', 'best');
-            grid(ax, 'on');
-        else
-            % 仅真实信道频响
-            Nf = max(256, length(h_tap));
-            H_true = fft(h_tap, Nf);
-            f_norm = (0:Nf-1)/Nf - 0.5;
-            plot(ax, f_norm, abs(fftshift(H_true)), 'b-', 'LineWidth', 1.2);
-            xlabel(ax, '归一化频率'); ylabel(ax, '|H(f)|');
-            title(ax, sprintf('信道频响 (%d 抽头)', length(h_tap)));
-            grid(ax, 'on');
+    if strcmp(sch, 'FH-MFSK')
+        % ---- FH-MFSK：能量矩阵 | 软 LLR 直方图 | LLR 散点 | 判决结果 ----
+        if isfield(info, 'energy_matrix')
+            ax = ax_cells{1};
+            imagesc(ax, 10*log10(info.energy_matrix.' + 1e-12)); axis(ax,'tight');
+            xlabel(ax,'符号 #'); ylabel(ax,'频点 #');
+            title(ax,'能量矩阵 (dB)'); colorbar(ax);
+            ax.XColor='k'; ax.YColor='k';
         end
-        ax.XColor = 'k'; ax.YColor = 'k';
+        if isfield(info, 'soft_llr')
+            L = info.soft_llr;
+            ax = ax_cells{2};
+            histogram(ax, L, 60, 'FaceColor', [0.4 0.6 0.8]);
+            xlabel(ax,'LLR'); ylabel(ax,'count');
+            title(ax, sprintf('软判决 LLR (med=%.1f)', median(abs(L))));
+            grid(ax,'on'); ax.XColor='k'; ax.YColor='k';
+
+            ax = ax_cells{3};
+            plot(ax, 1:length(L), L, '.', 'MarkerSize', 3, 'Color', [0.3 0.5 0.7]);
+            xlabel(ax,'bit #'); ylabel(ax,'LLR');
+            title(ax,'LLR 序列'); grid(ax,'on');
+            ax.XColor='k'; ax.YColor='k';
+        end
+        ax = ax_cells{4};
+        text(ax, 0.5, 0.5, sprintf('FH-MFSK\n无星座图\nBER=%.3f%%', entry.ber*100), ...
+            'Units','normalized','HorizontalAlignment','center','FontSize',12);
+        ax.XColor='none'; ax.YColor='none';
+
+    elseif strcmp(sch, 'DSSS')
+        % ---- DSSS：Rake 输出(BPSK) | 差分相关 | LLR | 判决 ----
+        if isfield(info, 'pre_eq_syms') && ~isempty(info.pre_eq_syms)
+            ax = ax_cells{1};
+            s = info.pre_eq_syms; ns = min(ns_max, length(s));
+            plot(ax, real(s(1:ns)), imag(s(1:ns)), '.', 'MarkerSize', 4, 'Color', [0.3 0.4 0.7]);
+            hold(ax,'on'); plot(ax, [-1 1], [0 0], 'rx', 'MarkerSize', 12, 'LineWidth', 2); hold(ax,'off');
+            axis(ax, 'equal'); title(ax, 'Rake 输出(DBPSK)');
+            xlabel(ax,'I'); ylabel(ax,'Q'); grid(ax,'on');
+            ax.XColor='k'; ax.YColor='k';
+        end
+        if isfield(info, 'post_eq_syms') && ~isempty(info.post_eq_syms)
+            ax = ax_cells{2};
+            s = info.post_eq_syms; ns = min(ns_max, length(s));
+            plot(ax, real(s(1:ns)), imag(s(1:ns)), '.', 'MarkerSize', 4, 'Color', [0.5 0.3 0.6]);
+            hold(ax,'on'); plot(ax, [-1 1], [0 0], 'rx', 'MarkerSize', 12, 'LineWidth', 2); hold(ax,'off');
+            axis(ax, 'equal'); title(ax, '差分检测后');
+            xlabel(ax,'I'); ylabel(ax,'Q'); grid(ax,'on');
+            ax.XColor='k'; ax.YColor='k';
+        end
+        ax = ax_cells{3};
+        text(ax, 0.5, 0.5, sprintf('DSSS Gold31\n无Turbo迭代\n单次 Rake+DCD'), ...
+            'Units','normalized','HorizontalAlignment','center','FontSize',11);
+        ax.XColor='none'; ax.YColor='none';
+        ax = ax_cells{4};
+        text(ax, 0.5, 0.5, sprintf('BER=%.3f%%\nSNR=%.1fdB', entry.ber*100, info.estimated_snr), ...
+            'Units','normalized','HorizontalAlignment','center','FontSize',13, ...
+            'FontWeight','bold', 'Color', [0.1 0.5 0.1]);
+        ax.XColor='none'; ax.YColor='none';
+
+    else
+        % ---- Turbo 体制（SC-FDE/OFDM/SC-TDE/OTFS）：迭代星座 ----
+        if has_iters
+            n_it = length(info.eq_syms_iters);
+            if n_it >= 4
+                sel = [1, round(n_it/3), round(2*n_it/3), n_it];
+            elseif n_it == 3
+                sel = [1, 2, 2, 3];
+            elseif n_it == 2
+                sel = [1, 1, 2, 2];
+            else
+                sel = [1, 1, 1, 1];
+            end
+        end
+
+        % 列 1：均衡前
+        ax = ax_cells{1};
+        if isfield(info,'pre_eq_syms') && ~isempty(info.pre_eq_syms)
+            s = info.pre_eq_syms; ns = min(ns_max, length(s));
+            scatter(ax, real(s(1:ns)), imag(s(1:ns)), 5, [0.3 0.4 0.7], 'filled', 'MarkerFaceAlpha', 0.3);
+            hold(ax,'on'); plot(ax, real(ref_qpsk), imag(ref_qpsk), 'kx', 'MarkerSize', 10, 'LineWidth', 2); hold(ax,'off');
+            axis(ax, 'equal'); title(ax, '均衡前'); xlabel(ax,'I'); ylabel(ax,'Q'); grid(ax,'on');
+        end
+        ax.XColor='k'; ax.YColor='k';
+
+        % 列 2/3/4：迭代过程
+        for ci = 2:4
+            ax = ax_cells{ci};
+            if has_iters && sel(ci) <= length(info.eq_syms_iters)
+                it_idx = sel(ci);
+                s = info.eq_syms_iters{it_idx}; ns = min(ns_max, length(s));
+                scatter(ax, real(s(1:ns)), imag(s(1:ns)), 5, [0.3 0.4 0.7], 'filled', 'MarkerFaceAlpha', 0.4);
+                hold(ax,'on'); plot(ax, real(ref_qpsk), imag(ref_qpsk), 'kx', 'MarkerSize', 10, 'LineWidth', 2); hold(ax,'off');
+                axis(ax, 'equal');
+                if ci == 4
+                    title(ax, sprintf('iter %d (末)', it_idx));
+                else
+                    title(ax, sprintf('iter %d', it_idx));
+                end
+                xlabel(ax,'I'); grid(ax,'on');
+            elseif isfield(info,'post_eq_syms') && ~isempty(info.post_eq_syms)
+                s = info.post_eq_syms; ns = min(ns_max, length(s));
+                scatter(ax, real(s(1:ns)), imag(s(1:ns)), 5, [0.3 0.4 0.7], 'filled', 'MarkerFaceAlpha', 0.4);
+                hold(ax,'on'); plot(ax, real(ref_qpsk), imag(ref_qpsk), 'kx', 'MarkerSize', 10, 'LineWidth', 2); hold(ax,'off');
+                axis(ax, 'equal'); title(ax, '均衡后'); xlabel(ax,'I'); grid(ax,'on');
+            end
+            ax.XColor='k'; ax.YColor='k';
+        end
+    end
+
+    % --- 信道（左：时域 CIR，右：频响，均含估计 vs 真实对比）---
+    ax_td = app.tabs.h_td; cla(ax_td,'reset');
+    ax_fd = app.tabs.h_fd; cla(ax_fd,'reset');
+    if length(h_tap) <= 1
+        text(ax_td, 0.5, 0.5, 'AWGN', 'Units','normalized', ...
+            'HorizontalAlignment','center','FontSize',13);
+        text(ax_fd, 0.5, 0.5, 'AWGN', 'Units','normalized', ...
+            'HorizontalAlignment','center','FontSize',13);
+        ax_td.XColor='none'; ax_td.YColor='none';
+        ax_fd.XColor='none'; ax_fd.YColor='none';
+    else
+        % ===== 确定采样率（h_tap 在哪个速率）=====
+        if strcmp(sch, 'DSSS')
+            h_fs = app.sys.fs;  % DSSS h_tap at sample rate (chip_rate * sps)
+        elseif strcmp(sch, 'OTFS')
+            h_fs = app.sys.sym_rate;
+        else
+            h_fs = app.sys.fs;  % SC-FDE/OFDM/SC-TDE h_tap at sample rate
+        end
+
+        % ===== 左列：时域 CIR（x 轴 = 时间 ms）=====
+        t_true_ms = (0:length(h_tap)-1) / h_fs * 1000;
+        stem(ax_td, t_true_ms, abs(h_tap), 'filled', 'LineWidth', 1.5, ...
+            'Color', [0.2 0.5 0.8], 'MarkerSize', 5);
+        hold(ax_td, 'on');
+        has_est_td = false;
+        if strcmp(sch, 'DSSS') && isfield(info, 'h_est') && isfield(info, 'chip_delays')
+            t_est_ms = info.chip_delays * app.sys.dsss.sps / h_fs * 1000;
+            stem(ax_td, t_est_ms, abs(info.h_est), 'LineWidth', 1.2, ...
+                'Color', [0.8 0.2 0.2], 'MarkerSize', 6);
+            has_est_td = true;
+        elseif ismember(sch, {'SC-FDE','OFDM','SC-TDE'}) && isfield(info, 'H_est_block1')
+            h_est_td = ifft(info.H_est_block1);
+            t_est_ms = (0:length(h_est_td)-1) / app.sys.sym_rate * 1000;
+            stem(ax_td, t_est_ms, abs(h_est_td), 'LineWidth', 1.2, ...
+                'Color', [0.8 0.2 0.2], 'MarkerSize', 4);
+            has_est_td = true;
+        end
+        hold(ax_td, 'off');
+        xlabel(ax_td, '时延 (ms)'); ylabel(ax_td, '|h|');
+        title(ax_td, '时域 CIR');
+        if has_est_td
+            legend(ax_td, '真实', '估计', 'Location', 'best');
+        end
+        grid(ax_td, 'on'); ax_td.XColor='k'; ax_td.YColor='k';
+
+        % ===== 右列：频域响应（以接收端带宽为窗口）=====
+        bw_rx = downconv_bandwidth(sch);  % 接收端信号带宽 (Hz)
+        Nf = 512;
+        % 真实信道在信号带宽范围画
+        H_true = fft(h_tap, Nf);
+        f_hz = (0:Nf-1)/Nf * h_fs - h_fs/2;
+        plot(ax_fd, f_hz/1000, 20*log10(abs(fftshift(H_true))+1e-9), 'b-', 'LineWidth', 1.2);
+        hold(ax_fd, 'on');
+        has_est_fd = false;
+        if ismember(sch, {'SC-FDE','OFDM','SC-TDE'}) && isfield(info, 'H_est_block1')
+            H_est = info.H_est_block1;
+            Nf_est = length(H_est);
+            f_est_hz = (0:Nf_est-1)/Nf_est * app.sys.sym_rate - app.sys.sym_rate/2;
+            plot(ax_fd, f_est_hz/1000, 20*log10(abs(fftshift(H_est))+1e-9), 'r--', 'LineWidth', 1.0);
+            has_est_fd = true;
+        elseif strcmp(sch, 'DSSS') && isfield(info, 'h_est') && isfield(info, 'chip_delays')
+            h_est_full = zeros(1, Nf);
+            est_samp = info.chip_delays * app.sys.dsss.sps;
+            for p = 1:length(est_samp)
+                if est_samp(p)+1 <= Nf
+                    h_est_full(est_samp(p)+1) = info.h_est(p);
+                end
+            end
+            H_est_d = fft(h_est_full, Nf);
+            plot(ax_fd, f_hz/1000, 20*log10(abs(fftshift(H_est_d))+1e-9), 'r--', 'LineWidth', 1.0);
+            has_est_fd = true;
+        end
+        hold(ax_fd, 'off');
+        xlim(ax_fd, [-bw_rx/2/1000 * 1.1, bw_rx/2/1000 * 1.1]);
+        xlabel(ax_fd, '频率 (kHz)'); ylabel(ax_fd, '|H(f)| (dB)');
+        title(ax_fd, sprintf('频域响应 (BW=%.1fkHz)', bw_rx/1000));
+        if has_est_fd
+            legend(ax_fd, '真实', '估计', 'Location', 'best');
+        end
+        grid(ax_fd, 'on'); ax_fd.XColor='k'; ax_fd.YColor='k';
     end
 end
 

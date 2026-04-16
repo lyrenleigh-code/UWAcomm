@@ -144,13 +144,53 @@ for bi = 1:N_blocks
     Y_freq_blocks{bi} = fft(rx_nocp);
 end
 
-%% ---- 7. 跨块 Turbo（调用 12_IterativeProc）----
-codec_p = struct('gen_polys', codec.gen_polys, ...
-    'constraint_len', codec.constraint_len, ...
-    'interleave_seed', codec.interleave_seed, ...
-    'decode_mode', codec.decode_mode);
-[bits_decoded, iter_info] = turbo_equalizer_scfde_crossblock( ...
-    Y_freq_blocks, H_est_blocks, cfg.turbo_iter, nv_eq, codec_p);
+%% ---- 7. 手写跨块 Turbo（保存每轮均衡符号）----
+turbo_iter = cfg.turbo_iter;
+x_bar_blks = cell(1, N_blocks);
+var_x_blks = ones(1, N_blocks);
+H_cur = H_est_blocks;
+for bi = 1:N_blocks, x_bar_blks{bi} = zeros(1, blk_fft); end
+bits_decoded = [];
+Lpost_info = [];
+eq_syms_iters = cell(1, turbo_iter);
+
+for titer = 1:turbo_iter
+    LLR_all = zeros(1, M_total);
+    eq_syms_t = [];
+    for bi = 1:N_blocks
+        [x_tilde, mu, nv_tilde] = eq_mmse_ic_fde(Y_freq_blocks{bi}, ...
+            H_cur{bi}, x_bar_blks{bi}, var_x_blks(bi), nv_eq);
+        LLR_all((bi-1)*M_per_blk+1 : bi*M_per_blk) = ...
+            soft_demapper(x_tilde, mu, nv_tilde, zeros(1, M_per_blk), 'qpsk');
+        eq_syms_t = [eq_syms_t, x_tilde(:).']; %#ok<AGROW>
+    end
+    eq_syms_iters{titer} = eq_syms_t;
+
+    Le_deint = random_deinterleave(LLR_all, meta.perm_all);
+    Le_deint = max(min(Le_deint, 30), -30);
+    [~, Lpost_info, Lpost_coded] = siso_decode_conv( ...
+        Le_deint, [], codec.gen_polys, codec.constraint_len, codec.decode_mode);
+    bits_decoded = double(Lpost_info > 0);
+
+    if titer < turbo_iter
+        Lp_inter = random_interleave(Lpost_coded, codec.interleave_seed);
+        if length(Lp_inter) < M_total
+            Lp_inter = [Lp_inter, zeros(1, M_total - length(Lp_inter))]; %#ok<AGROW>
+        else
+            Lp_inter = Lp_inter(1:M_total);
+        end
+        for bi = 1:N_blocks
+            coded_blk = Lp_inter((bi-1)*M_per_blk+1 : bi*M_per_blk);
+            [x_bar_blks{bi}, var_x_raw] = soft_mapper(coded_blk, 'qpsk');
+            var_x_blks(bi) = max(var_x_raw, nv_eq);
+            if titer >= 2 && var_x_blks(bi) < 0.5
+                X_bar = fft(x_bar_blks{bi});
+                H_dd = Y_freq_blocks{bi} .* conj(X_bar) ./ (abs(X_bar).^2 + nv_eq);
+                H_cur{bi} = H_dd;
+            end
+        end
+    end
+end
 
 %% ---- 8. 截取信息比特 ----
 N_info = meta.N_info;
@@ -160,30 +200,12 @@ else
     bits = [bits_decoded, zeros(1, N_info - length(bits_decoded))];
 end
 
-%% ---- 9. 收敛判定 + 星座图：用硬判决做一轮 MMSE 得到 LLR 和均衡后符号 ----
-constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
-coded_re = conv_encode(bits, codec.gen_polys, codec.constraint_len);
-coded_re = coded_re(1:M_total);
-[inter_re, ~] = random_interleave(coded_re, codec.interleave_seed);
-idx_re = bi2de(reshape(inter_re, 2, []).', 'left-msb') + 1;
-sym_hard = constellation(idx_re);
-LLR_final = zeros(1, M_total);
-post_eq_syms = [];
-for bi = 1:N_blocks
-    x_bar = sym_hard((bi-1)*blk_fft+1 : bi*blk_fft);
-    [x_tilde, mu, nv_tilde] = eq_mmse_ic_fde(Y_freq_blocks{bi}, ...
-        H_est_blocks{bi}, x_bar, 1e-6, nv_eq);
-    LLR_final((bi-1)*M_per_blk+1 : bi*M_per_blk) = ...
-        soft_demapper(x_tilde, mu, nv_tilde, zeros(1, M_per_blk), 'qpsk');
-    post_eq_syms = [post_eq_syms, x_tilde(:).']; %#ok<AGROW>
-end
-med_llr = median(abs(LLR_final));
-
-%% ---- 10. info ----
+%% ---- 9. info ----
+med_llr = median(abs(Lpost_info));
 info = struct();
 info.estimated_snr    = 10*log10(max(mean(abs(rx_sym_all).^2) / nv_eq, 1e-6));
-info.estimated_ber    = mean(0.5 * exp(-abs(LLR_final)));
-info.turbo_iter       = iter_info.num_iter;
+info.estimated_ber    = mean(0.5 * exp(-abs(Lpost_info)));
+info.turbo_iter       = turbo_iter;
 info.convergence_flag = double(med_llr > 5);
 info.H_est_block1     = H_est_blocks{1};
 info.noise_var        = nv_eq;
@@ -195,6 +217,7 @@ for bi = 1:N_blocks
     pre_eq_syms = [pre_eq_syms, blk]; %#ok<AGROW>
 end
 info.pre_eq_syms = pre_eq_syms;
-info.post_eq_syms = post_eq_syms;
+info.post_eq_syms = eq_syms_iters{end};
+info.eq_syms_iters = eq_syms_iters;
 
 end
