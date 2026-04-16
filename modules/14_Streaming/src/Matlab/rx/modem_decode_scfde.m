@@ -11,9 +11,10 @@ function [bits, info] = modem_decode_scfde(body_bb, sys, meta)
 %
 % 依赖：
 %   09_Waveform/match_filter
-%   07_ChannelEstEq/{ch_est_gamp, ch_est_bem, eq_mmse_ic_fde, soft_demapper, soft_mapper}
-%   02_ChannelCoding/siso_decode_conv
-%   03_Interleaving/random_deinterleave, random_interleave
+%   07_ChannelEstEq/{ch_est_gamp, ch_est_bem}
+%   12_IterativeProc/turbo_equalizer_scfde_crossblock
+%   02_ChannelCoding/conv_encode（均衡后星座反推用）
+%   03_Interleaving/random_interleave
 %
 % 噪声：若 meta.noise_var 存在则使用，否则用 RRC 后残差中位数估计
 
@@ -143,73 +144,13 @@ for bi = 1:N_blocks
     Y_freq_blocks{bi} = fft(rx_nocp);
 end
 
-%% ---- 7. 跨块 Turbo：LMMSE-IC ⇌ BCJR ----
-turbo_iter = cfg.turbo_iter;
-x_bar_blks = cell(1, N_blocks);
-var_x_blks = ones(1, N_blocks);
-H_cur_blocks = H_est_blocks;
-for bi = 1:N_blocks, x_bar_blks{bi} = zeros(1, blk_fft); end
-La_dec_info   = [];
-bits_decoded  = [];
-iter_done     = 0;
-last_abs_llr  = 0;
-converged     = 0;
-
-x_tilde_blks = cell(1, N_blocks);   % 保留每块均衡后符号（用于星座图）
-
-for titer = 1:turbo_iter
-    % Step 1: per-block LMMSE-IC → soft symbols → LLR
-    LLR_all = zeros(1, M_total);
-    for bi = 1:N_blocks
-        [x_tilde, mu, nv_tilde] = eq_mmse_ic_fde(Y_freq_blocks{bi}, ...
-            H_cur_blocks{bi}, x_bar_blks{bi}, var_x_blks(bi), nv_eq);
-        Le_eq_blk = soft_demapper(x_tilde, mu, nv_tilde, zeros(1, M_per_blk), 'qpsk');
-        LLR_all((bi-1)*M_per_blk+1 : bi*M_per_blk) = Le_eq_blk;
-        x_tilde_blks{bi} = x_tilde;
-    end
-
-    % Step 2: 跨块解交织 + BCJR
-    Le_eq_deint = random_deinterleave(LLR_all, meta.perm_all);
-    Le_eq_deint = max(min(Le_eq_deint, 30), -30);
-    [~, Lpost_info, Lpost_coded] = siso_decode_conv( ...
-        Le_eq_deint, La_dec_info, codec.gen_polys, codec.constraint_len);
-    bits_decoded = double(Lpost_info > 0);
-    iter_done = titer;
-
-    % 收敛判据：|LLR| 中位数 稳定且 > 5
-    cur_abs = median(abs(Lpost_info));
-    if titer > 1 && cur_abs > 5 && abs(cur_abs - last_abs_llr) < 0.1
-        converged = 1;
-        break;
-    end
-    last_abs_llr = cur_abs;
-
-    % Step 3: 反馈 + DD 信道重估（titer >= 2 且置信足够）
-    if titer < turbo_iter
-        Lpost_inter = random_interleave(Lpost_coded, codec.interleave_seed);
-        if length(Lpost_inter) < M_total
-            Lpost_inter = [Lpost_inter, zeros(1, M_total - length(Lpost_inter))];
-        else
-            Lpost_inter = Lpost_inter(1:M_total);
-        end
-        for bi = 1:N_blocks
-            coded_blk = Lpost_inter((bi-1)*M_per_blk+1 : bi*M_per_blk);
-            [x_bar_blks{bi}, var_x_raw] = soft_mapper(coded_blk, 'qpsk');
-            var_x_blks(bi) = max(var_x_raw, nv_eq);
-
-            if titer >= 2 && var_x_blks(bi) < 0.5
-                X_bar = fft(x_bar_blks{bi});
-                H_dd_raw = Y_freq_blocks{bi} .* conj(X_bar) ./ (abs(X_bar).^2 + nv_eq);
-                h_dd = ifft(H_dd_raw);
-                h_dd_sparse = zeros(1, blk_fft);
-                for p = 1:K_sparse
-                    h_dd_sparse(eff_delays(p)+1) = h_dd(eff_delays(p)+1);
-                end
-                H_cur_blocks{bi} = fft(h_dd_sparse);
-            end
-        end
-    end
-end
+%% ---- 7. 跨块 Turbo（调用 12_IterativeProc）----
+codec_p = struct('gen_polys', codec.gen_polys, ...
+    'constraint_len', codec.constraint_len, ...
+    'interleave_seed', codec.interleave_seed, ...
+    'decode_mode', codec.decode_mode);
+[bits_decoded, iter_info] = turbo_equalizer_scfde_crossblock( ...
+    Y_freq_blocks, H_est_blocks, cfg.turbo_iter, nv_eq, codec_p);
 
 %% ---- 8. 截取信息比特 ----
 N_info = meta.N_info;
@@ -219,40 +160,41 @@ else
     bits = [bits_decoded, zeros(1, N_info - length(bits_decoded))];
 end
 
-%% ---- 9. info ----
+%% ---- 9. 收敛判定 + 星座图：用硬判决做一轮 MMSE 得到 LLR 和均衡后符号 ----
+constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
+coded_re = conv_encode(bits, codec.gen_polys, codec.constraint_len);
+coded_re = coded_re(1:M_total);
+[inter_re, ~] = random_interleave(coded_re, codec.interleave_seed);
+idx_re = bi2de(reshape(inter_re, 2, []).', 'left-msb') + 1;
+sym_hard = constellation(idx_re);
+LLR_final = zeros(1, M_total);
+post_eq_syms = [];
+for bi = 1:N_blocks
+    x_bar = sym_hard((bi-1)*blk_fft+1 : bi*blk_fft);
+    [x_tilde, mu, nv_tilde] = eq_mmse_ic_fde(Y_freq_blocks{bi}, ...
+        H_est_blocks{bi}, x_bar, 1e-6, nv_eq);
+    LLR_final((bi-1)*M_per_blk+1 : bi*M_per_blk) = ...
+        soft_demapper(x_tilde, mu, nv_tilde, zeros(1, M_per_blk), 'qpsk');
+    post_eq_syms = [post_eq_syms, x_tilde(:).']; %#ok<AGROW>
+end
+med_llr = median(abs(LLR_final));
+
+%% ---- 10. info ----
 info = struct();
 info.estimated_snr    = 10*log10(max(mean(abs(rx_sym_all).^2) / nv_eq, 1e-6));
-% 用 |LLR| 做 BER 估计
-abs_llr = abs(Lpost_info);
-info.estimated_ber    = mean(0.5 * exp(-abs_llr));
-info.turbo_iter       = iter_done;
-info.convergence_flag = converged;
+info.estimated_ber    = mean(0.5 * exp(-abs(LLR_final)));
+info.turbo_iter       = iter_info.num_iter;
+info.convergence_flag = double(med_llr > 5);
 info.H_est_block1     = H_est_blocks{1};
 info.noise_var        = nv_eq;
 info.sym_offset       = best_off;
 
-% --- 星座图数据（UI 用）---
-% 均衡前：rx_sym_all 中各块去 CP 后的数据段
 pre_eq_syms = [];
 for bi = 1:N_blocks
     blk = rx_sym_all((bi-1)*sym_per_block + blk_cp + 1 : bi*sym_per_block);
     pre_eq_syms = [pre_eq_syms, blk]; %#ok<AGROW>
 end
 info.pre_eq_syms = pre_eq_syms;
-% 均衡后：x_tilde 拼接（最后一轮 Turbo 输出）
-post_eq_syms = [];
-for bi = 1:N_blocks
-    if ~isempty(x_tilde_blks{bi})
-        post_eq_syms = [post_eq_syms, x_tilde_blks{bi}(:).']; %#ok<AGROW>
-    end
-end
 info.post_eq_syms = post_eq_syms;
-% TX 参考符号（去 CP）
-tx_ref = [];
-for bi = 1:N_blocks
-    blk = meta.all_cp_data((bi-1)*sym_per_block + blk_cp + 1 : bi*sym_per_block);
-    tx_ref = [tx_ref, blk]; %#ok<AGROW>
-end
-info.tx_ref_syms = tx_ref;
 
 end

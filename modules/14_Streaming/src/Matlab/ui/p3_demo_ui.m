@@ -27,8 +27,10 @@ addpath(fullfile(streaming_root, 'rx'));
 addpath(fullfile(modules_root, '02_ChannelCoding', 'src', 'Matlab'));
 addpath(fullfile(modules_root, '03_Interleaving',  'src', 'Matlab'));
 addpath(fullfile(modules_root, '05_SpreadSpectrum','src', 'Matlab'));
+addpath(fullfile(modules_root, '06_MultiCarrier',  'src', 'Matlab'));
 addpath(fullfile(modules_root, '07_ChannelEstEq',  'src', 'Matlab'));
 addpath(fullfile(modules_root, '09_Waveform',      'src', 'Matlab'));
+addpath(fullfile(modules_root, '12_IterativeProc', 'src', 'Matlab'));
 
 %% ---- 全局状态 ----
 app = struct();
@@ -80,7 +82,7 @@ app.history = {};
 app.dec_count = 0;
 
 %% ---- 主 figure ----
-app.fig = uifigure('Name', 'Streaming P3.1 — 软件无线电流式 Demo', ...
+app.fig = uifigure('Name', 'Streaming P3 — 软件无线电流式 Demo', ...
     'Position', [40 40 1500 950], 'Color', [0.95 0.95 0.96], ...
     'CloseRequestFcn', @(~,~) on_close());
 
@@ -95,7 +97,7 @@ top = uigridlayout(main, [1 5]);
 top.Layout.Row = 1;
 top.ColumnWidth = {'1x', 280, 220, 240, 140, 80};
 
-title_lbl = uilabel(top, 'Text', 'Streaming P3.1 — 软件无线电流式 Demo', ...
+title_lbl = uilabel(top, 'Text', 'Streaming P3 — 软件无线电流式 Demo', ...
     'FontSize', 17, 'FontWeight', 'bold', 'FontColor', [0.1 0.3 0.6]);
 title_lbl.Layout.Column = 1;
 
@@ -107,7 +109,8 @@ sch_panel.RowHeight = {'1x', 22};
 sch_panel.RowSpacing = 2;
 uilabel(sch_panel, 'Text', '调制:', 'FontSize', 12, 'HorizontalAlignment', 'right');
 app.scheme_dd = uidropdown(sch_panel, ...
-    'Items', {'FH-MFSK (8-FSK 跳频, 非相干)', 'SC-FDE (QPSK + Turbo, 相干)'}, ...
+    'Items', {'FH-MFSK (8-FSK 跳频, 非相干)', 'SC-FDE (QPSK + Turbo, 相干)', ...
+              'OFDM (QPSK + Turbo, 相干)', 'SC-TDE (QPSK + Turbo, 相干)'}, ...
     'Value', 'SC-FDE (QPSK + Turbo, 相干)', ...
     'FontSize', 12, ...
     'ValueChangedFcn', @(~,~) on_scheme_changed());
@@ -359,16 +362,21 @@ end
 
 function on_scheme_changed()
     sch = current_scheme();
-    is_scfde = strcmp(sch, 'SC-FDE');
-    show(app.lbl_blk,  is_scfde); show(app.blk_dd,    is_scfde);
-    show(app.lbl_iter, is_scfde); show(app.iter_edit, is_scfde);
-    show(app.lbl_pl,   ~is_scfde); show(app.pl_dd,    ~is_scfde);
+    is_turbo = ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE'});
+    is_fhmfsk = strcmp(sch, 'FH-MFSK');
+    show(app.lbl_blk,  is_turbo); show(app.blk_dd,    is_turbo);
+    show(app.lbl_iter, is_turbo); show(app.iter_edit, is_turbo);
+    show(app.lbl_pl,   is_fhmfsk); show(app.pl_dd,    is_fhmfsk);
     append_log(sprintf('[UI] scheme -> %s', sch));
 end
 
 function s = current_scheme()
     sel = app.scheme_dd.Value;
-    if startsWith(sel, 'SC-FDE'), s = 'SC-FDE'; else, s = 'FH-MFSK'; end
+    if startsWith(sel, 'SC-FDE'), s = 'SC-FDE';
+    elseif startsWith(sel, 'OFDM'), s = 'OFDM';
+    elseif startsWith(sel, 'SC-TDE'), s = 'SC-TDE';
+    else, s = 'FH-MFSK';
+    end
 end
 
 function show(h, vis)
@@ -480,6 +488,7 @@ function on_transmit()
         end
 
         % --- 应用参数 ---
+        mem = app.sys.codec.constraint_len - 1;
         if strcmp(sch, 'SC-FDE')
             app.sys.scfde.blk_fft    = parse_lead_int(app.blk_dd.Value);
             app.sys.scfde.blk_cp     = app.sys.scfde.blk_fft;
@@ -487,8 +496,23 @@ function on_transmit()
             app.sys.scfde.turbo_iter = app.iter_edit.Value;
             app.sys.scfde.fading_type = 'static';
             app.sys.scfde.fd_hz       = 0;
-            mem = app.sys.codec.constraint_len - 1;
             N_info = app.sys.scfde.blk_fft * app.sys.scfde.N_blocks - mem;
+        elseif strcmp(sch, 'OFDM')
+            app.sys.ofdm.blk_fft    = parse_lead_int(app.blk_dd.Value);
+            app.sys.ofdm.blk_cp     = round(app.sys.ofdm.blk_fft / 2);
+            app.sys.ofdm.N_blocks   = 16;
+            app.sys.ofdm.turbo_iter = app.iter_edit.Value;
+            app.sys.ofdm.fading_type = 'static';
+            app.sys.ofdm.fd_hz       = 0;
+            null_idx_tmp = 1:app.sys.ofdm.null_spacing:app.sys.ofdm.blk_fft;
+            N_data_sc = app.sys.ofdm.blk_fft - length(null_idx_tmp);
+            N_info = N_data_sc * app.sys.ofdm.N_blocks - mem;
+        elseif strcmp(sch, 'SC-TDE')
+            app.sys.sctde.turbo_iter = app.iter_edit.Value;
+            app.sys.sctde.fading_type = 'static';
+            app.sys.sctde.fd_hz       = 0;
+            N_data_sym = 2000;
+            N_info = N_data_sym - mem;
         else
             pl = parse_lead_int(app.pl_dd.Value);
             app.sys.frame.payload_bits = pl;
@@ -574,6 +598,17 @@ function update_txinfo_panel(sch, body_bb, h_tap, ch_label, snr_db, N_info, info
         bw_hz = app.sys.sym_rate * (1 + app.sys.scfde.rolloff);
         sym_count = sprintf('%d blk x %d sym', ...
             app.sys.scfde.N_blocks, app.sys.scfde.blk_fft);
+        code_rate = sprintf('1/%d (conv)', app.sys.codec.constraint_len);
+        total_coded = length(body_bb);
+    elseif strcmp(sch, 'OFDM')
+        bw_hz = app.sys.sym_rate * (1 + app.sys.ofdm.rolloff);
+        sym_count = sprintf('%d blk x %d FFT', ...
+            app.sys.ofdm.N_blocks, app.sys.ofdm.blk_fft);
+        code_rate = sprintf('1/%d (conv)', app.sys.codec.constraint_len);
+        total_coded = length(body_bb);
+    elseif strcmp(sch, 'SC-TDE')
+        bw_hz = app.sys.sym_rate * (1 + app.sys.sctde.rolloff);
+        sym_count = sprintf('train=%d + data', app.sys.sctde.train_len);
         code_rate = sprintf('1/%d (conv)', app.sys.codec.constraint_len);
         total_coded = length(body_bb);
     else
@@ -840,6 +875,10 @@ end
 function bw = downconv_bandwidth(sch)
     if strcmp(sch, 'SC-FDE')
         bw = app.sys.sym_rate * (1 + app.sys.scfde.rolloff);
+    elseif strcmp(sch, 'OFDM')
+        bw = app.sys.sym_rate * (1 + app.sys.ofdm.rolloff);
+    elseif strcmp(sch, 'SC-TDE')
+        bw = app.sys.sym_rate * (1 + app.sys.sctde.rolloff);
     else
         bw = app.sys.fhmfsk.total_bw;
     end
@@ -847,7 +886,7 @@ end
 
 function [h_tap, label] = build_channel_tap(sch)
     preset = app.preset_dd.Value;
-    if strcmp(sch, 'SC-FDE')
+    if ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE'})
         sps_use = app.sys.sps;
     else
         sps_use = app.sys.fhmfsk.samples_per_sym / 8;
@@ -952,7 +991,7 @@ function update_tabs_from_entry(entry)
 
     % --- 均衡前 ---
     ax = app.tabs.pre_eq; cla(ax,'reset');
-    if strcmp(sch,'SC-FDE') && isfield(info,'pre_eq_syms') && ~isempty(info.pre_eq_syms)
+    if ismember(sch, {'SC-FDE','OFDM','SC-TDE'}) && isfield(info,'pre_eq_syms') && ~isempty(info.pre_eq_syms)
         s = info.pre_eq_syms;
         ns = min(2000, length(s));
         scatter(ax, real(s(1:ns)), imag(s(1:ns)), 8, [0.3 0.4 0.7], 'filled', ...
@@ -970,7 +1009,7 @@ function update_tabs_from_entry(entry)
 
     % --- 均衡后 ---
     ax = app.tabs.post_eq; cla(ax,'reset');
-    if strcmp(sch,'SC-FDE') && isfield(info,'post_eq_syms') && ~isempty(info.post_eq_syms)
+    if ismember(sch, {'SC-FDE','OFDM','SC-TDE'}) && isfield(info,'post_eq_syms') && ~isempty(info.post_eq_syms)
         s = info.post_eq_syms;
         ns = min(2000, length(s));
         ref = [1+1j,1-1j,-1+1j,-1-1j]/sqrt(2);
@@ -1011,7 +1050,7 @@ function update_tabs_from_entry(entry)
             'Units','normalized','HorizontalAlignment','center','FontSize',13);
         ax.XColor='none'; ax.YColor='none';
     else
-        if strcmp(sch,'SC-FDE') && isfield(info,'H_est_block1')
+        if ismember(sch, {'SC-FDE','OFDM','SC-TDE'}) && isfield(info,'H_est_block1')
             H = info.H_est_block1;
             Nf = length(H);
             f_norm = (0:Nf-1)/Nf - 0.5;

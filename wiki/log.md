@@ -4,6 +4,11 @@
 
 - P3.1 UI V3.0 重构：解码历史(20条)+信道时/频域拆分+日志 tab+TX 信号信息面板+音频监听
 - P3.1 SC-FDE 三个 bug 修复：零填充→随机填充、σ²_bb 公式 4→8、NV 实测覆盖兜底化
+- P3.1 SC-FDE 重构：手写 Turbo 循环改调 turbo_equalizer_scfde_crossblock（模块 12）
+- P3.2 完成：OFDM + SC-TDE 统一 modem API
+  + modem_encode/decode_ofdm: OMP(静态)/BEM(时变)+空子载波 CFO+Turbo MMSE-IC
+  + modem_encode/decode_sctde: GAMP+turbo_sctde(静态)/BEM+逐符号 ISI 消除(时变)
+  + dispatch 扩展到 4 体制，UI scheme 下拉同步更新
 - 14_流式仿真框架.md 追加 P3.1 调试记录 + V3 UI 功能更新
 
 ## 2026-04-15

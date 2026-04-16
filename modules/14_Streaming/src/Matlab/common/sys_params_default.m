@@ -54,6 +54,38 @@ sys.scfde.fd_hz        = 0;
 sys.scfde.turbo_iter   = 6;
 sys.scfde.total_bw     = sys.sym_rate * (1 + sys.scfde.rolloff);   % 匹配 frame 前导带宽参考
 
+%% OFDM 子结构（P3.2 新增）
+sys.ofdm.blk_fft      = 256;
+sys.ofdm.blk_cp        = 128;
+sys.ofdm.N_blocks      = 16;
+sys.ofdm.null_spacing  = 32;
+sys.ofdm.rolloff       = 0.35;
+sys.ofdm.span          = 6;
+sys.ofdm.turbo_iter    = 10;
+sys.ofdm.fading_type   = 'static';
+sys.ofdm.fd_hz         = 0;
+sys.ofdm.sym_delays    = [0, 5, 15, 40, 60, 90];
+sys.ofdm.gains_raw     = [1, 0.6*exp(1j*0.3), 0.45*exp(1j*0.9), ...
+                           0.3*exp(1j*1.5), 0.2*exp(1j*2.1), 0.12*exp(1j*2.8)];
+sys.ofdm.total_bw      = sys.sym_rate * (1 + sys.ofdm.rolloff);
+
+%% SC-TDE 子结构（P3.2 新增）
+sys.sctde.train_len         = 500;
+sys.sctde.pilot_cluster_len = 140;
+sys.sctde.pilot_spacing     = 300;
+sys.sctde.turbo_iter        = 10;
+sys.sctde.rolloff            = 0.35;
+sys.sctde.span               = 6;
+sys.sctde.fading_type        = 'static';
+sys.sctde.fd_hz              = 0;
+sys.sctde.sym_delays         = [0, 5, 15, 40, 60, 90];
+sys.sctde.gains_raw          = [1, 0.6*exp(1j*0.3), 0.45*exp(1j*0.9), ...
+                                0.3*exp(1j*1.5), 0.2*exp(1j*2.1), 0.12*exp(1j*2.8)];
+sys.sctde.num_ff             = 31;
+sys.sctde.num_fb             = 90;
+sys.sctde.lambda             = 0.998;
+sys.sctde.total_bw           = sys.sym_rate * (1 + sys.sctde.rolloff);
+
 %% 帧协议
 sys.frame.magic             = uint16(hex2dec('A5C3'));
 sys.frame.header_bytes      = 16;
