@@ -109,4 +109,30 @@ info.detected_indices = detected_indices;
 info.soft_llr         = soft_llr;
 info.N_info_out       = length(bits);
 
+% ---- 统一 API info 字段（P3.1 新增）----
+%   estimated_snr   : 用每符号(max_peak / median_noise) 平均估计
+%   estimated_ber   : 基于 |LLR| 映射的估计误码率
+%   turbo_iter      : FH-MFSK 非 Turbo = 0
+%   convergence_flag: Viterbi 硬判决无迭代收敛语义；用 |LLR| 充分性 + 0 迭代 = 1
+snr_per_sym = zeros(1, N_sym);
+for k = 1:N_sym
+    shift = meta.hop_pattern(k);
+    e_shifted = circshift(energy_matrix(k, :), -shift);
+    e_freqs = e_shifted(1:M);
+    peak = max(e_freqs);
+    noise = median(e_freqs);
+    if noise > 1e-12
+        snr_per_sym(k) = 10*log10(peak / noise);
+    else
+        snr_per_sym(k) = Inf;
+    end
+end
+info.estimated_snr    = mean(snr_per_sym(isfinite(snr_per_sym)));
+abs_llr = abs(deint_llr);
+p_err   = 0.5 * exp(-abs_llr);   % Q-近似，|LLR| 映射到 BER
+info.estimated_ber    = mean(p_err);
+info.turbo_iter       = 0;
+% 收敛：|LLR| 中位数 > 2（合理置信）= 1，否则 0
+info.convergence_flag = double(median(abs_llr) > 2);
+
 end

@@ -39,6 +39,21 @@ sys.fhmfsk.fb_base         = ((0:sys.fhmfsk.num_freqs-1) - sys.fhmfsk.num_freqs/
 sys.fhmfsk.total_bw        = sys.fhmfsk.num_freqs * sys.fhmfsk.freq_spacing;  % 8000 Hz
 sys.fhmfsk.hop_seed        = 42;
 
+%% SC-FDE 子结构（P3.1 新增）
+sys.scfde.rolloff      = 0.35;
+sys.scfde.span         = 6;
+sys.scfde.blk_fft      = 128;         % 时变配置（fd=5Hz 参考）：128/128/32
+sys.scfde.blk_cp       = 128;
+sys.scfde.N_blocks     = 32;
+% 信道先验（BEM 需要）
+sys.scfde.sym_delays   = [0, 5, 15, 40, 60, 90];
+sys.scfde.gains_raw    = [1, 0.6*exp(1j*0.3), 0.45*exp(1j*0.9), ...
+                          0.3*exp(1j*1.5), 0.2*exp(1j*2.1), 0.12*exp(1j*2.8)];
+sys.scfde.fading_type  = 'static';    % 'static' | 'slow'
+sys.scfde.fd_hz        = 0;
+sys.scfde.turbo_iter   = 6;
+sys.scfde.total_bw     = sys.sym_rate * (1 + sys.scfde.rolloff);   % 匹配 frame 前导带宽参考
+
 %% 帧协议
 sys.frame.magic             = uint16(hex2dec('A5C3'));
 sys.frame.header_bytes      = 16;

@@ -1,7 +1,7 @@
 ---
 project: uwacomm
 type: task
-status: placeholder
+status: in-progress
 created: 2026-04-15
 updated: 2026-04-15
 parent: 2026-04-15-streaming-framework-master.md
@@ -46,6 +46,53 @@ tags: [流式仿真, 14_Streaming, 统一API, 6体制]
 
 ---
 
-## Plan / Log / Result
+## Plan
 
-（P2 完成后补）
+详见 `plans/streaming-p3-unified-modem.md`（P3.1）。分阶段推进：
+- **P3.1**：架构 + FH-MFSK + SC-FDE → ✅ 完成（2026-04-15）
+- **P3.2**：OFDM + SC-TDE → 待开始
+- **P3.3**：DSSS + OTFS → 待开始
+
+## Log
+
+### 2026-04-15 — P3.1 完成
+
+新增：
+- `common/modem_dispatch.m` — 按 scheme 大写去连字符分发
+- `common/modem_encode.m` / `common/modem_decode.m` — 薄包装入口
+- `tx/modem_encode_scfde.m` — 从 13_SourceCode L100-128 抽取
+- `rx/modem_decode_scfde.m` — 从 13_SourceCode L238-373 抽取（含 GAMP 静态/BEM 时变 + 6 轮 Turbo）
+- `tests/test_p3_unified_modem.m` — 双体制回归测试
+
+修改：
+- `rx/modem_decode_fhmfsk.m` — info 补齐 4 个统一字段（estimated_snr/ber/turbo_iter/convergence_flag）
+- `common/sys_params_default.m` — 加入 `sys.scfde` 子结构
+
+测试结果（静态 6 径 + 复 AWGN）：
+
+| scheme  | 5dB | 10dB | 15dB |
+|---------|-----|------|------|
+| FH-MFSK | 0%  | 0%   | 0%   |
+| SC-FDE  | 0%  | 0%   | 0%   |
+
+通过 2/2 验收（FH-MFSK <0.5%@10dB；SC-FDE <0.5%@15dB）。
+
+**注**：本次测试 bypass passband/HFM-LFM 同步，直接基带卷积 + 复 AWGN，是严格更易场景。
+完整 passband 集成（含 frame_detector + LFM 精定时）在 P4 流水线整合时验证。
+
+### 2026-04-16 — P3.1 SC-FDE bug 修复 + UI V3
+
+bug 修复（3 项）：
+- 零填充→随机填充（seed=42）：GAMP 需多样化训练符号
+- σ²_bb 公式 4·σ²_pb·BW/fs → 8·σ²_pb·BW/fs：downconvert I/Q 各贡献一份
+- NV 实测覆盖改为兜底：优先用 on_transmit 精确值
+
+UI V3.0：
+- 解码历史（最多 20 条，带时间戳，下拉回看）
+- 信道 tab 拆为时域/频域（H_est vs H_true 叠加对比）
+- 日志移至底部 tab，TX 面板改为信号信息面板
+- 音频监听（Mon 按钮，1:1 实时 48kHz 播放）
+
+## Result
+
+P3.1 完成。剩余 4 体制（OFDM / SC-TDE / DSSS / OTFS）按相同模板分两次推进。

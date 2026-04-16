@@ -47,7 +47,9 @@ session_<timestamp>/
 |-------|------|------|
 | P1 | 单体制串行 loopback (FH-MFSK) + GUI demo | ✅ 完成 (2026-04-15) |
 | P2 | RX 流式帧检测 + 多帧 + 软判决 LLR + GUI | ✅ 完成 (2026-04-15) |
-| P3 | 6 体制统一 modem API | 待 P2 |
+| P3.1 | 统一 modem API + FH-MFSK + SC-FDE + GUI | ✅ 完成 (2026-04-15) |
+| P3.2 | OFDM + SC-TDE 接入统一 API | 待 P3.1 |
+| P3.3 | DSSS + OTFS 接入统一 API | 待 P3.2 |
 | P4 | 帧头 FH-MFSK + payload 异构体制路由 | 待 P3 |
 | P5 | 三进程并发 | 待 P4 |
 | P6 | 物理层 AMC | 待 P5 |
@@ -89,7 +91,28 @@ P2 vs P1 关键差异：
 - FH-MFSK 解码改软判决 LLR（对 Jakes 衰落更鲁棒）
 - 缺帧用 `[missing frame N]` 占位，CRC 失败的帧不影响其他帧
 
-## 统一 modem API（P3 目标）
+## P3.1 用法
+
+```matlab
+% 命令行测试（FH-MFSK + SC-FDE 双体制基带回归）
+clear functions; clear all;
+cd modules/14_Streaming/src/Matlab/tests
+run('test_p3_unified_modem.m');
+
+% 交互式 GUI demo（流式 — RX 持续监听 + TX 触发）
+cd modules/14_Streaming/src/Matlab/ui
+p3_demo_ui
+```
+
+GUI（V2 流式版）：
+- 顶部：scheme 下拉（FH-MFSK / SC-FDE）+ **RX 监听开关** + status + Transmit 按钮
+- 工作流：先打开 RX 开关 → 配置参数 → 点 Transmit → TX 切片入 FIFO → 实时通带示波器更新 → 累积满帧自动解调显示 BER/info
+- TX 参数（沿用 P1/P2 风格）：文本（默认值可改）+ SNR + Doppler + 衰落类型 + Jakes fd + 信道预设；scheme 切换动态显示参数（SC-FDE: blk_fft / Turbo iter；FH-MFSK: payload bits）
+- RX 面板：解码文本 + BER 大字 + info 6 字段（estimated_snr/ber, turbo_iter, convergence, noise_var, 解码次数）+ TX/RX bits 对比 + FIFO/队列状态
+- 5 tab：**实时通带示波器**（最近 0.4s 真实 passband real 信号，timer 100ms 刷新）、通带频谱、均衡前星座/能量矩阵、均衡后星座/LLR、CIR + Hest 频响
+- 单进程 timer 模拟流（chunk_ms=50, tick=100ms → 2× 加速）；跳过 wav/session，便于即点即看
+
+## 统一 modem API
 
 ```matlab
 [tx_pb, meta] = modem_encode(bits, scheme, sys_params)

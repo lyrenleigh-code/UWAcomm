@@ -280,7 +280,9 @@ RX：①LFM相位+训练精估α ②resample补偿 ③LFM精确定时 ④残余C
 | 🟡 中 | OTFS PAPR专项降低 | **待做** | 需SLM/PTS/削峰等专用技术, 当前papr_clip可用 |
 | ✅ | **14_Streaming P1 (FH-MFSK loopback + GUI demo)** | **完成(2026-04-15)** | 17 文件，方案A passband 信道，Jakes 时变，Doppler oracle 补偿，UI 含 7 viz tab |
 | ✅ | **14_Streaming P2 流式帧检测 + 多帧 + GUI** | **完成(2026-04-15)** | 6 文件，hybrid 检测，软判决 LLR FH-MFSK，多帧 GUI 含 uitable 帧明细 |
-| 🔴 高 | 14_Streaming P3 6 体制统一 modem API | **待 P2** | 取代临时 modem_encode_fhmfsk |
+| ✅ | **14_Streaming P3.1 统一 modem API + FH-MFSK + SC-FDE** | **完成(2026-04-16)** | `modem_dispatch` 架构 + SC-FDE 抽取 + 3 个 bug 修复 + UI V3(历史/信道拆分/音频监听) |
+| 🔴 高 | 14_Streaming P3.2 OFDM + SC-TDE 统一 API | **待做** | 按 P3.1 模板抽取 |
+| 🟡 中 | 14_Streaming P3.3 DSSS + OTFS 统一 API | **待 P3.2** | 按 P3.1 模板抽取 |
 | 🟡 中 | 14_Streaming P4 帧头/payload 异构调制路由 | **待 P3** | header FH-MFSK + payload 按 scheme 分发 |
 | 🟡 中 | 14_Streaming P5 三进程并发 | **待 P4** | TX/Channel/RX 独立 MATLAB |
 | 🟡 中 | 14_Streaming P6 物理层 AMC | **待 P5** | LFM peak/SNR/delay/Doppler → 自适应切体制 |

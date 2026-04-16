@@ -220,7 +220,9 @@ close → touch 0002.ready        close → touch 0001.ready           write 000
 |-------|------|------|------|
 | **P1** | 单体制串行 loopback (FH-MFSK) | ✅ 完成 (2026-04-15) | `archive/2026-04-15-streaming-p1-loopback-fhmfsk.md` |
 | **P2** | RX 流式帧检测 + 多帧 + 软判决 LLR | ✅ 完成 (2026-04-15) | `archive/2026-04-15-streaming-p2-stream-detect.md` |
-| **P3** | 6 体制统一 API | ⬜ 待开始 | `2026-04-15-streaming-p3-unified-modem.md` |
+| **P3.1** | 统一 API + FH-MFSK + SC-FDE | ✅ 完成 (2026-04-15) | `2026-04-15-streaming-p3-unified-modem.md` |
+| **P3.2** | OFDM + SC-TDE | ⬜ 待开始 | 待写 |
+| **P3.3** | DSSS + OTFS | ⬜ 待开始 | 待写 |
 | **P4** | scheme 路由 | ⬜ 待 P3 | `2026-04-15-streaming-p4-scheme-routing.md` |
 | **P5** | 三进程并发 | ⬜ 待 P4 | `2026-04-15-streaming-p5-concurrent.md` |
 | **P6** | 物理层 AMC | ⬜ 待 P5 | `2026-04-15-streaming-p6-amc.md` |
@@ -262,7 +264,11 @@ close → touch 0002.ready        close → touch 0001.ready           write 000
 
 ## Log
 
-（phase 推进时追加）
+- **2026-04-15 P3.1 完成**：搭建 `modem_dispatch / modem_encode / modem_decode` 统一 API；
+  FH-MFSK 现有实现适配 4 字段 info；SC-FDE 从 `13_SourceCode/tests/SC-FDE/test_scfde_timevarying.m`
+  抽取 encode/decode 到 `14_Streaming/{tx,rx}/modem_{encode,decode}_scfde.m`。
+  `test_p3_unified_modem.m` 静态 6 径 + AWGN 两体制 0%@5dB+ 通过。
+  剩余 4 体制（OFDM/SC-TDE/DSSS/OTFS）拆分到 P3.2/P3.3。
 
 ---
 
