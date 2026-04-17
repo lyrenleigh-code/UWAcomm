@@ -1,0 +1,44 @@
+{
+  "name": "MATLAB 仿真原型（中文注释）",
+  "description": "UWAcomm 主模式：MATLAB 仿真原型 + 中文注释头 + 英文函数/变量标识符",
+  "version": "1.0",
+  "language": {
+    "primary": "MATLAB",
+    "file_extension": ".m",
+    "comments": "中文",
+    "identifiers": "英文（lowercase_snake_case）",
+    "error_messages": "中文",
+    "doc_formulas": "$$LaTeX$$"
+  },
+  "conventions": {
+    "function_naming": "lowercase_snake_case（例：ch_est_ls.m / sync_dual_hfm.m）",
+    "header": "完整中文注释头：功能、版本、输入/输出参数、备注",
+    "function_sections": "%% 1. 入参解析 → 2. 参数校验 → 3~N. 核心算法",
+    "param_validation": "中文错误提示（例：error('输入信号长度不足')）",
+    "module_artifacts": "每模块含 test_*.m 和 README.md（含 $$LaTeX$$ 公式）"
+  },
+  "testing": {
+    "mandatory_prelude": [
+      "clear functions; clear all;",
+      "cd('D:\\Claude\\TechReq\\UWAcomm\\modules\\XX_模块\\src\\Matlab');",
+      "diary('test_xxx_results.txt');",
+      "run('test_xxx.m');",
+      "diary off;"
+    ],
+    "rules": [
+      "必须 clear functions（防 git 切分支或 Claude Code 改文件后 MATLAB 用旧缓存）",
+      "测试结果保存 txt（fopen/fprintf/fclose 自动保存关键指标）",
+      "断言与可视化分离：assert/pass/fail 与 figure 各自独立 try/catch",
+      "测试失败时 catch 块打印实际值（不仅'误差过大'）",
+      "每个测试须有可视化 figure",
+      "断言条件在 README 中记录"
+    ]
+  },
+  "git": {
+    "branch_naming": "feat/xxx",
+    "target_branch": "master"
+  },
+  "cross_module_deps": {
+    "path_pattern": "proj_root = fileparts(fileparts(fileparts(fileparts(mfilename('fullpath'))))); addpath(fullfile(proj_root, '07_ChannelEstEq', 'src', 'Matlab'));"
+  }
+}

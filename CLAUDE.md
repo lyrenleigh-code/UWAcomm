@@ -65,13 +65,22 @@ UWAcomm/
 ### 2. 接收端禁用发射端参数（关键）
 
 接收端处理链路**严禁使用实际系统中无法获得的发射端参数**：
-- ❌ 已知多普勒因子 `dop_rate`
-- ❌ 已知发射符号 `all_cp_data/info_bits`
+- ❌ 已知发射符号 `all_cp_data/all_sym/info_bits`
 - ❌ 真实信道 `ch_info.h_time`
-- ❌ 已知 SNR
+- ❌ 已知 SNR / `noise_var`
+- ❌ 已知多普勒因子 `dop_rate` / 多普勒扩展 `fd_hz`
+- ❌ 已知信道时延位置 `sym_delays`（应由 OMP/相关峰搜索估计）
+- ❌ 已知衰落类型 `fading_type`（接收端应统一走时变路径或后验判断）
 
 这些参数**只能用于性能对比基准（oracle baseline）**，不能作为最终系统输入。
-接收端可用：接收信号 `bb_raw/rx_pb`、已知前导码/训练序列模板、帧结构参数（帧长、CP长度等协议约定）、系统参数（fs/fc/sps 等）。
+接收端可用：接收信号 `bb_raw/rx_pb`、已知前导码/训练序列模板（固定 seed 可重生成）、帧结构参数（帧长、CP长度等协议约定）、系统参数（fs/fc/sps 等）。
+
+**`meta` 字段白名单**（encode → decode 允许传递的）：
+- ✅ 帧结构参数：`N_info`, `blk_fft`, `blk_cp`, `N_blocks`, `sym_per_block`, `N_shaped`
+- ✅ 编码参数：`perm_all`, `M_total`, `M_per_blk`, `M_coded`
+- ✅ 导频配置：`pilot_config`, `pilot_info`, `data_indices`, `null_idx`, `data_idx`
+- ✅ 帧协议：`guard_mask`, `N_data_slots`
+- ❌ TX 数据：`all_cp_data`, `all_sym`, `noise_var`, `pilot_sym`（应本地重生成）
 
 ### 3. 工程闭环
 
@@ -109,6 +118,37 @@ specs/active/ → plans/ → 改代码 → 跑测试 → 更新wiki → 归档sp
 - 调试经验 → `wiki/debug-logs/{模块}/` 追加带日期章节
 - 跨项目价值（算法卡片/领域知识/工具经验）→ `/promote` 回流 Hub
 
+### 7. Oracle 排查（端到端/定稿必检）
+
+**触发条件**：以下场景**必须**执行 Oracle 排查，无一例外：
+- 端到端测试定稿前（`13_SourceCode/tests/*` 或 `14_Streaming/tests/*`）
+- 新增或修改任何 `modem_decode_*.m` 接收端函数
+- 从测试脚本抽取代码到正式模块（如 P3 抽取场景）
+- 性能指标宣称"完成"前
+
+**排查清单**（逐项检查，全通过才可提交）：
+
+```
+□ 1. meta 字段审计：decode 函数的 meta 是否只含白名单字段（见 §2）？
+     grep: meta.all_cp_data / meta.all_sym / meta.noise_var
+□ 2. 信道估计训练来源：估计矩阵是否只用训练序列/导频（RX可独立重生成）？
+     不得使用 TX 数据符号构建观测矩阵
+□ 3. 噪声方差：是否由接收信号估计？不得从 harness 注入
+     允许的估计方法：训练残差 / guard 区域 / CP 段残差 / nv_post
+□ 4. 信道时延位置：是否由 OMP/相关峰搜索估计？
+     不得 hardcode sym_delays 并传入 decode
+□ 5. 多普勒扩展：BEM 是否用 BIC 自适应选阶或保守上界？
+     不得将精确 fd_hz 传入 decode
+□ 6. 衰落类型：是否消除 fading_type 分支？
+     统一时变路径（静态自动退化）或后验判断
+□ 7. 符号定时：定时参考是否为已知训练序列（非 TX 数据首段）？
+□ 8. 测试 harness：是否存在 meta_rx = meta_tx 模式？
+     允许传递协议参数，禁止传递 TX 数据/oracle 信息
+```
+
+**违反后果**：标记为 🔴 CRITICAL，阻塞提交。参考 spec：
+`specs/active/2026-04-16-deoracle-rx-parameters.md`
+
 ## MATLAB 测试调试流程
 
 每次运行 `test_*.m` 单元测试**必须**按此流程：
@@ -132,6 +172,8 @@ diary off;
 
 ## Language & Conventions
 
+**当前模式**：`matlab-zh`（结构化配置：`.claude/modes/matlab-zh.json`，见 [`.claude/modes/README.md`](./.claude/modes/README.md)）
+
 - 主语言：MATLAB (.m)
 - 函数命名：小写下划线 `ch_est_ls.m`
 - 完整中文注释头（功能、版本、输入/输出参数、备注）
@@ -154,4 +196,24 @@ addpath(fullfile(proj_root, '07_ChannelEstEq', 'src', 'Matlab'));
 - `modules/10_DopplerProc/UWA_Doppler_MATLAB_Spec.md` — 多普勒规范 v2.0
 - `modules/12_IterativeProc/turbo_equalizer_implementation.md` — Turbo 均衡方案
 - `raw/notes/framework-history/` — 框架图历史版本
-- `refrence/` — 哈工程殷敬伟课题组学位论文 + Turbo_VAMP 参考
+- `reference/` — 哈工程殷敬伟课题组学位论文 + Turbo_VAMP 参考
+
+## 自动化保障（Hooks）
+
+| 时机 | 检查内容 | 脚本 |
+|------|---------|------|
+| PreToolUse（Edit/Write） | 阻断 raw/ 写入 | `scripts/check_raw_write.py` |
+| PreToolUse（Edit/Write） | 阻断 `<private>` 标签外泄到 wiki/ 等公开路径 | `scripts/check_private_tags.py` |
+| PostToolUse（Edit/Write） | Wiki 结构快速检查 | `scripts/lint_wiki.py --quick` |
+| Stop | Wiki index/log 同步检查 | `scripts/check_index_log_sync.py` |
+| Stop | 任务完整性验证 | `scripts/validate_task.py` |
+
+### Hook Exit Code Strategy
+
+| Exit | 含义 | 触发效果 |
+|------|------|---------|
+| **0** | 成功 / 优雅放行 | 继续执行，stdout 可见 |
+| **1** | 非阻断错误 | stderr 显示给用户，继续执行 |
+| **2** | 阻断错误 | stderr 喂回 Claude，阻止工具调用 |
+
+**设计原则**：宽松优先（未知输入 exit 0 放行）；阻断谨慎（仅安全性/一致性被破坏时 exit 2）；非致命提醒用 exit 0 + stdout，避免打断工作流。Windows Terminal 下大量非 0 exit 可能导致 tab 累积。
