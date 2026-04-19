@@ -884,20 +884,28 @@ function on_transmit()
         frame_ch = conv(frame_bb, h_tap);
         frame_ch = frame_ch(1:length(frame_bb));
 
-        % --- 多普勒注入（V2 简化版：仅基带相位旋转，不做时域 resample）---
-        % 理由：P3 demo UI 的 RX 无 α 盲估计（sync_dual_hfm 未接入），
-        %   若施加 resample 会产生时间漂移破坏 OTFS 数据结构；
-        %   仅相位旋转相当于引入频偏 fc*α Hz，OTFS DD 域 Doppler 轴呈现扩散但
-        %   数据流本身不漂移，RX 即使不补偿 BER 也不会崩（仅轻微升）。
-        % 完整 Doppler（含 time-scale）需先做 HFM+/HFM- α 估计，见
-        %   后续 spec 2026-04-20-p3-doppler-full-integration.md（待创建）。
+        % --- 多普勒注入（V3：真实水声 Doppler = time-scale + 载波频偏）---
+        % 公式: y(t) = x((1+α)·t) · exp(j·2π·fc·α·t)
+        %   time-scale (1+α) 由 comp_resample_spline 实现
+        %   载波相位旋转 exp(j·2π·fc·α·t) = exp(j·2π·fd·t)
+        % 注：RX 端 detect_frame_stream 用双 HFM 偏置差估计 α，
+        %   然后 try_decode_frame 反补偿（对齐 13_SourceCode/rx_chain）
         dop_hz = app.doppler_edit.Value;
         if abs(dop_hz) > 1e-3
             alpha = dop_hz / app.sys.fc;
+            % 时域 resample（产生 HFM peak 偏移，可被 sync_dual_hfm 估计）
+            frame_ch_resamp = comp_resample_spline(frame_ch, alpha);
+            if length(frame_ch_resamp) > length(frame_ch)
+                frame_ch = frame_ch_resamp(1:length(frame_ch));
+            else
+                frame_ch = [frame_ch_resamp, ...
+                    zeros(1, length(frame_ch)-length(frame_ch_resamp))];
+            end
+            % 载波相位旋转
             t_vec = (0:length(frame_ch)-1) / app.sys.fs;
             frame_ch = frame_ch .* exp(1j * 2*pi * dop_hz * t_vec);
-            ch_label = sprintf('%s + Doppler %+gHz (仅相位, 无 time-scale)', ...
-                ch_label, dop_hz);
+            ch_label = sprintf('%s + Doppler %+gHz (α=%.2e)', ...
+                ch_label, dop_hz, alpha);
         end
 
         snr_db = app.snr_edit.Value;
@@ -1188,21 +1196,14 @@ function try_decode_frame()
         bb_use = p3_downconv_bw(sch, app.sys);
         [full_bb_rx, ~] = downconvert(rx_seg, app.sys.fs, app.sys.fc, bb_use);
 
-        % Doppler 补偿（Level 1 对齐 13_SourceCode 端到端架构）
-        % decoder 文档要求"已由外层完成 Doppler 补偿"，这里在 RX 前应用 α 反补偿
-        alpha_est = sync_det.alpha_est;
-        if abs(alpha_est) > 1e-5 && sync_det.alpha_confidence > 0.2
-            % 先补偿载波相位（exp(-j·2π·fc·α·t) 反 TX 的相位旋转）
-            t_vec = (0:length(full_bb_rx)-1) / app.sys.fs;
-            full_bb_rx = full_bb_rx .* exp(-1j * 2*pi * app.sys.fc * alpha_est * t_vec);
-            % 再做时域 resample 反补偿（如有 time-scale）
-            try
-                full_bb_rx = comp_resample_spline(full_bb_rx, -alpha_est);
-            catch
-                % 无 addpath 时跳过
-            end
-            append_log(sprintf('[DOPPLER] α=%.2e (conf=%.2f) 已反补偿', ...
-                alpha_est, sync_det.alpha_confidence));
+        % Doppler 告知（Level 1 回滚：α 估计不稳定，改用 log 提示）
+        % RX 侧无 α 补偿；完整 Doppler 处理需 decoder 时变分支（Level 2，见
+        %   13_SourceCode/tests/*_timevarying.m 的成熟实现）
+        dop_hz_set = app.doppler_edit.Value;
+        if abs(dop_hz_set) > 0.1
+            append_log(sprintf(['[DOPPLER] TX 注入 %+gHz (α=%.2e) | RX 无补偿\n' ...
+                '           相干体制 BER 可能崩溃；FH-MFSK 非相干鲁棒；OTFS DD 域自带部分处理'], ...
+                dop_hz_set, dop_hz_set / app.sys.fc));
         end
 
         % 剥离前导码（下变频后样本对齐）

@@ -155,33 +155,35 @@ sidelobe = median(corr_pos_mag(mask));
 if sidelobe < 1e-9, sidelobe = 1e-9; end
 peak_ratio = peak_val / sidelobe;
 
-%% 8b. 多普勒 α 估计（双 HFM 偏置对消）
-% 原理: sync_dual_hfm V1.1 的公式
-%   HFM 在 α≠0 时, peak 出现偏置 Δt = S_bias × α
-%   HFM+ 偏置 = +S_bias × α, HFM- 偏置 = -S_bias × α
-%   差分: (tau_pos - tau_neg) = 2 × S_bias × α
-% S_bias = T_hfm × fc / bw （秒）
+%% 8b. 多普勒 α 估计（双 HFM 偏置对消，sync_dual_hfm V1.1 精确公式）
+% 公式: α ≈ (τ_neg - τ_pos - G) / (2·S_bias·fs - G)
+%   G = nominal_gap (采样点，HFM+ peak 到 HFM- peak 理论间距)
+%   S_bias = T_hfm × f_bar / bw (秒)，f_bar = fc（HFM 平均频率）
+% 亚样本精度: 对 peak 左右 1 样本做抛物线插值
 alpha_est = 0;
 alpha_confidence = 0;
-% 在 HFM- corr 中搜索 peak（粗窗口: 距 HFM+ peak 约 N_pre + guard 样本后）
-% assemble_physical_frame 帧结构: HFM+ | guard | HFM- | ...
-hfm_neg_expected = abs_rel_peak + N_pre + guard;  % HFM- peak 期望位置
-half_win = round(N_pre * 0.3);   % 搜索窗 ±0.3×N_pre
+S_bias = dur * fc / bw;
+nominal_sep = N_pre + guard;  % 采样点
+
+% 在 HFM- corr 中搜索 peak（窗口: 距 HFM+ peak 约 nominal_sep 样本）
+hfm_neg_expected = abs_rel_peak + nominal_sep;
+half_win = round(N_pre * 0.2);   % 搜索窗 ±0.2×N_pre
 win_lo = max(valid_start, hfm_neg_expected - half_win);
 win_hi = min(length(corr_neg_mag), hfm_neg_expected + half_win);
-if win_hi > win_lo
+if win_hi > win_lo + 2
     [neg_peak_val, rel_neg] = max(corr_neg_mag(win_lo:win_hi));
     abs_neg_peak = win_lo + rel_neg - 1;
-    % 双 HFM 偏置差
-    actual_sep = abs_neg_peak - abs_rel_peak;
-    nominal_sep = N_pre + guard;
-    dt_sec = (actual_sep - nominal_sep) / fs;   % HFM- 比预期延迟的秒数
-    S_bias = dur * fc / bw;
-    if abs(S_bias) > 1e-9
-        alpha_est = dt_sec / (2 * S_bias);
-        % 置信度: 两个 HFM peak 的归一化强度比
-        alpha_confidence = min(neg_peak_val / max(peak_val, eps), 1);
+
+    % 亚样本 peak 精化（抛物线拟合）
+    [tau_pos_sub] = parabolic_subsample_peak(corr_pos_mag, abs_rel_peak);
+    [tau_neg_sub] = parabolic_subsample_peak(corr_neg_mag, abs_neg_peak);
+
+    actual_sep = tau_neg_sub - tau_pos_sub;   % 亚样本精度
+    denom = 2 * S_bias * fs - nominal_sep;
+    if abs(denom) > 1
+        alpha_est = (actual_sep - nominal_sep) / denom;
     end
+    alpha_confidence = min(neg_peak_val / max(peak_val, eps), 1);
 end
 
 %% 9. 输出
@@ -193,4 +195,29 @@ det.confidence = min(peak_ratio / 20, 1);
 det.alpha_est = alpha_est;
 det.alpha_confidence = alpha_confidence;
 
+end
+
+
+%% ============================================================
+%% 辅助函数：抛物线插值亚样本 peak 位置
+%% ============================================================
+function idx_sub = parabolic_subsample_peak(mag, idx_int)
+% 输入：幅度序列 mag，整数 peak 位置 idx_int
+% 输出：亚样本精度 peak 位置（1-based）
+    N = length(mag);
+    if idx_int <= 1 || idx_int >= N
+        idx_sub = idx_int;
+        return;
+    end
+    y_m = mag(idx_int - 1);
+    y_0 = mag(idx_int);
+    y_p = mag(idx_int + 1);
+    denom = y_m - 2*y_0 + y_p;
+    if abs(denom) < 1e-12
+        idx_sub = idx_int;
+    else
+        delta = 0.5 * (y_m - y_p) / denom;
+        delta = max(min(delta, 0.5), -0.5);   % clamp ±0.5
+        idx_sub = idx_int + delta;
+    end
 end
