@@ -129,17 +129,14 @@ data_only_idx = find(~known_map(train_len+1:end));
 
 meta = struct();
 meta.N_info          = N_info_orig;
-meta.training        = training;
+% 去oracle：training/pilot_sym_ref/pilot_sym/all_sym 由 RX 本地重生成
 meta.known_map       = known_map;
 meta.pilot_positions = pilot_positions;
-meta.pilot_sym_ref   = pilot_sym_ref;
-meta.all_sym         = tx_sym;
 meta.perm_all        = perm_all;
 meta.train_len       = train_len;
 meta.N_data_sym      = length(tx_sym) - train_len;
 meta.N_total_sym     = length(tx_sym);
 meta.N_shaped        = length(body_bb);
-meta.pilot_sym       = tx_sym(1:min(10, length(tx_sym)));
 meta.M_coded         = M_coded;
 meta.data_only_idx   = data_only_idx;
 

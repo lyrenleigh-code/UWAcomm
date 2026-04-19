@@ -89,14 +89,12 @@ body_bb = shaped_bb(:).';
 meta = struct();
 meta.N_info        = N_info;
 meta.M_coded       = M_coded;
-meta.gold_code     = gold_code;
-meta.training      = training;
+% 去oracle：gold_code/training/pilot_sym 由 RX 本地重生成，不再导出
 meta.perm_all      = perm_all;
 meta.train_len     = train_len;
 meta.N_data_sym    = N_data_sym;
 meta.N_total_chips = N_total_chips;
 meta.code_len      = L;
 meta.N_shaped      = length(body_bb);
-meta.pilot_sym     = train_spread(1:min(L*10, length(train_spread)));
 
 end

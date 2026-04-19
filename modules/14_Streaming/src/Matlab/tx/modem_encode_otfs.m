@@ -93,6 +93,6 @@ meta.pilot_config = pilot_config;
 meta.guard_mask   = guard_mask;
 meta.N_data_slots = N_data_slots;
 meta.N_shaped     = length(body_bb);
-meta.pilot_sym    = data_sym(1:min(10, length(data_sym)));
+% 去oracle：pilot_sym 不再导出，RX 用 DD 域导频估计
 
 end

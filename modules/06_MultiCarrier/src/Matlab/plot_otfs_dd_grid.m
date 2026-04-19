@@ -41,7 +41,7 @@ colorbar; colormap('hsv');
 xlabel('时延索引 l'); ylabel('多普勒索引 k');
 title('∠x_{DD}[k,l] 相位');
 set(gca, 'YDir', 'normal');
-caxis([-pi, pi]);
+clim([-pi, pi]);
 
 sgtitle(sprintf('%s  (N=%d, M=%d, 格点=%d)', title_str, N, M, N*M));
 

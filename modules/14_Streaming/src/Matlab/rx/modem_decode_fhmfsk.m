@@ -115,11 +115,15 @@ info.N_info_out       = length(bits);
 %   turbo_iter      : FH-MFSK 非 Turbo = 0
 %   convergence_flag: Viterbi 硬判决无迭代收敛语义；用 |LLR| 充分性 + 0 迭代 = 1
 snr_per_sym = zeros(1, N_sym);
+hop_peaks   = zeros(1, N_sym);   % 每符号实际选出的最大能量频点（hop tab 用）
+hop_peak_val = zeros(1, N_sym);  % 对应峰值幅度
 for k = 1:N_sym
     shift = meta.hop_pattern(k);
     e_shifted = circshift(energy_matrix(k, :), -shift);
     e_freqs = e_shifted(1:M);
-    peak = max(e_freqs);
+    [peak, pk_idx] = max(e_freqs);
+    hop_peaks(k)    = pk_idx - 1;  % 0..M-1
+    hop_peak_val(k) = peak;
     noise = median(e_freqs);
     if noise > 1e-12
         snr_per_sym(k) = 10*log10(peak / noise);
@@ -134,5 +138,10 @@ info.estimated_ber    = mean(p_err);
 info.turbo_iter       = 0;
 % 收敛：|LLR| 中位数 > 2（合理置信）= 1，否则 0
 info.convergence_flag = double(median(abs_llr) > 2);
+% 同步诊断（sync tab 用）：跳频 peak 位置 + 能量矩阵快照
+info.hop_peaks       = hop_peaks;
+info.hop_peak_val    = hop_peak_val;
+info.hop_pattern     = meta.hop_pattern;
+info.snr_per_sym     = snr_per_sym;
 
 end

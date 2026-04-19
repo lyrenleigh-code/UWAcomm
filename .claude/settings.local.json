@@ -40,7 +40,16 @@
       "Bash(echo \"exit=$?\")",
       "Bash(mkdir -p _debug)",
       "Bash(mv diag_uilabel.m diag_uilabel_results.txt diag_ui_error.m diag_ui_error.txt _debug/)",
-      "Bash(echo \"=== 硬编码路径 ===\" grep -nE \"D:\\\\\\\\\\\\\\\\|/d/|H:\\\\\\\\\\\\\\\\|C:\\\\\\\\\\\\\\\\Users\" modules/14_Streaming/src/Matlab/**/*.m)"
+      "Bash(echo \"=== 硬编码路径 ===\" grep -nE \"D:\\\\\\\\\\\\\\\\|/d/|H:\\\\\\\\\\\\\\\\|C:\\\\\\\\\\\\\\\\Users\" modules/14_Streaming/src/Matlab/**/*.m)",
+      "Bash(\"/c/Program Files/MATLAB/R2025b/bin/matlab.exe\" -batch \"clear functions; clear all; run\\('test_p3_unified_modem.m'\\);\")",
+      "Bash(ls:*)",
+      "Bash(\"/c/Program Files/MATLAB/R2025b/bin/matlab.exe\" -batch \"msgs = checkcode\\('p3_demo_ui.m','-string'\\); disp\\(msgs\\); disp\\('---'\\); disp\\('END'\\);\")",
+      "Bash(\"/c/Program Files/MATLAB/R2025b/bin/matlab.exe\" -batch \"fh = @p3_demo_ui; disp\\('parse_ok'\\); whos fh\")",
+      "Bash(\"/c/Program Files/MATLAB/R2025b/bin/matlab.exe\" -batch \"fh = @p2_demo_ui; try, p2_demo_ui\\(\\); pause\\(1\\); close all; disp\\('P2_UI_OK'\\); catch ME, disp\\(['P2_UI_FAIL: ' ME.message]\\); end\")",
+      "Bash(\"/c/Program Files/MATLAB/R2025b/bin/matlab.exe\" -batch \"try, p3_demo_ui\\(\\); pause\\(2\\); close all; disp\\('UI_OK'\\); catch ME, disp\\(['UI_FAIL: ' ME.message]\\); for k=1:min\\(5,length\\(ME.stack\\)\\), fprintf\\('  @%s line %d\\\\n', ME.stack\\(k\\).name, ME.stack\\(k\\).line\\); end; end\")",
+      "Bash('/c/Program Files/MATLAB/R2025b/bin/matlab.exe' -batch ':*)",
+      "Bash(\"/c/Program Files/MATLAB/R2025b/bin/matlab.exe\" -batch \"try, p3_demo_ui\\(\\); pause\\(2\\); close all force; disp\\('UI_OK'\\); catch ME, disp\\(['UI_FAIL: ' ME.message]\\); for k=1:min\\(5,length\\(ME.stack\\)\\), fprintf\\('  @%s line %d\\\\n', ME.stack\\(k\\).name, ME.stack\\(k\\).line\\); end; end\")",
+      "Bash(grep:*)"
     ]
   }
 }

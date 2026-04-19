@@ -106,7 +106,7 @@ try
         subplot(n_rows, 3, pi);
         chi_db = 20*log10(max(all_chi{pi}, 1e-6));
         imagesc(tau_ax_us, nu_ax_plot, chi_db);
-        colorbar; caxis([-40 0]);
+        colorbar; clim([-40 0]);
         xlabel('延迟 (us)'); ylabel('多普勒 (Hz)');
         title(sprintf('%s', pulse_labels{pi}));
         set(gca, 'YDir', 'normal');

@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
-> 最后更新：2026-04-15
-> 页面总数：39（14_Streaming P1 + P2 完成 + 流式调试日志）
+> 最后更新：2026-04-17
+> 页面总数：40（新增 comparisons/e2e-test-matrix.md）
 
 ## Architecture（架构页）
 
@@ -38,5 +38,7 @@
 ## Explorations（探索页）
 
 ## Comparisons（比较页）
+
+- [e2e-test-matrix](comparisons/e2e-test-matrix.md) — 模块 07 + E2E 全体制 BER 测试矩阵（从 todo.md 迁入）
 
 ## Source Summaries（资料摘要页）

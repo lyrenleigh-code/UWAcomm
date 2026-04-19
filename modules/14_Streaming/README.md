@@ -23,11 +23,36 @@
 │   ├── tx/          # 发射链：text → frame → modem → raw_frames/NNNN.wav
 │   ├── rx/          # 接收链：channel_frames/NNNN.wav → detect → decode → text
 │   ├── channel/     # 信道模拟 daemon
-│   ├── amc/         # 链路质量估计 + 体制选择（P6）
+│   ├── amc/         # [P6 占位，待实现] 链路质量估计 + 体制选择，见 specs/active/2026-04-15-streaming-p6-amc.md
 │   ├── common/      # 文本↔比特 / 帧头 / CRC / session 管理 / wav I/O
+│   ├── ui/          # P1/P2/P3 交互 demo + 样式/动效 helper
 │   └── tests/
 ├── README.md
 ```
+
+## UI helper 模块（2026-04-17 视觉升级引入）
+
+位于 `src/Matlab/ui/`，供 `p3_demo_ui.m` 统一深色科技风 + 通信声纳主题：
+
+| 文件 | 职责 |
+|------|------|
+| `p3_style.m` | 色板 / 字体 / 尺寸 / 发光参数的**单一事实源**，返回 struct(PALETTE,FONTS,SIZES,GLOW) |
+| `p3_pick_font.m` | 按优先级探测可用字体，缺失时 fallback `'monospaced'` |
+| `p3_semantic_color.m` | 关键词（收敛/未收敛/进行中/失败/空闲）→ 前景/背景 RGB |
+| `p3_metric_card.m` | 指标卡（label + value + unit 三层），返回 handles 供 UI 更新 |
+| `p3_sonar_badge.m` | 顶栏声纳波纹装饰（3 道同心弧 + 扫描线 patch）|
+| `p3_animate_tick.m` | on_tick 动效：呼吸灯 / 检测闪烁 / 解码 flash / FIFO 进度 |
+| `p3_plot_channel_stem.m` | 彩色 stem 绘信道抽头，\|h\| 梯度 cyan→amber |
+| `p3_style_axes.m` | 深色 axes 统一样式（grid / 字体 / 颜色） |
+| `p3_channel_tap.m` | 按 scheme + preset 构造信道抽头（refactor 抽出） |
+| `p3_downconv_bw.m` | scheme → 接收端下变频带宽（refactor 抽出） |
+| `p3_text_capacity.m` | scheme → 最大文本字节数单一事实源（refactor 抽出） |
+| `p3_render_quality.m` | 质量历史 tab（BER + SNR + iter 演进，scheme 分色） |
+| `p3_render_sync.m` | 同步/多普勒 tab（HFM+/- 匹配滤波 + 符号级 scheme 分支 + 偏差轨迹） |
+
+`common/detect_frame_stream.m`（2026-04-17 引入）：流式帧检测器，P3 demo UI 真同步核心。
+替代旧 `frame_start_write` 共享捷径，对 passband FIFO 尾部做 downconvert + HFM+ 匹配滤波定位帧起点。
+单元测试 `tests/test_detect_frame_stream.m`：AWGN -5~15dB / 多径场景 6/6 PASS，位置偏差 ≤ 1 样本。
 
 ## 会话目录结构（方案 B：每帧一个 wav）
 

@@ -517,7 +517,7 @@ for fi=1:size(fading_cfgs,1)
 
     imagesc(t_ax_ds*1000, delay_ax_ms, 20*log10(cir_map + 1e-6));
     set(gca, 'YDir', 'normal');
-    colorbar; caxis([-30 max(20*log10(cir_map(:)+1e-6))]);
+    colorbar; clim([-30 max(20*log10(cir_map(:)+1e-6))]);
     colormap(gca, 'jet');
     xlabel('时间 (ms)'); ylabel('时延 (ms)');
     title(sprintf('%s: 时变CIR (dB)', fading_cfgs{fi,1}));

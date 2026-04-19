@@ -27,9 +27,15 @@ N_data_sym    = meta.N_data_sym;
 N_total_chips = meta.N_total_chips;
 N_shaped      = meta.N_shaped;
 M_coded       = meta.M_coded;
-gold_code     = meta.gold_code;
-training      = meta.training;
-chip_delays   = cfg.chip_delays;
+% 去oracle：本地重生成 gold_code 和 training（与 TX seed 一致）
+gold_01   = gen_gold_code(cfg.code_poly(1), cfg.code_poly(2));
+gold_code = 2 * gold_01 - 1;
+rng_st = rng; rng(88);
+training  = 2 * randi([0 1], 1, train_len) - 1;
+rng(rng_st);
+% 去oracle：不用 cfg.chip_delays，由训练码片相关搜索发现
+L_max_chips   = min(2*L, 50);  % 搜索范围上界（码片单位）
+K_rake_max    = 8;             % Rake finger 数上界
 train_chips   = train_len * L;
 
 %% ---- 2. body 长度对齐 ----
@@ -47,11 +53,13 @@ sps_dsss = cfg.sps;
 % 用训练码片做最大相关确定采样时刻
 train_spread = dsss_spread(training, gold_code);
 best_off = 0; best_pwr = 0;
+chip_off_corr_curve = zeros(1, sps_dsss);
 for off = 0:sps_dsss-1
     idx = off+1 : sps_dsss : length(rx_filt);
     n_check = min(length(idx), train_chips);
     if n_check >= L
         c = abs(sum(rx_filt(idx(1:n_check)) .* conj(train_spread(1:n_check))));
+        chip_off_corr_curve(off+1) = c;
         if c > best_pwr
             best_pwr = c;
             best_off = off;
@@ -67,22 +75,28 @@ elseif length(rx_chips) < N_total_chips
     rx_chips = [rx_chips, zeros(1, N_total_chips - length(rx_chips))];
 end
 
-%% ---- 4. 噪声方差估计 ----
-if isfield(meta, 'noise_var') && ~isempty(meta.noise_var) && meta.noise_var > 0
-    nv = max(meta.noise_var, 1e-10);
-else
-    % 用训练段尾部残差粗估
-    tail_n = min(L*5, train_chips);
-    tail_chips = rx_chips(train_chips-tail_n+1 : train_chips);
-    ref_chips  = train_spread(train_chips-tail_n+1 : train_chips);
-    nv = max(0.5 * var(tail_chips - mean(abs(tail_chips)) * ref_chips), 1e-10);
-end
-
-%% ---- 5. 训练段信道估计（Rake finger 增益）----
+%% ---- 4. 噪声方差盲估计（训练码片残差）----
 spread_code_pm = gold_code;
-h_est = zeros(1, length(chip_delays));
-for p = 1:length(chip_delays)
-    d = chip_delays(p);
+tail_n = min(L*5, train_chips);
+tail_chips = rx_chips(train_chips-tail_n+1 : train_chips);
+ref_chips  = train_spread(train_chips-tail_n+1 : train_chips);
+% 先粗估信道增益（训练段逐符号平均）
+h0_est = 0;
+for k = 1:train_len
+    cs = (k-1)*L + 1;
+    ce = cs + L - 1;
+    if ce <= train_chips
+        h0_est = h0_est + (sum(rx_chips(cs:ce) .* spread_code_pm) / L) * conj(training(k));
+    end
+end
+h0_est = h0_est / train_len;
+nv = max(var(tail_chips - abs(h0_est) * ref_chips), 1e-10);
+
+%% ---- 5. 训练段信道估计（盲搜 Rake finger 位置 + 增益估计）----
+
+% 5a. 对所有候选时延做相关，发现有效 Rake finger 位置
+h_scan = zeros(1, L_max_chips);
+for d = 0:L_max_chips-1
     acc = 0;
     for k = 1:train_len
         cs = (k-1)*L + d + 1;
@@ -91,8 +105,20 @@ for p = 1:length(chip_delays)
             acc = acc + (sum(rx_chips(cs:ce) .* spread_code_pm) / L) * conj(training(k));
         end
     end
-    h_est(p) = acc / train_len;
+    h_scan(d+1) = acc / train_len;
 end
+
+% 阈值检测：>5% 最大值的位置为有效径
+h_abs = abs(h_scan);
+thresh = 0.05 * max(h_abs);
+detected = find(h_abs > thresh);
+if length(detected) > K_rake_max
+    [~, si] = sort(h_abs(detected), 'descend');
+    detected = sort(detected(si(1:K_rake_max)));
+end
+if isempty(detected), detected = 1; end
+chip_delays = detected - 1;  % 0-based
+h_est = h_scan(detected);
 
 %% ---- 6. Rake 接收（MRC, 数据段含参考符号）----
 rake_opts = struct('combine', 'mrc', 'offset', train_chips);
@@ -127,7 +153,9 @@ end
 %% ---- 11. info ----
 med_llr = median(abs(LLR_inter));
 info = struct();
-info.estimated_snr    = 10*log10(max(mean(abs(rx_chips).^2) / nv, 1e-6));
+% 信道 SNR：减去 RRC 处理增益（sps_dsss）
+P_ch = sum(abs(h_est).^2);
+info.estimated_snr    = 10*log10(max(P_ch / nv, 1e-6)) - 10*log10(sps_dsss);
 info.estimated_ber    = mean(0.5 * exp(-abs(LLR_inter)));
 info.turbo_iter       = 1;     % DSSS 无 Turbo，单次 Rake + DCD + Viterbi
 info.convergence_flag = 1;  % DSSS 单次译码，无迭代收敛概念
@@ -135,6 +163,12 @@ info.noise_var        = nv;
 info.sym_offset       = best_off;
 info.h_est            = h_est;
 info.chip_delays      = chip_delays;
+% 同步诊断（sync tab 用）
+info.chip_off_best     = best_off;
+info.chip_off_corr     = chip_off_corr_curve;
+info.chip_off_best_val = best_pwr;
+info.rake_finger_delays = chip_delays;  % Rake 选中径（chip 级时延）
+info.rake_finger_gains  = h_est;        % 对应增益
 
 % 星座图诊断（BPSK）
 info.pre_eq_syms  = rake_out;

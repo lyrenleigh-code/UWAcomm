@@ -1,6 +1,6 @@
 # 信道估计与均衡模块 (ChannelEstEq)
 
-接收链路核心模块，覆盖静态/时变/OTFS信道估计、信道跟踪、时域/频域/OTFS均衡器、Turbo迭代软信息接口。共41个文件（35个对外函数 + 3个可视化 + 2个测试 + 1个内部辅助）。
+接收链路核心模块，覆盖静态/时变/OTFS 信道估计、信道跟踪、时域/频域/OTFS 均衡器、Turbo 迭代软信息接口。共 48 个文件（2026-04-17 统计）：40 个对外函数（含 3 个 OTFS 专用估计器 + 1 个 TV FDE 均衡器的 IC 版） + 3 个可视化 + 2 个测试 + 3 个辅助。
 
 ---
 
@@ -62,11 +62,13 @@
 | `delay_range` | 1x2向量 | SAGE时延搜索范围 [min max]（采样点） |
 | `doppler_range` | 1x2向量 | SAGE多普勒搜索范围 [min max]（Hz） |
 
-### 3 OTFS信道估计（1个）
+### 3 OTFS信道估计（3个）
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
 | `ch_est_otfs_dd` | `[h_dd, path_info] = ch_est_otfs_dd(Y_dd, pilot_info, N, M)` | DD域嵌入导频信道估计，提取稀疏路径参数 |
+| `ch_est_otfs_zc` | `[h_dd, info] = ch_est_otfs_zc(Y_dd, pilot_cfg, N, M)` | ZC 序列导频的 DD 信道估计（B 方案，降 PAPR 9dB，见 2026-04-13 OTFS PAPR 决策）|
+| `ch_est_otfs_superimposed` | `[h_dd, info] = ch_est_otfs_superimposed(Y_dd, pilot_cfg, N, M)` | 叠加导频估计（C 方案，导频和数据共享同一 DD 网格，能效最优） |
 
 #### OTFS估计参数说明
 
@@ -97,7 +99,7 @@
 | `opts.q_proc` | 标量 | 过程噪声方差，默认 `(1-alpha^2)*mean(abs(h_init)^2)` |
 | `opts.K_target` | 标量 | 稀疏修剪阈值比例，默认5% |
 
-### 5 TDE均衡器（时域，5个）
+### 5 TDE均衡器（时域，6个）
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
@@ -106,6 +108,7 @@
 | `eq_linear_rls` | `[LLR_out, x_hat, noise_var_est] = eq_linear_rls(y, training, num_taps, lambda_rls, pll_params)` | RLS线性均衡+PLL，Turbo iter1用，输出LLR |
 | `eq_dfe` | `[LLR_out, x_hat, noise_var_est] = eq_dfe(y, h_est, training, num_ff, num_fb, lambda_rls, pll_params)` | RLS-DFE+PLL+LLR输出，V3.1 |
 | `eq_bidirectional_dfe` | `[LLR_out, x_hat, noise_var_est] = eq_bidirectional_dfe(y, h_est, training, num_ff, num_fb, lambda_rls, pll_params)` | 双向DFE，前向+后向联合判决抑制错误传播 |
+| `eq_rake` | `[x_hat, w] = eq_rake(y, h_est, delays)` | Rake 合并器，DSSS 多径能量捕获 |
 
 #### TDE均衡器参数说明
 
@@ -120,7 +123,7 @@
 | `h_est` | 1xL复数 | 信道估计（DFE初始化用，可选；不传则纯RLS训练） |
 | `pll_params` | 结构体 | `.enable`(bool), `.Kp`(默认0.01), `.Ki`(默认0.005)；静态信道必须关闭 |
 
-### 6 FDE均衡器（频域，5个）
+### 6 FDE均衡器（频域，6个）
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
@@ -128,6 +131,7 @@
 | `eq_mmse_fde` | `[x_hat, X_hat_freq] = eq_mmse_fde(Y_freq, H_est, noise_var)` | MMSE频域均衡，SC-FDE/OFDM通用 |
 | `eq_mmse_ic_fde` | `[x_tilde, mu, nv_tilde] = eq_mmse_ic_fde(Y_freq, H_est, x_bar, var_x, noise_var)` | 迭代MMSE-IC频域均衡，Turbo核心 |
 | `eq_mmse_tv_fde` | `[x_hat, H_tv] = eq_mmse_tv_fde(Y_freq, h_time_block, delays_sym, N_fft, noise_var)` | 时变MMSE-FDE，构建ICI矩阵求逆 |
+| `eq_mmse_ic_tv_fde` | `[x_tilde, mu, nv_tilde] = eq_mmse_ic_tv_fde(Y_freq, H_tv, x_bar, var_x, noise_var)` | 时变 MMSE-IC FDE（Turbo 迭代 + ICI 消除版，接 eq_mmse_tv_fde 输出） |
 | `eq_bem_turbo_fde` | `[bits_out, iter_info] = eq_bem_turbo_fde(Y_freq, h_time_block, delays_sym, N_fft, noise_var, codec_params, num_outer_iter)` | BEM-Turbo迭代ICI消除FDE |
 
 #### FDE均衡器参数说明
@@ -143,12 +147,14 @@
 | `delays_sym` | 1xP向量 | 各径符号级时延 |
 | `codec_params` | 结构体 | BEM-Turbo用编解码参数 |
 
-### 7 OTFS均衡器（2个）
+### 7 OTFS均衡器（4个）
 
 | 函数 | 签名 | 说明 |
 |------|------|------|
 | `eq_otfs_mp` | `[x_hat, LLR_out, x_mean_out] = eq_otfs_mp(Y_dd, h_dd, path_info, N, M, noise_var, max_iter, constellation, prior_mean, prior_var)` | OTFS消息传递(MP)均衡，高斯近似BP，V3 |
 | `eq_otfs_mp_simplified` | `[x_hat] = eq_otfs_mp_simplified(Y_dd, h_dd, path_info, N, M, noise_var, max_iter)` | OTFS简化MP，MMSE低复杂度近似 |
+| `eq_otfs_lmmse` | `[x_hat, info] = eq_otfs_lmmse(Y_dd, h_dd, path_info, N, M, noise_var)` | OTFS LMMSE 均衡（基于 DD 域稀疏路径构造协方差矩阵），作为 MP 的高 SNR 基准 |
+| `eq_otfs_uamp` | `[x_hat, info] = eq_otfs_uamp(Y_dd, h_dd, path_info, N, M, noise_var, max_iter)` | OTFS UAMP 均衡（统一近似消息传递），离散 Doppler 场景收敛快 |
 
 ### 8 多通道均衡器（1个）
 

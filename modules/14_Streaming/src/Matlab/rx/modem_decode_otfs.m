@@ -42,17 +42,12 @@ end
 %% ---- 3. OTFS 解调 ----
 [Y_dd, ~] = otfs_demodulate(body_bb, N, M, cp_len, 'dft');
 
-%% ---- 4. 噪声方差估计 ----
-if isfield(meta, 'noise_var') && ~isempty(meta.noise_var) && meta.noise_var > 0
-    nv = max(meta.noise_var, 1e-8);
+%% ---- 4. 噪声方差盲估计（guard 区域）----
+guard_indices = find(guard_mask);
+if ~isempty(guard_indices)
+    nv = max(mean(abs(Y_dd(guard_indices)).^2), 1e-8);
 else
-    % 用 guard 区域估计噪底
-    guard_indices = find(guard_mask);
-    if ~isempty(guard_indices)
-        nv = max(mean(abs(Y_dd(guard_indices)).^2), 1e-8);
-    else
-        nv = max(0.1 * var(Y_dd(:)), 1e-8);
-    end
+    nv = max(0.1 * var(Y_dd(:)), 1e-8);
 end
 
 %% ---- 5. DD 域信道估计 ----
@@ -163,13 +158,21 @@ end
 %% ---- 9. info ----
 med_llr = median(abs(Lpost_info));
 info = struct();
-info.estimated_snr    = 10*log10(max(mean(abs(Y_dd(:)).^2) / nv, 1e-6));
+% 信道总功率 / guard 区噪声
+P_ch_otfs = sum(abs(path_info.gain).^2);
+info.estimated_snr    = 10*log10(max(P_ch_otfs / nv, 1e-6));
 info.estimated_ber    = mean(0.5 * exp(-abs(Lpost_info)));
 info.turbo_iter       = turbo_iter;
 info.convergence_flag = double(med_llr > 5);
 info.noise_var        = nv;
 info.h_dd             = h_dd;
 info.path_info        = path_info;
+% 同步诊断（sync tab 用）：DD 域路径快照
+info.dd_path_info = struct( ...
+    'num_paths',   path_info.num_paths, ...
+    'delay_idx',   path_info.delay_idx, ...
+    'doppler_idx', path_info.doppler_idx, ...
+    'gain',        path_info.gain);
 
 info.pre_eq_syms  = Y_dd(data_indices).';
 info.post_eq_syms = post_eq_syms_dd(:).';

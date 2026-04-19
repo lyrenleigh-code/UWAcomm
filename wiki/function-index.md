@@ -1,11 +1,12 @@
 ---
 tags: [自动生成, 函数索引, UWAcomm]
-last-sync: 2026-04-11
+last-sync: 2026-04-17
 ---
 
 # UWAcomm 全模块函数索引
 
-> 自动生成，勿手动编辑。共 13 个模块，151 个函数。
+> 共 14 个模块，261 个 .m 文件（含测试/可视化/辅助），~200 个对外函数。2026-04-17 统计。
+> 14_Streaming 模块及 ui/ helper 清单见下方"14_Streaming"章节。
 
 ## 模块概览
 
@@ -17,13 +18,14 @@ last-sync: 2026-04-11
 | [[04_Modulation\|04_Modulation]] | 4 | 将比特流映射为复数调制符号（QAM/PSK）或频率索引（MFSK），接收端支持硬判决和软判决LLR输 |
 | [[05_SpreadSpectrum\|05_SpreadSpectrum]] | 17 | 提供扩频处理能力，覆盖DSSS直接序列扩频、CSK循环移位键控、M-ary组合扩频、FH跳频四种方案 |
 | [[06_MultiCarrier\|06_MultiCarrier]] | 15 | 将频域/DD域符号变换为时域发射信号，覆盖OFDM(CP/ZP)、SC-FDE和OTFS(DFT/Z |
-| [[07_ChannelEstEq\|07_ChannelEstEq]] | 37 | 接收链路核心模块，覆盖静态/时变/OTFS信道估计、信道跟踪、时域/频域/OTFS均衡器、Turbo |
+| [[07_ChannelEstEq\|07_ChannelEstEq]] | 48（41 对外） | 接收链路核心模块，覆盖静态/时变/OTFS信道估计、信道跟踪、时域/频域/OTFS均衡器、Turbo |
 | [[08_Sync\|08_Sync]] | 20 | 发端帧组装和收端同步检测/帧解析的统一入口，支持SC-TDE/SC-FDE/OFDM/OTFS四种体 |
 | [[09_Waveform\|09_Waveform]] | 8 | 发射链路末端和接收链路前端的物理层波形处理，负责脉冲成形/匹配滤波、数字上下变频、FSK波形生成和D |
 | [[10_DopplerProc\|10_DopplerProc]] | 12 | 接收链路中的多普勒处理模块，分为10-1粗多普勒估计+重采样补偿（去CP前）和10-2残余CFO/I |
 | [[11_ArrayProc\|11_ArrayProc]] | 6 | 可选的接收链路前端预处理模块，对多通道阵列信号进行波束形成或非均匀变采样重建，输出单路高质量信号供下 |
 | [[12_IterativeProc\|12_IterativeProc]] | 5 | Turbo均衡迭代调度器，调度模块07(SISO均衡)、模块03(交织)和模块02(SISO译码)之 |
 | [[13_SourceCode\|13_SourceCode]] | 7 | 六种通信体制的端到端仿真统一入口，提供公共函数（参数配置/发射链路/接收链路/信道模型/自适应块长） |
+| 14_Streaming | 58 | 流式仿真框架：text → wav → 信道 → wav → text，统一 modem API（6 体制），P1-P6 phase 规划；ui/ 下 P3 深色科技风 + 11 个样式/动效 helper |
 
 ## 全部函数
 
@@ -100,19 +102,25 @@ last-sync: 2026-04-11
 | `ch_est_tsbl` | 07_ChannelEstEq | T-SBL时序稀疏贝叶斯，多快照联合稀疏+AR(1)时间相关 |
 | `ch_est_sage` | 07_ChannelEstEq | SAGE/EM高分辨率参数估计，输出时延/增益/多普勒 |
 | `ch_est_otfs_dd` | 07_ChannelEstEq | DD域嵌入导频信道估计，提取稀疏路径参数 |
+| `ch_est_otfs_zc` | 07_ChannelEstEq | ZC 序列导频 DD 信道估计，降 PAPR 9dB |
+| `ch_est_otfs_superimposed` | 07_ChannelEstEq | 叠加导频估计，导频和数据共享 DD 网格 |
 | `ch_track_kalman` | 07_ChannelEstEq | 稀疏Kalman AR(1)逐符号跟踪 |
 | `eq_rls` | 07_ChannelEstEq | RLS居中延迟自适应均衡，抽头甜点=4xL_h |
 | `eq_lms` | 07_ChannelEstEq | LMS自适应均衡 |
 | `eq_linear_rls` | 07_ChannelEstEq | RLS线性均衡+PLL，Turbo iter1用，输出LLR |
 | `eq_dfe` | 07_ChannelEstEq | RLS-DFE+PLL+LLR输出，V3.1 |
 | `eq_bidirectional_dfe` | 07_ChannelEstEq | 双向DFE，前向+后向联合判决抑制错误传播 |
+| `eq_rake` | 07_ChannelEstEq | Rake 合并器，DSSS 多径能量捕获 |
 | `eq_ofdm_zf` | 07_ChannelEstEq | OFDM ZF迫零，信道零点处噪声放大 |
 | `eq_mmse_fde` | 07_ChannelEstEq | MMSE频域均衡，SC-FDE/OFDM通用 |
 | `eq_mmse_ic_fde` | 07_ChannelEstEq | 迭代MMSE-IC频域均衡，Turbo核心 |
 | `eq_mmse_tv_fde` | 07_ChannelEstEq | 时变MMSE-FDE，构建ICI矩阵求逆 |
+| `eq_mmse_ic_tv_fde` | 07_ChannelEstEq | 时变 MMSE-IC FDE（Turbo + ICI 消除版） |
 | `eq_bem_turbo_fde` | 07_ChannelEstEq | BEM-Turbo迭代ICI消除FDE |
 | `eq_otfs_mp` | 07_ChannelEstEq | OTFS消息传递(MP)均衡，高斯近似BP，V3 |
 | `eq_otfs_mp_simplified` | 07_ChannelEstEq | OTFS简化MP，MMSE低复杂度近似 |
+| `eq_otfs_lmmse` | 07_ChannelEstEq | OTFS LMMSE（高 SNR 基准） |
+| `eq_otfs_uamp` | 07_ChannelEstEq | OTFS UAMP（离散 Doppler 收敛快） |
 | `eq_ptrm` | 07_ChannelEstEq | PTR被动时反转，多通道匹配滤波空间聚焦 |
 | `build_scattered_obs` | 07_ChannelEstEq | 从帧结构（训练+散布导频）构建BEM观测矩阵 |
 | `soft_demapper` | 07_ChannelEstEq | 均衡输出 -> 编码比特外信息LLR |
@@ -120,8 +128,6 @@ last-sync: 2026-04-11
 | `llr_to_symbol` | 07_ChannelEstEq | LLR -> 软符号（译码器->均衡器接口） |
 | `symbol_to_llr` | 07_ChannelEstEq | 均衡后符号 -> LLR（均衡器->译码器接口） |
 | `interference_cancel` | 07_ChannelEstEq | 干扰消除，从接收信号减去已知干扰重构分量 |
-| `MMSE` | 07_ChannelEstEq | IC（最小均方误差干扰消除） |
-| `OTFS` | 07_ChannelEstEq | MP（OTFS消息传递均衡） |
 | `gen_lfm` | 08_Sync | LFM线性调频信号生成 |
 | `gen_hfm` | 08_Sync | HFM双曲调频信号生成（Doppler不变） |
 | `gen_zc_seq` | 08_Sync | Zadoff-Chu序列生成（恒模，理想自相关） |
@@ -230,3 +236,20 @@ last-sync: 2026-04-11
 |------|------|
 | `p1_demo_ui` | P1 单帧交互 GUI（uifigure，7 viz tab）|
 | `p2_demo_ui` | P2 多帧交互 GUI（uitable 帧明细 + 7 viz tab 含帧检测）|
+| `p3_demo_ui` | P3 流式 GUI（RX 持续监听 + TX 触发 + 6 tab 可视化）V3.1 深色科技风 |
+
+#### ui/ helper（2026-04-17 视觉升级引入，见 [[SC-FDE调试日志]] 上游）
+
+| 函数 | 用途 |
+|------|------|
+| `p3_style` | 色板/字体/尺寸/发光参数**单一事实源**，返回 struct(PALETTE,FONTS,SIZES,GLOW) |
+| `p3_pick_font` | 按优先级探测可用字体，fallback `'monospaced'` |
+| `p3_semantic_color` | 关键词（收敛/未收敛/进行中/空闲）→ 前景/背景 RGB |
+| `p3_metric_card` | 指标卡原子（label + value + unit 三层），返回 handles struct |
+| `p3_sonar_badge` | 顶栏声纳波纹装饰 patch（3 道同心弧）|
+| `p3_animate_tick` | on_tick 动效：呼吸灯 / 检测闪烁 / 解码 flash / FIFO 进度 |
+| `p3_plot_channel_stem` | 彩色 stem 绘信道抽头，\|h\| 梯度 cyan→amber |
+| `p3_style_axes` | 深色 axes 统一样式（grid + 字体 + 颜色） |
+| `p3_channel_tap` | scheme + preset → 信道抽头构造（refactor 抽出） |
+| `p3_downconv_bw` | scheme → 接收端下变频带宽（refactor 抽出） |
+| `p3_text_capacity` | scheme → 最大文本字节数（refactor 抽出） |

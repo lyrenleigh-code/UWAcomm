@@ -1,6 +1,6 @@
 ---
 tags: [结论, 技术决策]
-updated: 2026-04-14
+updated: 2026-04-17
 ---
 
 # 关键技术结论
@@ -50,3 +50,9 @@ updated: 2026-04-14
 24. **FH-MFSK 软判决 LLR 显著改善衰落鲁棒性**（P2）：硬判决 1 位错即 CRC 挂；改用每符号 8 频率能量算 per-bit LLR `(max_e_b1 - max_e_b0) / median(e)` 送 Viterbi，配合 [7,5] 卷积码 dfree=5 能纠多位错
 25. **FH-MFSK 无均衡，多径展宽 > 50% 符号时长即崩**：FFT 能量检测对 ISI 无能为力；延时展宽 1.5ms vs 符号 2ms (75%) 时连软 LLR 也救不回；OFDM/SC-FDE 自带均衡器才能扛大延时展宽
 26. **downconvert LPF 暖机吃首帧**：64 阶 FIR 前 ~64 样本是瞬态会损伤 frame 1 HFM；流式 RX 必须**预填零给 LPF 暖机**（rx_pb_padded = [zeros(N_warmup), rx_pb]，再 trim 输出）
+
+## SC-FDE decode 诊断（2026-04-17）
+
+27. **SC-FDE convergence_flag 单阈值失效 (2026-04-17)**：`modem_decode_scfde` 原 `med_llr > 5` 判据在 LLR clip ±30 下过严，BER=0 场景仍显示未收敛；改三选一（`med_llr > 5 || 硬判决稳定 || 高置信LLR>70%`）。详见 [[SC-FDE调试日志]]
+28. **estimated_snr 不应减 10*log10(sps) (2026-04-17)**：`rx_filt` 未做 RRC 能量归一化，`P_sig_train / nv_eq` 本身就是符号域 SNR；旧代码额外减 sps 增益导致恒定偏低 ~10dB。去掉后 est_snr 贴近真实值 ±4dB
+29. **est_ber 估计依赖 LLR 正确归一化**：`mean(0.5*exp(-|L|))` 在 LLR scale 偏小（L157 clip ±30）时虚高，不能作 BER 参考；建议用 `hard_converged_iter > 0` 直接置 0。暂留独立修复

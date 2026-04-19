@@ -26,20 +26,42 @@ cfg   = sys.sctde;
 codec = sys.codec;
 
 %% ---- 1. 关键参数 ----
-training      = meta.training;
 known_map     = meta.known_map;
 train_len     = meta.train_len;
 N_total_sym   = meta.N_total_sym;
 N_shaped      = meta.N_shaped;
 M_coded       = meta.M_coded;
 data_only_idx = meta.data_only_idx;
-sym_delays    = cfg.sym_delays;
-L_h           = max(sym_delays) + 1;
-P_paths       = length(sym_delays);
+% 去oracle：不用 cfg.sym_delays，由训练段 GAMP 搜索发现
+L_max         = min(train_len, 200);  % 搜索范围上界
+K_sparse_max  = 10;
 T             = train_len;
 N_dsym        = N_total_sym - T;
 
-is_timevarying = ~strcmpi(cfg.fading_type, 'static');
+% 去oracle：由帧结构判断是否时变（有散布导频→时变路径，无→静态路径）
+is_timevarying = isfield(meta, 'pilot_positions') && ~isempty(meta.pilot_positions) && any(meta.pilot_positions > 0);
+
+%% ---- 1b. 本地重生成训练序列和导频（seed=99，与 TX 端一致）----
+constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
+rng_st = rng;
+rng(99);
+training = constellation(randi(4, 1, train_len));
+pilot_sym_ref = constellation(randi(4, 1, cfg.pilot_cluster_len));
+rng(rng_st);
+
+% 构建 known_values：仅在 known_map=true 位置填入已知值
+known_values = zeros(1, N_total_sym);
+known_values(1:T) = training;
+if isfield(meta, 'pilot_positions') && ~isempty(meta.pilot_positions)
+    for kk = 1:length(meta.pilot_positions)
+        pp_start = meta.pilot_positions(kk);
+        if pp_start > 0
+            pp_end = min(pp_start + cfg.pilot_cluster_len - 1, N_total_sym);
+            plen = pp_end - pp_start + 1;
+            known_values(pp_start:pp_end) = pilot_sym_ref(1:plen);
+        end
+    end
+end
 
 %% ---- 2. body 长度对齐 ----
 body_bb = body_bb(:).';
@@ -52,14 +74,16 @@ end
 %% ---- 3. RRC 匹配滤波 + 符号定时 ----
 [rx_filt, ~] = match_filter(body_bb, sys.sps, 'rrc', cfg.rolloff, cfg.span);
 
-pilot = meta.pilot_sym;
+pilot = training(1:min(10, train_len));  % 本地重生成的训练序列首段
 N_pilot = length(pilot);
 best_off = 0; best_corr = 0;
+sym_off_corr_curve = zeros(1, sys.sps);
 for off = 0 : sys.sps-1
     st = rx_filt(off+1 : sys.sps : end);
     n_check = min(length(st), N_pilot);
     if n_check >= 10
         c = abs(sum(st(1:n_check) .* conj(pilot(1:n_check))));
+        sym_off_corr_curve(off+1) = c;
         if c > best_corr
             best_corr = c;
             best_off  = off;
@@ -73,24 +97,34 @@ elseif length(rx_sym_recv) < N_total_sym
     rx_sym_recv = [rx_sym_recv, zeros(1, N_total_sym - length(rx_sym_recv))];
 end
 
-%% ---- 4. 噪声方差 ----
-if isfield(meta, 'noise_var') && ~isempty(meta.noise_var)
-    nv_eq = max(meta.noise_var, 1e-10);
-else
-    tail = rx_sym_recv(end-min(50,length(rx_sym_recv))+1:end);
-    nv_eq = max(0.1 * var(tail), 1e-10);
-end
+%% ---- 4. 噪声方差粗估（训练段信号方差，BEM 后由 nv_post 精化）----
+nv_eq = max(0.1 * var(rx_sym_recv(1:min(50, length(rx_sym_recv)))), 1e-10);
 
-%% ---- 5. 信道估计 + Turbo 均衡 ----
+%% ---- 5. 信道时延盲估计（GAMP 全长搜索）----
+T_mat_scan = zeros(train_len, L_max);
+for col = 1:L_max
+    T_mat_scan(col:train_len, col) = training(1:train_len-col+1).';
+end
+rx_train = rx_sym_recv(1:train_len);
+[h_scan_vec, ~] = ch_est_gamp(rx_train(:), T_mat_scan, L_max, 50, nv_eq);
+
+% 自动发现时延位置
+h_abs = abs(h_scan_vec(:).');
+thresh = 0.05 * max(h_abs);
+detected = find(h_abs > thresh);
+if length(detected) > K_sparse_max
+    [~, si] = sort(h_abs(detected), 'descend');
+    detected = sort(detected(si(1:K_sparse_max)));
+end
+if isempty(detected), detected = 1; end
+sym_delays = detected - 1;
+L_h = max(sym_delays) + 1;
+P_paths = length(sym_delays);
+
+%% ---- 5b. 信道估计 + Turbo 均衡 ----
 if ~is_timevarying
     %% === 静态路径：GAMP + turbo_equalizer_sctde ===
-    T_mat = zeros(train_len, L_h);
-    for col = 1:L_h
-        T_mat(col:train_len, col) = training(1:train_len-col+1).';
-    end
-    rx_train = rx_sym_recv(1:train_len);
-    [h_gamp_vec, ~] = ch_est_gamp(rx_train(:), T_mat, L_h, 50, nv_eq);
-    h_est_gamp = h_gamp_vec(:).';
+    h_est_gamp = h_scan_vec(1:L_h).';
 
     % PLL 关闭（无多普勒时 PLL 不稳定，per debug history）
     eq_params = struct('num_ff', cfg.num_ff, 'num_fb', cfg.num_fb, ...
@@ -106,7 +140,6 @@ if ~is_timevarying
     med_llr_final = median(abs(final_llr));
 else
     %% === 时变路径：BEM(DCT) + 手写 ISI 消除 Turbo ===
-    tx_sym = meta.all_sym;
     pilot_positions = meta.pilot_positions;
     N_pilot_clusters = length(pilot_positions);
 
@@ -137,7 +170,7 @@ else
             for pp = 1:P_paths
                 idx = n - sym_delays(pp);
                 if idx >= 1 && idx <= N_total_sym && known_map(idx)
-                    x_vec(pp) = tx_sym(idx);
+                    x_vec(pp) = known_values(idx);
                 else
                     all_known = false;
                 end
@@ -151,9 +184,10 @@ else
     end
 
     % BEM(DCT) 信道估计
-    bem_opts = struct('Q_mode', 'auto', 'lambda_scale', 1.0);
+    fd_hz_max = 10;  % 保守上界，不依赖 oracle fd_hz
+    bem_opts = struct('Q_mode', 'bic', 'lambda_scale', 1.0);
     [h_tv, ~, ~] = ch_est_bem(obs_y(:), obs_x, obs_n(:), N_total_sym, ...
-        sym_delays, cfg.fd_hz, sys.sym_rate, nv_eq, 'dct', bem_opts);
+        sym_delays, fd_hz_max, sys.sym_rate, nv_eq, 'dct', bem_opts);
 
     % nv_post 实测噪声兜底
     nv_post_sum = 0; nv_post_cnt = 0;
@@ -191,7 +225,7 @@ else
                     idx = nn - d;
                     if idx >= 1 && idx <= N_total_sym
                         if known_map(idx)
-                            isi_known = isi_known + h_tv(pp, nn) * tx_sym(idx);
+                            isi_known = isi_known + h_tv(pp, nn) * known_values(idx);
                         else
                             isi_unknown_pwr = isi_unknown_pwr + abs(h_tv(pp, nn))^2;
                         end
@@ -219,7 +253,7 @@ else
             n_fill = min(length(x_bar_data), length(data_only_idx));
             full_soft(T + data_only_idx(1:n_fill)) = x_bar_data(1:n_fill);
             pilot_idx_seg = find(known_map(T+1:end));
-            full_soft(T + pilot_idx_seg) = tx_sym(T + pilot_idx_seg);
+            full_soft(T + pilot_idx_seg) = known_values(T + pilot_idx_seg);
 
             % DD-BEM 重估计（置信门控）
             avg_confidence = mean(abs(Lp_coded));
@@ -250,7 +284,7 @@ else
                     end
                 end
                 [h_tv, ~, ~] = ch_est_bem(obs_y2(:), obs_x2, obs_n2(:), N_total_sym, ...
-                    sym_delays, cfg.fd_hz, sys.sym_rate, nv_eq, 'dct', bem_opts);
+                    sym_delays, fd_hz_max, sys.sym_rate, nv_eq, 'dct', bem_opts);
             end
 
             % 逐符号全 ISI 消除 + 单抽头 MMSE
@@ -317,13 +351,18 @@ end
 
 %% ---- 7. info ----
 info = struct();
-info.estimated_snr    = 10*log10(max(mean(abs(rx_sym_recv).^2) / nv_eq, 1e-6));
+% 训练段信道功率/噪声 → 信道 SNR（减去 RRC 处理增益）
+P_sig_train = sum(abs(h_scan_vec).^2);
+info.estimated_snr    = 10*log10(max(P_sig_train / nv_eq, 1e-6)) - 10*log10(sys.sps);
 info.estimated_ber    = mean(0.5 * exp(-med_llr_final));
 info.turbo_iter       = turbo_iter_actual;
 info.convergence_flag = double(med_llr_final > 5);
 info.H_est_block1     = H_est_block1;
 info.noise_var        = nv_eq;
 info.sym_offset       = best_off;
+info.sym_off_best     = best_off;
+info.sym_off_corr     = sym_off_corr_curve;
+info.sym_off_best_val = best_corr;
 
 % 星座图数据（UI 用）
 info.pre_eq_syms = rx_sym_recv(T+1:end);

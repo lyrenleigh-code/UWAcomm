@@ -125,7 +125,7 @@ for fi = 1:size(fading_cfgs,1)
         end
     end
     imagesc(dl_range, dk_range, h_crop);
-    axis xy; colorbar; caxis([0 max(abs(gains_raw))*1.1]);
+    axis xy; colorbar; clim([0 max(abs(gains_raw))*1.1]);
     xlabel('dl (时延偏移)'); ylabel('dk (多普勒偏移)');
     title(sprintf('%s: 真实DD信道', fname));
     % 标记真实径位置
@@ -145,7 +145,7 @@ for fi = 1:size(fading_cfgs,1)
         end
     end
     imagesc(dl_range, dk_range, h_est_crop);
-    axis xy; colorbar; caxis([0 max(abs(gains_raw))*1.1]);
+    axis xy; colorbar; clim([0 max(abs(gains_raw))*1.1]);
     xlabel('dl (时延偏移)'); ylabel('dk (多普勒偏移)');
     title(sprintf('%s: 估计DD信道 (%d径)', fname, path_info.num_paths));
     hold on;
@@ -216,7 +216,7 @@ phase_err_deg = phase_err * 180 / pi;
 
 subplot(1,2,1);
 imagesc(0:M-1, 0:N-1, abs(ratio_matrix));
-axis xy; colorbar; caxis([0.8 1.2]);
+axis xy; colorbar; clim([0.8 1.2]);
 xlabel('l (时延bin)'); ylabel('k (多普勒bin)');
 title('|Y_{dd}/(H_{total}·x)| — 偏离1.0=β因子影响');
 hold on;

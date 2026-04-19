@@ -1,6 +1,6 @@
 function p3_demo_ui()
-% 功能：Streaming P3.1 流式 GUI demo —— RX 持续监听 + TX 触发发送 + 实时通带示波器
-% 版本：V3.0.0
+% 功能：通信声纳 流式 Demo —— RX 持续监听 + TX 触发发送 + 实时通带示波器
+% 版本：V3.1.0（2026-04-17 深色科技风重样式 + 命名改"通信声纳"）
 % 用法：在 MATLAB 命令行执行 p3_demo_ui()
 %
 % 架构（单进程 timer 模拟"软件无线电"）：
@@ -63,6 +63,12 @@ app.last_bits_in = [];
 app.last_bits_out = [];
 app.last_text_bits_len = 0;
 
+% 动效计数器（Step 4）
+app.flash_det_count    = 0;   % 检测闪烁剩余 tick
+app.flash_decode_count = 0;   % 解码成功闪烁剩余 tick
+app.last_det_status    = '';  % 上次 det_status，变化时触发闪烁
+app.anim_t_start       = tic; % 动效时间基准
+
 % Scope 持久句柄
 app.scope_line = [];
 app.scope_window_s = 0.4;
@@ -84,75 +90,132 @@ app.bypass_rf = false;
 app.history = {};
 app.dec_count = 0;
 
+%% ---- 样式（单一事实源：p3_style.m）----
+S           = p3_style();
+PALETTE     = S.PALETTE;
+FONTS       = S.FONTS;
+SIZES       = S.SIZES;
+app.style   = S;
+app.palette = PALETTE;
+
 %% ---- 主 figure ----
-app.fig = uifigure('Name', 'Streaming P3 — 软件无线电流式 Demo', ...
-    'Position', [40 40 1500 950], 'Color', [0.95 0.95 0.96], ...
+app.fig = uifigure('Name', '通信声纳 · Streaming P3 Demo', ...
+    'Position', [40 40 1500 950], 'Color', PALETTE.bg, ...
     'CloseRequestFcn', @(~,~) on_close());
 
 main = uigridlayout(app.fig, [3 1]);
-main.RowHeight   = {110, '1x', 320};
+main.RowHeight   = {SIZES.top_h, '1x', SIZES.tab_h};
 main.ColumnWidth = {'1x'};
-main.Padding     = [10 10 10 10];
-main.RowSpacing  = 8;
+main.Padding     = [12 12 12 12];
+main.RowSpacing  = 10;
 
-%% ==== 顶栏 ====
-top = uigridlayout(main, [1 5]);
+%% ==== 顶栏（驾驶舱风格：badge | title | scheme | rx | status | tx+mon）====
+top = uigridlayout(main, [1 6]);
 top.Layout.Row = 1;
-top.ColumnWidth = {'1x', 280, 220, 240, 140, 80};
+top.ColumnWidth = {62, '1x', 300, 180, 200, 250};
+top.ColumnSpacing = 14;
+top.BackgroundColor = PALETTE.surface;
+top.Padding = [14 8 14 8];
 
-title_lbl = uilabel(top, 'Text', 'Streaming P3 — 软件无线电流式 Demo', ...
-    'FontSize', 17, 'FontWeight', 'bold', 'FontColor', [0.1 0.3 0.6]);
-title_lbl.Layout.Column = 1;
+% 声纳 badge（装饰）
+badge_wrap = uigridlayout(top, [1 1]);
+badge_wrap.Layout.Column = 1;
+badge_wrap.Padding = [0 4 0 4];
+badge_wrap.BackgroundColor = PALETTE.surface;
+app.sonar_badge = p3_sonar_badge(badge_wrap);
+
+% 标题组（主标题 + 英文副标题）
+title_group = uigridlayout(top, [2 1]);
+title_group.Layout.Column = 2;
+title_group.RowHeight = {'1x', 14};
+title_group.RowSpacing = 0;
+title_group.Padding = [0 6 0 6];
+title_group.BackgroundColor = PALETTE.surface;
+
+title_lbl = uilabel(title_group, 'Text', '通信声纳  ·  流式 Demo', ...
+    'FontSize', SIZES.h1, 'FontWeight', 'bold', 'FontColor', PALETTE.primary, ...
+    'FontName', FONTS.title);
+title_lbl.Layout.Row = 1;
+
+subtitle_lbl = uilabel(title_group, ...
+    'Text', sprintf('UNDERWATER ACOUSTIC COMM  ·  fs=%dHz  fc=%dHz', ...
+                    app.sys.fs, app.sys.fc), ...
+    'FontSize', 10, 'FontColor', PALETTE.text_dim, ...
+    'FontName', FONTS.code);
+subtitle_lbl.Layout.Row = 2;
 
 % scheme 下拉 + RF bypass
 sch_panel = uigridlayout(top, [2 2]);
-sch_panel.Layout.Column = 2;
-sch_panel.ColumnWidth = {'fit', '1x'};
-sch_panel.RowHeight = {'1x', 22};
+sch_panel.Layout.Column = 3;
+sch_panel.ColumnWidth = {48, '1x'};
+sch_panel.RowHeight = {'1x', 20};
 sch_panel.RowSpacing = 2;
-uilabel(sch_panel, 'Text', '调制:', 'FontSize', 12, 'HorizontalAlignment', 'right');
+sch_panel.Padding = [0 4 0 4];
+sch_panel.BackgroundColor = PALETTE.surface;
+lbl_sch = uilabel(sch_panel, 'Text', '调制', ...
+    'FontSize', SIZES.body, 'FontWeight', 'bold', ...
+    'FontColor', PALETTE.text_muted, ...
+    'HorizontalAlignment', 'right');
+lbl_sch.Layout.Row = 1; lbl_sch.Layout.Column = 1;
 app.scheme_dd = uidropdown(sch_panel, ...
     'Items', {'FH-MFSK (8-FSK 跳频, 非相干)', 'SC-FDE (QPSK + Turbo, 相干)', ...
               'OFDM (QPSK + Turbo, 相干)', 'SC-TDE (QPSK + Turbo, 相干)', ...
               'DSSS (DBPSK + Rake, 非相干)'}, ...
     'Value', 'SC-FDE (QPSK + Turbo, 相干)', ...
-    'FontSize', 12, ...
+    'FontSize', SIZES.body_sm, ...
     'ValueChangedFcn', @(~,~) on_scheme_changed());
+app.scheme_dd.Layout.Row = 1; app.scheme_dd.Layout.Column = 2;
 app.bypass_chk = uicheckbox(sch_panel, ...
     'Text', 'Bypass RF (复基带直通, 调试用)', ...
-    'Value', false, 'FontSize', 10, ...
+    'Value', false, 'FontSize', 9, ...
+    'FontColor', PALETTE.text_dim, ...
     'ValueChangedFcn', @(~,~) on_bypass_changed());
 app.bypass_chk.Layout.Row = 2; app.bypass_chk.Layout.Column = [1 2];
 
 % RX 开关
 rx_sw_panel = uigridlayout(top, [1 2]);
-rx_sw_panel.Layout.Column = 3;
+rx_sw_panel.Layout.Column = 4;
 rx_sw_panel.ColumnWidth = {'fit', '1x'};
-uilabel(rx_sw_panel, 'Text', 'RX 监听:', 'FontSize', 13, ...
-    'FontWeight', 'bold', 'HorizontalAlignment', 'right');
+rx_sw_panel.Padding = [0 4 0 4];
+rx_sw_panel.BackgroundColor = PALETTE.surface;
+lbl_rx = uilabel(rx_sw_panel, 'Text', 'RX 监听', ...
+    'FontSize', SIZES.body, 'FontWeight', 'bold', ...
+    'FontColor', PALETTE.text_muted, ...
+    'HorizontalAlignment', 'right');
+lbl_rx.Layout.Column = 1;
 app.rx_switch = uiswitch(rx_sw_panel, 'slider', 'Items', {'OFF', 'ON'}, ...
-    'Value', 'OFF', 'FontSize', 12, ...
+    'Value', 'OFF', 'FontSize', SIZES.body_sm, ...
     'ValueChangedFcn', @(~,~) on_rx_switch());
+app.rx_switch.Layout.Column = 2;
 
-% status
-app.status_lbl = uilabel(top, 'Text', 'Ready', ...
-    'FontSize', 13, 'HorizontalAlignment', 'center', ...
-    'BackgroundColor', [0.90 0.95 0.90], 'FontColor', [0.1 0.5 0.1]);
-app.status_lbl.Layout.Column = 4;
+% status（驾驶舱灯）
+app.status_lbl = uilabel(top, 'Text', '  ●  Ready', ...
+    'FontSize', SIZES.h3, 'FontWeight', 'bold', ...
+    'HorizontalAlignment', 'center', 'VerticalAlignment', 'center', ...
+    'BackgroundColor', PALETTE.success_bg, 'FontColor', PALETTE.success, ...
+    'FontName', FONTS.code);
+app.status_lbl.Layout.Column = 5;
 
-% Transmit
-app.tx_btn = uibutton(top, 'push', 'Text', 'Transmit', ...
-    'FontSize', 15, 'FontWeight', 'bold', ...
-    'BackgroundColor', [0.2 0.6 0.3], 'FontColor', 'white', ...
+% Transmit + Mon（合成右栏）
+action_grid = uigridlayout(top, [1 2]);
+action_grid.Layout.Column = 6;
+action_grid.ColumnWidth = {'1x', 64};
+action_grid.ColumnSpacing = 6;
+action_grid.Padding = [0 6 0 6];
+action_grid.BackgroundColor = PALETTE.surface;
+
+app.tx_btn = uibutton(action_grid, 'push', 'Text', 'Transmit  ▶', ...
+    'FontSize', SIZES.h2, 'FontWeight', 'bold', ...
+    'BackgroundColor', PALETTE.accent, 'FontColor', 'white', ...
+    'FontName', FONTS.title, ...
     'ButtonPushedFcn', @(~,~) on_transmit());
-app.tx_btn.Layout.Column = 5;
+app.tx_btn.Layout.Column = 1;
 
-% 音频监听开关
-app.monitor_btn = uibutton(top, 'state', 'Text', 'Mon', ...
-    'FontSize', 12, 'FontWeight', 'bold', ...
-    'BackgroundColor', [0.3 0.45 0.7], 'FontColor', 'white', ...
+app.monitor_btn = uibutton(action_grid, 'state', 'Text', 'Mon', ...
+    'FontSize', SIZES.body_sm, 'FontWeight', 'bold', ...
+    'BackgroundColor', PALETTE.divider, 'FontColor', PALETTE.text, ...
     'ValueChangedFcn', @(src,~) on_monitor_toggle(src));
-app.monitor_btn.Layout.Column = 6;
+app.monitor_btn.Layout.Column = 2;
 app.audio_monitor = false;
 app.audio_buf = [];
 app.audio_play_until = 0;
@@ -164,9 +227,14 @@ mid.ColumnWidth = {'1x', '1x'};
 mid.ColumnSpacing = 10;
 
 %% ---- TX panel ----
-tx_panel = uipanel(mid, 'Title', 'TX 发射端', 'FontSize', 13, ...
-    'FontWeight', 'bold', 'BackgroundColor', [0.98 0.98 1.0]);
+tx_panel = uipanel(mid, 'Title', '  ▲  TX 发射端   ·   TRANSMITTER', ...
+    'FontSize', SIZES.h2, 'FontWeight', 'bold', ...
+    'BackgroundColor', PALETTE.panel_tx_bg, ...
+    'ForegroundColor', PALETTE.primary, 'BorderType', 'line');
+if isprop(tx_panel, 'BorderColor'),  tx_panel.BorderColor = PALETTE.border_subtle; end
+if isprop(tx_panel, 'BorderWidth'),  tx_panel.BorderWidth = 1; end
 tx_panel.Layout.Column = 1;
+app.tx_panel = tx_panel;
 tx_grid = uigridlayout(tx_panel, [13 2]);
 tx_grid.RowHeight = {25, 55, 25, 28, 28, 28, 28, 28, 28, 28, 28, 25, '1x'};
 tx_grid.ColumnWidth = {140, '1x'};
@@ -228,20 +296,30 @@ app.pl_dd  = uidropdown(tx_grid, ...
 app.pl_dd.Layout.Row = 10; app.pl_dd.Layout.Column = 2;
 
 % TX 信号信息面板（替换原 Log 区域）
-txinfo_panel = uipanel(tx_grid, 'Title', 'TX 信号信息', 'FontSize', 11);
+txinfo_panel = uipanel(tx_grid, 'Title', '  TX 信号信息', 'FontSize', SIZES.body, ...
+    'FontWeight', 'bold', 'BackgroundColor', PALETTE.surface, ...
+    'ForegroundColor', PALETTE.text_muted, 'BorderType', 'line');
+if isprop(txinfo_panel, 'BorderColor'), txinfo_panel.BorderColor = PALETTE.border_subtle; end
+if isprop(txinfo_panel, 'BorderWidth'), txinfo_panel.BorderWidth = 1; end
 txinfo_panel.Layout.Row = [12 13]; txinfo_panel.Layout.Column = [1 2];
 txinfo_grid = uigridlayout(txinfo_panel, [1 1]); txinfo_grid.Padding = [5 5 5 5];
+txinfo_grid.BackgroundColor = PALETTE.surface;
 app.txinfo_area = uitextarea(txinfo_grid, 'Editable', 'off', ...
-    'FontName', 'Consolas', 'FontSize', 10, ...
+    'FontName', FONTS.code, 'FontSize', 10, ...
     'Value', '(Transmit 后显示信号统计)');
 
 %% ---- RX panel ----
-rx_rpanel = uipanel(mid, 'Title', 'RX 接收端', 'FontSize', 13, ...
-    'FontWeight', 'bold', 'BackgroundColor', [1.0 0.98 0.95]);
+rx_rpanel = uipanel(mid, 'Title', '  ▼  RX 接收端   ·   RECEIVER', ...
+    'FontSize', SIZES.h2, 'FontWeight', 'bold', ...
+    'BackgroundColor', PALETTE.panel_rx_bg, ...
+    'ForegroundColor', PALETTE.accent_hi, 'BorderType', 'line');
+if isprop(rx_rpanel, 'BorderColor'),  rx_rpanel.BorderColor = PALETTE.border_subtle; end
+if isprop(rx_rpanel, 'BorderWidth'),  rx_rpanel.BorderWidth = 1; end
 rx_rpanel.Layout.Column = 2;
+app.rx_panel = rx_rpanel;
 
 rx_grid = uigridlayout(rx_rpanel, [5 1]);
-rx_grid.RowHeight = {25, 110, 90, 30, '1x'};
+rx_grid.RowHeight = {25, 95, 134, 28, '1x'};
 rx_grid.RowSpacing = 6;
 
 % 解码文本 header（带 Clear 按钮）
@@ -250,27 +328,43 @@ hdr_grid.ColumnWidth = {'1x', 100};
 hdr_grid.Padding = [0 0 0 0];
 uilabel(hdr_grid, 'Text', '解码文本（自动）:', 'FontWeight', 'bold');
 app.clear_btn = uibutton(hdr_grid, 'push', 'Text', 'Clear', ...
-    'BackgroundColor', [0.9 0.9 0.9], ...
+    'BackgroundColor', PALETTE.divider, ...
+    'FontColor', PALETTE.text_muted, ...
     'ButtonPushedFcn', @(~,~) on_clear());
 app.text_out = uitextarea(rx_grid, 'Editable', 'off', ...
     'Value', '(打开 RX 监听 → 点 Transmit → 检测+解码)', ...
     'FontSize', 12);
 
-% BER 大字 + 监听状态
-ber_panel = uipanel(rx_grid, 'Title', 'BER / 监听状态', 'FontSize', 11);
-ber_grid = uigridlayout(ber_panel, [2 4]);
-ber_grid.RowHeight = {30, 30};
-ber_grid.ColumnWidth = {120, '1x', 120, '1x'};
+% BER 关键指标（4 张 metric card，单行 bento）
+ber_panel = uipanel(rx_grid, 'Title', '  监听状态', 'FontSize', SIZES.body, ...
+    'FontWeight', 'bold', 'BackgroundColor', PALETTE.surface, ...
+    'ForegroundColor', PALETTE.text_muted, 'BorderType', 'line');
+if isprop(ber_panel, 'BorderColor'), ber_panel.BorderColor = PALETTE.border_subtle; end
+if isprop(ber_panel, 'BorderWidth'), ber_panel.BorderWidth = 1; end
+ber_grid = uigridlayout(ber_panel, [1 4]);
+ber_grid.ColumnWidth = {'1x', '1x', '1x', '1x'};
+ber_grid.ColumnSpacing = 8;
 ber_grid.Padding = [10 6 10 6];
-uilabel(ber_grid, 'Text', '比特 BER:', 'FontName','Consolas');
-app.lbl_ber = uilabel(ber_grid, 'Text', '—', 'FontName','Consolas', ...
-    'FontSize', 22, 'FontWeight', 'bold', 'FontColor', [0.1 0.4 0.7]);
-uilabel(ber_grid, 'Text', '错误/总:', 'FontName','Consolas');
-app.lbl_err = uilabel(ber_grid, 'Text', '—', 'FontName','Consolas','FontWeight','bold');
-uilabel(ber_grid, 'Text', 'FIFO 长度:', 'FontName','Consolas');
-app.lbl_fifo = uilabel(ber_grid, 'Text', '0 样本', 'FontName','Consolas','FontWeight','bold');
-uilabel(ber_grid, 'Text', '检测状态:', 'FontName','Consolas');
-app.lbl_det = uilabel(ber_grid, 'Text', '空闲', 'FontName','Consolas','FontWeight','bold');
+ber_grid.BackgroundColor = PALETTE.surface;
+
+card_ber  = p3_metric_card(ber_grid, '比特 BER',   '—',     '',      'primary');
+card_err  = p3_metric_card(ber_grid, '错误 / 总',  '—',     'bits',  'muted');
+card_fifo = p3_metric_card(ber_grid, 'FIFO',       '0',     '样本',   'accent');
+card_det  = p3_metric_card(ber_grid, '检测状态',    '空闲',  '',      'muted');
+% 长文本字段：降小字号避免溢出
+card_err.value.FontSize  = 14;
+card_fifo.value.FontSize = 14;
+card_det.value.FontSize  = 13;
+% 保留旧句柄名（回调零改动）
+app.lbl_ber  = card_ber.value;
+app.lbl_err  = card_err.value;
+app.lbl_fifo = card_fifo.value;
+app.lbl_det  = card_det.value;
+% 保存卡片句柄（动效/语义色调用）
+app.card_ber  = card_ber;
+app.card_err  = card_err;
+app.card_fifo = card_fifo;
+app.card_det  = card_det;
 
 % 解码历史下拉
 hist_grid = uigridlayout(rx_grid, [1 2]);
@@ -281,39 +375,58 @@ app.hist_dd = uidropdown(hist_grid, ...
     'Items', {'(无)'}, 'Value', '(无)', ...
     'ValueChangedFcn', @(~,~) on_history_select());
 
-% info struct
-info_panel = uipanel(rx_grid, 'Title', '解码 info', 'FontSize', 11);
+% info 紧凑网格（label/value 成对，4 行 × 4 列 = 8 对字段）
+info_panel = uipanel(rx_grid, 'Title', '  解码 info', 'FontSize', SIZES.body, ...
+    'FontWeight', 'bold', 'BackgroundColor', PALETTE.surface, ...
+    'ForegroundColor', PALETTE.text_muted, 'BorderType', 'line');
+if isprop(info_panel, 'BorderColor'), info_panel.BorderColor = PALETTE.border_subtle; end
+if isprop(info_panel, 'BorderWidth'), info_panel.BorderWidth = 1; end
 info_grid = uigridlayout(info_panel, [4 4]);
-info_grid.RowHeight = {25, 25, 25, 25};
+info_grid.RowHeight = {'1x', '1x', '1x', '1x'};
 info_grid.ColumnWidth = {130, '1x', 130, '1x'};
-info_grid.Padding = [10 6 10 6];
+info_grid.ColumnSpacing = 6;
 info_grid.RowSpacing = 2;
+info_grid.Padding = [12 6 12 6];
+info_grid.BackgroundColor = PALETTE.surface;
 
-uilabel(info_grid, 'Text', 'estimated_snr:', 'FontName','Consolas');
-app.lbl_esnr = uilabel(info_grid, 'Text', '—', 'FontName','Consolas','FontWeight','bold');
-uilabel(info_grid, 'Text', 'estimated_ber:', 'FontName','Consolas');
-app.lbl_eber = uilabel(info_grid, 'Text', '—', 'FontName','Consolas','FontWeight','bold');
-uilabel(info_grid, 'Text', 'turbo_iter:', 'FontName','Consolas');
-app.lbl_iter_show = uilabel(info_grid, 'Text', '—', 'FontName','Consolas','FontWeight','bold');
-uilabel(info_grid, 'Text', 'convergence:', 'FontName','Consolas');
-app.lbl_conv = uilabel(info_grid, 'Text', '—', 'FontName','Consolas','FontWeight','bold');
-uilabel(info_grid, 'Text', 'noise_var:', 'FontName','Consolas');
-app.lbl_nv = uilabel(info_grid, 'Text', '—', 'FontName','Consolas','FontWeight','bold');
-uilabel(info_grid, 'Text', '解码次数:', 'FontName','Consolas');
-app.lbl_dec_cnt = uilabel(info_grid, 'Text', '0', 'FontName','Consolas','FontWeight','bold');
-uilabel(info_grid, 'Text', 'TX bits:', 'FontName','Consolas');
-app.lbl_txb = uilabel(info_grid, 'Text', '—', 'FontName','Consolas','FontSize',9);
-uilabel(info_grid, 'Text', 'RX bits:', 'FontName','Consolas');
-app.lbl_rxb = uilabel(info_grid, 'Text', '—', 'FontName','Consolas','FontSize',9);
+% 统一 label / value 构造器
+make_lbl = @(txt) uilabel(info_grid, 'Text', txt, ...
+    'FontName', FONTS.code, 'FontSize', 11, ...
+    'FontColor', PALETTE.text_muted);
+make_val = @(txt, color) uilabel(info_grid, 'Text', txt, ...
+    'FontName', FONTS.code, 'FontSize', 13, 'FontWeight', 'bold', ...
+    'FontColor', color);
+
+make_lbl('estimated_snr:');
+app.lbl_esnr      = make_val('—', PALETTE.primary);
+make_lbl('estimated_ber:');
+app.lbl_eber      = make_val('—', PALETTE.primary);
+make_lbl('turbo_iter:');
+app.lbl_iter_show = make_val('—', PALETTE.accent_hi);
+make_lbl('convergence:');
+app.lbl_conv      = make_val('—', PALETTE.text_muted);
+make_lbl('noise_var:');
+app.lbl_nv        = make_val('—', PALETTE.text_muted);
+make_lbl('解码次数:');
+app.lbl_dec_cnt   = make_val('0', PALETTE.success);
+make_lbl('TX bits:');
+app.lbl_txb       = make_val('—', PALETTE.text_dim);
+app.lbl_txb.FontSize = 10;
+make_lbl('RX bits:');
+app.lbl_rxb       = make_val('—', PALETTE.text_dim);
+app.lbl_rxb.FontSize = 10;
+
+% 兼容动效 / 语义色代码：建哑 card 句柄
+app.card_conv = struct('value', app.lbl_conv, 'panel', info_panel);
 
 %% ==== 底部 7 tab ====
 bot = uitabgroup(main); bot.Layout.Row = 3;
 app.tabs = struct();
 
-% 单 axes tab
+% 单 axes tab（Unicode 前缀增强识别）
 ax_tab_specs = {
-    'scope',    '实时通带示波器';
-    'spectrum', '通带频谱'};
+    'scope',    '◉ 实时通带示波器';
+    'spectrum', '≋ 通带频谱'};
 for ti = 1:size(ax_tab_specs,1)
     tab = uitab(bot, 'Title', ax_tab_specs{ti,2});
     tg = uigridlayout(tab, [1 1]); tg.Padding = [8 8 8 8];
@@ -329,7 +442,7 @@ for ti = 1:size(ax_tab_specs,1)
 end
 
 % 均衡/解调 tab（4 列：Turbo 体制显示迭代星座，非 Turbo 体制显示 LLR/能量等）
-eq_tab = uitab(bot, 'Title', '均衡分析');
+eq_tab = uitab(bot, 'Title', '◈ 均衡分析');
 eq_grid = uigridlayout(eq_tab, [1 4]); eq_grid.Padding = [6 6 6 6]; eq_grid.ColumnSpacing = 6;
 app.tabs.pre_eq = uiaxes(eq_grid);  app.tabs.pre_eq.Layout.Column = 1;
 app.tabs.eq_it1 = uiaxes(eq_grid);  app.tabs.eq_it1.Layout.Column = 2;
@@ -337,7 +450,7 @@ app.tabs.eq_mid = uiaxes(eq_grid);  app.tabs.eq_mid.Layout.Column = 3;
 app.tabs.post_eq = uiaxes(eq_grid); app.tabs.post_eq.Layout.Column = 4;
 
 % TX/RX 对比 tab（双行：上 TX，下 RX）
-cmp_tab = uitab(bot, 'Title', 'TX/RX 对比');
+cmp_tab = uitab(bot, 'Title', '⇄ TX/RX 对比');
 cmp_grid = uigridlayout(cmp_tab, [2 1]); cmp_grid.Padding = [8 8 8 8]; cmp_grid.RowSpacing = 6;
 app.tabs.compare_tx = uiaxes(cmp_grid);
 app.tabs.compare_tx.Toolbar.Visible = 'on';
@@ -347,7 +460,7 @@ app.tabs.compare_rx.Toolbar.Visible = 'on';
 app.tabs.compare_rx.Layout.Row = 2;
 
 % 信道 tab（两列：左时域 右频域，估计 vs 真实对比）
-ch_tab = uitab(bot, 'Title', '信道');
+ch_tab = uitab(bot, 'Title', '◣ 信道');
 ch_grid = uigridlayout(ch_tab, [1 2]); ch_grid.Padding = [8 8 8 8]; ch_grid.ColumnSpacing = 10;
 app.tabs.h_td = uiaxes(ch_grid);
 app.tabs.h_td.Toolbar.Visible = 'on';
@@ -356,11 +469,53 @@ app.tabs.h_fd = uiaxes(ch_grid);
 app.tabs.h_fd.Toolbar.Visible = 'on';
 app.tabs.h_fd.Layout.Column = 2;
 
+% 同步/多普勒 tab（2×2：HFM+ corr / HFM- corr / 符号定时 / 多普勒占位）
+sync_tab = uitab(bot, 'Title', '◎ 同步/多普勒');
+sync_grid = uigridlayout(sync_tab, [2 2]);
+sync_grid.Padding = [6 6 6 6]; sync_grid.ColumnSpacing = 6; sync_grid.RowSpacing = 6;
+app.tabs.sync_hfm_pos = uiaxes(sync_grid);
+app.tabs.sync_hfm_pos.Layout.Row = 1; app.tabs.sync_hfm_pos.Layout.Column = 1;
+app.tabs.sync_sym_off = uiaxes(sync_grid);
+app.tabs.sync_sym_off.Layout.Row = 1; app.tabs.sync_sym_off.Layout.Column = 2;
+app.tabs.sync_hfm_neg = uiaxes(sync_grid);
+app.tabs.sync_hfm_neg.Layout.Row = 2; app.tabs.sync_hfm_neg.Layout.Column = 1;
+app.tabs.sync_doppler = uiaxes(sync_grid);
+app.tabs.sync_doppler.Layout.Row = 2; app.tabs.sync_doppler.Layout.Column = 2;
+
+% 质量历史 tab（2 行：上 BER 散点，下 SNR+iter 双 Y 轴）
+quality_tab = uitab(bot, 'Title', '📊 质量历史');
+quality_grid = uigridlayout(quality_tab, [2 1]);
+quality_grid.Padding = [8 8 8 8]; quality_grid.RowSpacing = 6;
+app.tabs.quality_ber = uiaxes(quality_grid);
+app.tabs.quality_ber.Toolbar.Visible = 'on';
+app.tabs.quality_ber.Layout.Row = 1;
+app.tabs.quality_snr = uiaxes(quality_grid);
+app.tabs.quality_snr.Toolbar.Visible = 'on';
+app.tabs.quality_snr.Layout.Row = 2;
+
 % 日志 tab（uitextarea, 无 axes）
-log_tab = uitab(bot, 'Title', '日志');
+log_tab = uitab(bot, 'Title', '≡ 日志');
 log_tg = uigridlayout(log_tab, [1 1]); log_tg.Padding = [8 8 8 8];
 app.log_area = uitextarea(log_tg, 'Editable', 'off', ...
-    'FontName', 'Consolas', 'FontSize', 10);
+    'FontName', FONTS.code, 'FontSize', 10, ...
+    'BackgroundColor', PALETTE.surface_alt, 'FontColor', PALETTE.text);
+
+%% ---- 统一深色样式应用到所有 axes ----
+axes_all = {app.tabs.scope, app.tabs.spectrum, ...
+            app.tabs.pre_eq, app.tabs.eq_it1, app.tabs.eq_mid, app.tabs.post_eq, ...
+            app.tabs.compare_tx, app.tabs.compare_rx, ...
+            app.tabs.h_td, app.tabs.h_fd, ...
+            app.tabs.sync_hfm_pos, app.tabs.sync_hfm_neg, ...
+            app.tabs.sync_sym_off, app.tabs.sync_doppler, ...
+            app.tabs.quality_ber, app.tabs.quality_snr};
+for k = 1:length(axes_all)
+    style_dark_axes(axes_all{k});
+end
+% scope 初始占位文字颜色调亮（之前用 [0.5 0.5 0.5] 深灰在深色背景不可见）
+app.tabs.scope.Children(1).Color = PALETTE.text_muted;
+
+%% ---- 扫默认色控件统一上深色主题 ----
+apply_dark_defaults(app.fig, PALETTE);
 
 %% ---- 启动定时器 ----
 app.timer = timer('ExecutionMode','fixedSpacing', 'Period', app.tick_ms/1000, ...
@@ -377,11 +532,110 @@ on_scheme_changed();
 %% 内部函数
 %% ============================================================
 function [lbl, edt] = mk_row(g, row, label, type, val, lim)
-    lbl = uilabel(g, 'Text', label);
+    lbl = uilabel(g, 'Text', label, 'FontColor', PALETTE.text);
     lbl.Layout.Row = row; lbl.Layout.Column = 1;
     edt = uieditfield(g, type, 'Value', val, 'Limits', lim, ...
-        'ValueDisplayFormat', '%g');
+        'ValueDisplayFormat', '%g', ...
+        'BackgroundColor', PALETTE.surface_alt, 'FontColor', PALETTE.text);
     edt.Layout.Row = row; edt.Layout.Column = 2;
+end
+
+function style_dark_axes(ax)
+% 深色科技风 axes 样式（与 PALETTE 对齐）
+    ax.BackgroundColor = PALETTE.surface;
+    ax.Color = PALETTE.surface;
+    ax.XColor = PALETTE.text_muted;
+    ax.YColor = PALETTE.text_muted;
+    ax.GridColor = PALETTE.divider;
+    ax.GridAlpha = 0.4;
+    ax.MinorGridColor = PALETTE.divider;
+    if ~isempty(ax.Title),  ax.Title.Color  = PALETTE.text; end
+    if ~isempty(ax.XLabel), ax.XLabel.Color = PALETTE.text_muted; end
+    if ~isempty(ax.YLabel), ax.YLabel.Color = PALETTE.text_muted; end
+end
+
+function apply_dark_defaults(root, P)
+% 扫描所有控件，把仍在默认（白/浅灰/黑）的色值改为深色主题对应色
+    DEFAULT_WHITE = [1 1 1];
+    DEFAULT_BLACK = [0 0 0];
+    DEFAULT_GRID_GRAY = [0.94 0.94 0.94];
+
+    % uilabel 黑字 → 主文字色
+    hs = findall(root, 'Type', 'uilabel');
+    for h = hs'
+        if isequal(h.FontColor, DEFAULT_BLACK)
+            h.FontColor = P.text;
+        end
+    end
+
+    % uieditfield 白底黑字 → surface_alt + text
+    hs = findall(root, 'Type', 'uieditfield');
+    for h = hs'
+        if isequal(h.BackgroundColor, DEFAULT_WHITE)
+            h.BackgroundColor = P.surface_alt;
+        end
+        if isequal(h.FontColor, DEFAULT_BLACK)
+            h.FontColor = P.text;
+        end
+    end
+
+    % uitextarea 同理
+    hs = findall(root, 'Type', 'uitextarea');
+    for h = hs'
+        if isequal(h.BackgroundColor, DEFAULT_WHITE)
+            h.BackgroundColor = P.surface_alt;
+        end
+        if isequal(h.FontColor, DEFAULT_BLACK)
+            h.FontColor = P.text;
+        end
+    end
+
+    % uidropdown 同理
+    hs = findall(root, 'Type', 'uidropdown');
+    for h = hs'
+        if isequal(h.BackgroundColor, DEFAULT_WHITE)
+            h.BackgroundColor = P.surface_alt;
+        end
+        if isequal(h.FontColor, DEFAULT_BLACK)
+            h.FontColor = P.text;
+        end
+    end
+
+    % uicheckbox 黑字 → text
+    hs = findall(root, 'Type', 'uicheckbox');
+    for h = hs'
+        if isequal(h.FontColor, DEFAULT_BLACK)
+            h.FontColor = P.text;
+        end
+    end
+
+    % uigridlayout 默认浅灰 → bg 色
+    hs = findall(root, 'Type', 'uigridlayout');
+    for h = hs'
+        if isequal(h.BackgroundColor, DEFAULT_GRID_GRAY)
+            h.BackgroundColor = P.bg;
+        end
+    end
+
+    % uitab 默认灰底 → surface + 文字色
+    hs = findall(root, 'Type', 'uitab');
+    for h = hs'
+        h.BackgroundColor = P.surface;
+        if isprop(h, 'ForegroundColor')
+            h.ForegroundColor = P.text;
+        end
+    end
+
+    % uipanel 若仍是默认灰 → surface
+    hs = findall(root, 'Type', 'uipanel');
+    for h = hs'
+        if isequal(h.BackgroundColor, DEFAULT_GRID_GRAY)
+            h.BackgroundColor = P.surface;
+        end
+        if isprop(h, 'ForegroundColor') && isequal(h.ForegroundColor, DEFAULT_BLACK)
+            h.ForegroundColor = P.text_muted;
+        end
+    end
 end
 
 function on_scheme_changed()
@@ -392,15 +646,8 @@ function on_scheme_changed()
     show(app.blk_dd,   ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE'}));
     show(app.lbl_iter, is_turbo); show(app.iter_edit, is_turbo);
     show(app.lbl_pl,   is_fhmfsk); show(app.pl_dd,    is_fhmfsk);
-    % 更新文本容量提示
-    switch sch
-        case 'SC-FDE',  nb = floor((128*32-2)/8);
-        case 'OFDM',    nb = floor(((256-8)*16-2)/8);
-        case 'SC-TDE',  nb = floor((2000-2)/8);
-        case 'DSSS',    nb = floor((1200-2)/8);
-        case 'FH-MFSK', nb = floor(2192/8);
-        otherwise,       nb = 200;
-    end
+    % 更新文本容量提示（单一事实源：p3_text_capacity）
+    nb = p3_text_capacity(sch, app.sys);
     app.lbl_txt.Text = sprintf('发射文本 (max ~%dB):', nb);
     append_log(sprintf('[UI] scheme -> %s (max %d bytes)', sch, nb));
 end
@@ -438,11 +685,11 @@ function on_rx_switch()
     if strcmp(app.rx_switch.Value, 'ON')
         app.rx_running = true;
         append_log(sprintf('[RX] 监听 ON  噪声底 var=%.3e', app.noise_var_pb));
-        set_status('RX 监听中', [0.1 0.5 0.7]);
+        set_status('RX 监听中', 'busy');
     else
         app.rx_running = false;
         append_log('[RX] 监听 OFF');
-        set_status('Ready', [0.1 0.5 0.1]);
+        set_status('Ready', 'ready');
     end
 end
 
@@ -457,8 +704,8 @@ function on_clear()
     app.history = {};
     app.hist_dd.Items = {'(无)'}; app.hist_dd.Value = '(无)';
     app.text_out.Value = '(已清空)';
-    app.text_out.FontColor = [0.3 0.3 0.3];
-    app.lbl_ber.Text = '—'; app.lbl_ber.FontColor = [0.1 0.4 0.7];
+    app.text_out.FontColor = app.palette.text_muted;
+    app.lbl_ber.Text = '—'; app.lbl_ber.FontColor = app.palette.primary;
     app.lbl_err.Text = '—';
     app.lbl_esnr.Text = '—'; app.lbl_eber.Text = '—';
     app.lbl_iter_show.Text = '—'; app.lbl_conv.Text = '—';
@@ -469,32 +716,35 @@ function on_clear()
     if ~isempty(app.scope_line) && isvalid(app.scope_line)
         delete(app.scope_line); app.scope_line = [];
     end
-    cla(app.tabs.scope, 'reset');
-    cla(app.tabs.compare_tx, 'reset');
-    cla(app.tabs.compare_rx, 'reset');
-    cla(app.tabs.spectrum, 'reset');
-    cla(app.tabs.pre_eq, 'reset');
-    cla(app.tabs.eq_it1, 'reset');
-    cla(app.tabs.eq_mid, 'reset');
-    cla(app.tabs.post_eq, 'reset');
-    cla(app.tabs.h_td, 'reset');
-    cla(app.tabs.h_fd, 'reset');
+    cla(app.tabs.scope);
+    cla(app.tabs.compare_tx);
+    cla(app.tabs.compare_rx);
+    cla(app.tabs.spectrum);
+    cla(app.tabs.pre_eq);
+    cla(app.tabs.eq_it1);
+    cla(app.tabs.eq_mid);
+    cla(app.tabs.post_eq);
+    cla(app.tabs.h_td);
+    cla(app.tabs.h_fd);
     app.tx_body_bb_clean = [];
     append_log('[CLEAR] RX + FIFO + 历史 已清空');
 end
 
 function on_monitor_toggle(src)
     app.audio_monitor = logical(src.Value);
+    P = app.palette;
     if app.audio_monitor
         app.audio_buf = [];
         app.audio_play_until = 0;
         src.Text = 'Mon ON';
-        src.BackgroundColor = [0.7 0.3 0.2];
+        src.BackgroundColor = P.success;
+        src.FontColor = 'white';
         append_log('[MON] 音频监听 ON');
     else
         app.audio_buf = [];
         src.Text = 'Mon';
-        src.BackgroundColor = [0.3 0.45 0.7];
+        src.BackgroundColor = P.divider;
+        src.FontColor = P.text;
         append_log('[MON] 音频监听 OFF');
     end
 end
@@ -525,7 +775,7 @@ function on_transmit()
         sch = current_scheme();
         if ~app.rx_running
             append_log('[!] 请先打开 RX 监听');
-            set_status('请先打开 RX 监听', [0.7 0.4 0.1]);
+            set_status('请先打开 RX 监听', 'warning');
             return;
         end
 
@@ -538,7 +788,7 @@ function on_transmit()
             app.sys.scfde.turbo_iter = app.iter_edit.Value;
             app.sys.scfde.fading_type = 'static';
             app.sys.scfde.fd_hz       = 0;
-            N_info = app.sys.scfde.blk_fft * app.sys.scfde.N_blocks - mem;
+            N_info = app.sys.scfde.blk_fft * (app.sys.scfde.N_blocks - 1) - mem;  % V2: block 1 = 训练块
         elseif strcmp(sch, 'OFDM')
             app.sys.ofdm.blk_fft    = parse_lead_int(app.blk_dd.Value);
             app.sys.ofdm.blk_cp     = round(app.sys.ofdm.blk_fft / 2);
@@ -548,7 +798,7 @@ function on_transmit()
             app.sys.ofdm.fd_hz       = 0;
             null_idx_tmp = 1:app.sys.ofdm.null_spacing:app.sys.ofdm.blk_fft;
             N_data_sc = app.sys.ofdm.blk_fft - length(null_idx_tmp);
-            N_info = N_data_sc * app.sys.ofdm.N_blocks - mem;
+            N_info = N_data_sc * (app.sys.ofdm.N_blocks - 1) - mem;  % V2: block 1 = 导频块
         elseif strcmp(sch, 'SC-TDE')
             app.sys.sctde.turbo_iter = app.iter_edit.Value;
             app.sys.sctde.fading_type = 'static';
@@ -604,7 +854,7 @@ function on_transmit()
         body_offset = length(frame_bb) - length(body_bb);  % 前导码占用样本数
 
         % --- 基带信道（对完整帧施加）---
-        [h_tap, ch_label] = build_channel_tap(sch);
+        [h_tap, ch_label] = p3_channel_tap(sch, app.sys, app.preset_dd.Value);
         frame_ch = conv(frame_bb, h_tap);
         frame_ch = frame_ch(1:length(frame_bb));
 
@@ -650,7 +900,7 @@ function on_transmit()
             app.tx_signal       = tx_pb;
             app.tx_signal_start = app.fifo_write + 1;
             app.tx_pending      = true;
-            bw_tx = downconv_bandwidth(sch);
+            bw_tx = p3_downconv_bw(sch, app.sys);
             nv_pb = sig_pwr_pb * 10^(-snr_db/10);
             app.tx_meta_pending.noise_var = 8 * nv_pb * bw_tx / app.sys.fs;
             app.tx_meta_pending.frame_start_write = app.tx_signal_start;
@@ -662,7 +912,7 @@ function on_transmit()
 
         % --- 更新 TX 信号信息面板 ---
         update_txinfo_panel(sch, body_bb, frame_bb, body_offset, h_tap, ch_label, snr_db, N_info);
-        set_status('信号注入中...', [0.2 0.5 0.7]);
+        set_status('信号注入中...', 'busy');
     catch ME
         append_log(sprintf('[TX-ERR] %s', ME.message));
         if ~isempty(ME.stack)
@@ -719,6 +969,12 @@ function update_txinfo_panel(sch, body_bb, frame_bb, body_offset, h_tap, ch_labe
 end
 
 function on_tick()
+    % 动效更新（无论 RX 是否 ON 都要跑，保证边框/进度条可见）
+    try
+        t_sec = toc(app.anim_t_start);
+        app = p3_animate_tick(app, t_sec);
+    catch
+    end
     try
         if ~app.rx_running, return; end
 
@@ -778,20 +1034,26 @@ end
 function update_detection_status()
     win = round(0.03 * app.sys.fs);
     cur = app.fifo_write;
+    P = app.palette;
     if cur < win
         app.lbl_det.Text = '空闲（缓冲中）';
-        app.lbl_det.FontColor = [0.3 0.3 0.3];
+        app.lbl_det.FontColor = P.text_muted;
         return;
     end
     seg = app.fifo(cur-win+1 : cur);
     pwr = mean(abs(seg).^2);
     ratio = pwr / max(app.noise_var_pb, 1e-12);
     if ratio > 3
-        app.lbl_det.Text = sprintf('检到信号 (%.1fx)', ratio);
-        app.lbl_det.FontColor = [0.1 0.6 0.1];
+        new_txt = sprintf('检到信号 (%.1fx)', ratio);
+        % 状态切换瞬间触发闪烁
+        if ~startsWith(app.lbl_det.Text, '检到')
+            app.flash_det_count = 4;   % 闪 2 个周期（on/off × 2）
+        end
+        app.lbl_det.Text = new_txt;
+        app.lbl_det.FontColor = P.success;
     else
         app.lbl_det.Text = sprintf('仅噪声 (%.2fx)', ratio);
-        app.lbl_det.FontColor = [0.5 0.5 0.5];
+        app.lbl_det.FontColor = P.text_muted;
     end
 end
 
@@ -827,14 +1089,14 @@ function update_scope()
     t = ((-N_show+1):0) / app.sys.fs * 1000;
 
     if isempty(app.scope_line) || ~isvalid(app.scope_line)
-        cla(ax,'reset');
+        cla(ax);
         app.scope_line = plot(ax, t, y, 'b', 'LineWidth', 0.6);
         xlabel(ax, 'time relative to now (ms)');
         ylabel(ax, 'amplitude');
         title(ax, sprintf('实时通带示波器 (%.0fms, fc=%dHz)', ...
             app.scope_window_s*1000, app.sys.fc));
         grid(ax, 'on');
-        ax.XColor = 'k'; ax.YColor = 'k';
+        ax.XColor = PALETTE.text_muted; ax.YColor = PALETTE.text_muted;
         xlim(ax, [t(1), t(end)]);
         ylim(ax, [-0.5, 0.5]);
     else
@@ -849,11 +1111,28 @@ end
 
 function try_decode_frame()
     if ~app.tx_pending, return; end
-    if ~isfield(app.tx_meta_pending, 'frame_start_write'), return; end
-    fs_pos = app.tx_meta_pending.frame_start_write;
+    if ~isfield(app.tx_meta_pending, 'frame_pb_samples'), return; end
     fn = app.tx_meta_pending.frame_pb_samples;
+
+    % 真同步：HFM+ 匹配滤波检测帧起点（替代 frame_start_write 捷径）
+    sync_det = detect_frame_stream(app.fifo, app.fifo_write, ...
+                                    app.last_decode_at, app.sys, ...
+                                    struct('frame_len_hint', fn));
+    if ~sync_det.found, return; end
+    fs_pos = sync_det.fs_pos;
+
     if app.fifo_write < fs_pos + fn - 1, return; end
     if app.last_decode_at >= fs_pos, return; end
+
+    % Ground truth 对比（frame_start_write 仅做 debug 偏差 log，不驱动解码）
+    fs_pos_gt = 0;
+    if isfield(app.tx_meta_pending, 'frame_start_write')
+        fs_pos_gt = app.tx_meta_pending.frame_start_write;
+    end
+    sync_diff = fs_pos - fs_pos_gt;
+    append_log(sprintf('[SYNC] fs=%d gt=%d diff=%+d peak=%.1f ratio=%.1f conf=%.2f', ...
+        fs_pos, fs_pos_gt, sync_diff, sync_det.peak_val, ...
+        sync_det.peak_ratio, sync_det.confidence));
 
     rx_seg = app.fifo(fs_pos : fs_pos + fn - 1);
     sch = app.tx_meta_pending.scheme;
@@ -864,20 +1143,11 @@ function try_decode_frame()
         % 剥离前导码，只取 body 部分给 decoder
         body_bb_rx = rx_seg(body_offset+1 : end);
     else
-        bb_use = downconv_bandwidth(sch);
+        bb_use = p3_downconv_bw(sch, app.sys);
         [full_bb_rx, ~] = downconvert(rx_seg, app.sys.fs, app.sys.fc, bb_use);
         % 剥离前导码（下变频后样本对齐）
         body_bb_rx = full_bb_rx(body_offset+1 : end);
-        if ~isfield(meta, 'noise_var') || isempty(meta.noise_var) || meta.noise_var <= 0
-            n_noise_samp = min(round(0.1 * app.sys.fs), fs_pos - 1);
-            if n_noise_samp >= round(0.02 * app.sys.fs)
-                noise_pb_seg = app.fifo(fs_pos - n_noise_samp : fs_pos - 1);
-                [noise_bb_seg, ~] = downconvert(noise_pb_seg, app.sys.fs, app.sys.fc, bb_use);
-                skip = max(1, round(0.05 * length(noise_bb_seg)));
-                nv_meas = var(noise_bb_seg(skip:end));
-                meta.noise_var = max(nv_meas, 1e-12);
-            end
-        end
+        % 去oracle：噪声方差由 decoder 内部盲估计，不再外部注入
     end
     app.last_body_bb_rx = body_bb_rx;
 
@@ -898,6 +1168,7 @@ function try_decode_frame()
     app.last_bits_out = bits_out;
     app.last_decode_at = fs_pos;
     app.dec_count = app.dec_count + 1;
+    app.flash_decode_count = 4;   % 触发 text_out 闪烁（2 个周期）
 
     % BER
     n = min(length(bits_out), length(app.last_bits_in));
@@ -924,6 +1195,8 @@ function try_decode_frame()
     entry.tx_signal = app.tx_signal;                 % TX 通带信号（对比用）
     entry.bypass_rf = app.bypass_rf;                 % 记录当时的旁路模式
     entry.text_bits_len = app.last_text_bits_len;
+    entry.sync_det  = sync_det;                      % 真同步检测结果（sync tab 用）
+    entry.sync_diff = sync_diff;                     % 检测位置 - ground truth
 
     app.history{end+1} = entry;
     if length(app.history) > 20
@@ -939,7 +1212,7 @@ function try_decode_frame()
 
     app.tx_pending = false;
     app.tx_signal  = [];
-    set_status('RX 监听中（等待下一帧）', [0.1 0.5 0.7]);
+    set_status('RX 监听中（等待下一帧）', 'busy');
 end
 
 function refresh_history_dropdown()
@@ -964,83 +1237,6 @@ function on_history_select()
     update_rx_panel(entry.scheme, entry.info, entry.ber, n_err, n);
 end
 
-function bw = downconv_bandwidth(sch)
-    if strcmp(sch, 'SC-FDE')
-        bw = app.sys.sym_rate * (1 + app.sys.scfde.rolloff);
-    elseif strcmp(sch, 'OFDM')
-        bw = app.sys.sym_rate * (1 + app.sys.ofdm.rolloff);
-    elseif strcmp(sch, 'SC-TDE')
-        bw = app.sys.sym_rate * (1 + app.sys.sctde.rolloff);
-    elseif strcmp(sch, 'DSSS')
-        bw = app.sys.dsss.total_bw;
-    elseif strcmp(sch, 'OTFS')
-        bw = app.sys.otfs.total_bw;
-    else
-        bw = app.sys.fhmfsk.total_bw;
-    end
-end
-
-function [h_tap, label] = build_channel_tap(sch)
-    preset = app.preset_dd.Value;
-    if startsWith(preset, 'AWGN')
-        h_tap = 1; label = 'AWGN'; return;
-    end
-
-    % DSSS 使用码片时延，OTFS 使用 DD 域格点时延，其余使用符号时延
-    if strcmp(sch, 'DSSS')
-        % DSSS: body_bb 采样率 = chip_rate * sps
-        % 信道时延以码片为单位，映射到样本 = chip_delays * sps
-        chip_d = app.sys.dsss.chip_delays;
-        gains  = app.sys.dsss.gains_raw;
-        gains  = gains / sqrt(sum(abs(gains).^2));
-        delays_samp = chip_d * app.sys.dsss.sps;
-        h_tap = zeros(1, max(delays_samp) + 1);
-        for p = 1:length(delays_samp)
-            h_tap(delays_samp(p)+1) = gains(p);
-        end
-        label = sprintf('DSSS 5径, %d 抽头', length(h_tap));
-        return;
-    elseif strcmp(sch, 'OTFS')
-        % OTFS: body_bb 采样率 = sym_rate, 时延以 DD 格点（=1/sym_rate 样本）为单位
-        sym_d = app.sys.otfs.sym_delays;
-        gains = app.sys.otfs.gains_raw;
-        delays_samp = sym_d;  % 1:1 映射
-        h_tap = zeros(1, max(delays_samp) + 1);
-        for p = 1:length(delays_samp)
-            h_tap(delays_samp(p)+1) = gains(p);
-        end
-        h_tap = h_tap / norm(h_tap);
-        label = sprintf('OTFS 5径, %d 抽头', length(h_tap));
-        return;
-    elseif ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE'})
-        sps_use = app.sys.sps;
-    else
-        sps_use = app.sys.fhmfsk.samples_per_sym / 8;
-    end
-
-    if contains(preset, '6径 标准')
-        sym_d = [0, 5, 15, 40, 60, 90];
-        gains = [1, 0.6*exp(1j*0.3), 0.45*exp(1j*0.9), ...
-                 0.3*exp(1j*1.5), 0.2*exp(1j*2.1), 0.12*exp(1j*2.8)];
-    elseif contains(preset, '6径 深衰减')
-        sym_d = [0, 5, 15, 40, 60, 90];
-        gains = [0.4, 0.7*exp(1j*0.5), 0.6*exp(1j*1.2), ...
-                 0.5*exp(1j*1.8), 0.4*exp(1j*2.4), 0.3*exp(1j*2.9)];
-    elseif contains(preset, '3径 短时延')
-        sym_d = [0, 5, 15];
-        gains = [1, 0.5*exp(1j*0.8), 0.3*exp(1j*1.6)];
-    else
-        sym_d = 0; gains = 1;
-    end
-    delays_samp = round(sym_d * sps_use);
-    h_tap = zeros(1, max(delays_samp)+1);
-    for p = 1:length(delays_samp)
-        h_tap(delays_samp(p)+1) = h_tap(delays_samp(p)+1) + gains(p);
-    end
-    h_tap = h_tap / norm(h_tap);
-    label = sprintf('%s, %d 抽头', preset, length(h_tap));
-end
-
 function update_rx_panel(sch, info, ber, n_err, n)
     bo = app.last_bits_out;
     if isfield(app, 'last_text_bits_len')
@@ -1057,21 +1253,22 @@ function update_rx_panel(sch, info, ber, n_err, n)
     end
     txt = regexprep(txt, '[\x00-\x08\x0E-\x1F]', '.');
     app.text_out.Value = txt;
+    P = app.palette;
     if ber < 1e-6
-        app.text_out.FontColor = [0.1 0.5 0.1];
+        app.text_out.FontColor = P.success;
     elseif ber < 0.01
-        app.text_out.FontColor = [0.6 0.5 0.1];
+        app.text_out.FontColor = P.warning;
     else
-        app.text_out.FontColor = [0.7 0.2 0.2];
+        app.text_out.FontColor = P.danger;
     end
 
     app.lbl_ber.Text = sprintf('%.3f%%', ber*100);
-    if ber < 1e-6, app.lbl_ber.FontColor = [0.1 0.6 0.1];
-    elseif ber < 0.01, app.lbl_ber.FontColor = [0.6 0.5 0.1];
-    else, app.lbl_ber.FontColor = [0.8 0.2 0.2]; end
+    if ber < 1e-6, app.lbl_ber.FontColor = P.success;
+    elseif ber < 0.01, app.lbl_ber.FontColor = P.warning;
+    else, app.lbl_ber.FontColor = P.danger; end
     app.lbl_err.Text = sprintf('%d / %d', n_err, n);
 
-    app.lbl_esnr.Text = sprintf('%.2f dB', info.estimated_snr);
+    app.lbl_esnr.Text = sprintf('%.2f', info.estimated_snr);
     app.lbl_eber.Text = sprintf('%.3e', info.estimated_ber);
     if info.turbo_iter <= 1
         app.lbl_iter_show.Text = '—';
@@ -1079,14 +1276,17 @@ function update_rx_panel(sch, info, ber, n_err, n)
         app.lbl_iter_show.Text = sprintf('%d', info.turbo_iter);
     end
     if info.convergence_flag == 1
+        c_ok = p3_semantic_color('收敛');
         if info.turbo_iter <= 1
-            app.lbl_conv.Text = 'OK'; app.lbl_conv.FontColor = [0.1 0.6 0.1];
+            app.lbl_conv.Text = 'OK';
         else
             app.lbl_conv.Text = sprintf('收敛 (iter %d)', info.turbo_iter);
-            app.lbl_conv.FontColor = [0.1 0.6 0.1];
         end
+        app.lbl_conv.FontColor = c_ok.fg;
     else
-        app.lbl_conv.Text = '未收敛'; app.lbl_conv.FontColor = [0.7 0.3 0.1];
+        c_bad = p3_semantic_color('未收敛');
+        app.lbl_conv.Text = '未收敛';
+        app.lbl_conv.FontColor = c_bad.fg;
     end
     if isfield(info, 'noise_var')
         app.lbl_nv.Text = sprintf('%.3e', info.noise_var);
@@ -1110,8 +1310,8 @@ function update_tabs_from_entry(entry)
     fs_val = app.sys.fs;
 
     % --- TX/RX 对比（双行：上 TX 原始，下 RX 含信道+噪声）---
-    ax_tx = app.tabs.compare_tx; cla(ax_tx,'reset');
-    ax_rx = app.tabs.compare_rx; cla(ax_rx,'reset');
+    ax_tx = app.tabs.compare_tx; cla(ax_tx);
+    ax_rx = app.tabs.compare_rx; cla(ax_rx);
     try
         % TX 始终用原始帧（无信道无噪声）
         tx_clean = entry.tx_body_bb_clean;  % = frame_bb
@@ -1133,39 +1333,52 @@ function update_tabs_from_entry(entry)
         if ~isempty(tx_cmp) && ~isempty(rx_cmp)
             n_show = min(length(tx_cmp), length(rx_cmp));
             t_s = (0:n_show-1) / sr;
-            plot(ax_tx, t_s, tx_cmp(1:n_show), 'b-', 'LineWidth', 0.5);
-            title(ax_tx, sprintf('TX %s（%.2fs, %d 样本）', lbl_mode, t_s(end), n_show));
+            plot(ax_tx, t_s, tx_cmp(1:n_show), ...
+                'Color', PALETTE.chart_cyan, 'LineWidth', 0.8);
+            title(ax_tx, sprintf('TX %s（%.2fs, %d 样本）', lbl_mode, t_s(end), n_show), ...
+                'Color', PALETTE.primary_hi);
             xlabel(ax_tx, 's'); ylabel(ax_tx, 'amplitude');
-            grid(ax_tx, 'on'); ax_tx.XColor='k'; ax_tx.YColor='k';
-            plot(ax_rx, t_s, rx_cmp(1:n_show), 'Color', [0.8 0.2 0.2], 'LineWidth', 0.5);
-            title(ax_rx, sprintf('RX %s（含噪声+信道）', lbl_mode));
+            plot(ax_rx, t_s, rx_cmp(1:n_show), ...
+                'Color', PALETTE.chart_amber, 'LineWidth', 0.8);
+            title(ax_rx, sprintf('RX %s（含噪声+信道）', lbl_mode), ...
+                'Color', PALETTE.accent_hi);
             xlabel(ax_rx, 's'); ylabel(ax_rx, 'amplitude');
-            grid(ax_rx, 'on'); ax_rx.XColor='k'; ax_rx.YColor='k';
+            p3_style_axes({ax_tx, ax_rx});
             linkaxes([ax_tx, ax_rx], 'x');
         end
     catch
     end
 
-    % --- 频谱（仅正频率）---
-    ax = app.tabs.spectrum; cla(ax,'reset');
+    % --- 频谱（仅正频率，area 半透填充）---
+    ax = app.tabs.spectrum; cla(ax);
     rx_seg2 = entry.pb_seg;
     Nfft = 8192;
     Pf = abs(fft(rx_seg2, Nfft));
     f_khz = (0:Nfft/2) / Nfft * fs_val / 1000;
     P_pos = 20*log10(Pf(1:Nfft/2+1) + 1e-9);
-    plot(ax, f_khz, P_pos, 'b', 'LineWidth', 0.8); grid(ax, 'on');
+    % 填充基线取 P_pos 最小值，提升视觉密度
+    baseline = min(P_pos) - 3;
+    ar = area(ax, f_khz, P_pos, baseline);
+    ar.FaceColor = PALETTE.chart_cyan;
+    ar.FaceAlpha = 0.28;
+    ar.EdgeColor = PALETTE.primary_hi;
+    ar.LineWidth = 1.0;
     xlabel(ax, '频率 (kHz)'); ylabel(ax, 'dB');
-    title(ax, '通带频谱（接收信号）');
-    xline(ax, app.sys.fc/1000, 'r--', 'fc');
-    bw_rx = downconv_bandwidth(sch);
-    xline(ax, (app.sys.fc - bw_rx/2)/1000, 'g:', 'f_L');
-    xline(ax, (app.sys.fc + bw_rx/2)/1000, 'g:', 'f_H');
+    title(ax, '通带频谱（接收信号）', 'Color', PALETTE.primary_hi);
+    xline(ax, app.sys.fc/1000, '--', 'fc', ...
+        'Color', PALETTE.accent, 'LabelVerticalAlignment', 'top', ...
+        'LabelHorizontalAlignment', 'center');
+    bw_rx = p3_downconv_bw(sch, app.sys);
+    xline(ax, (app.sys.fc - bw_rx/2)/1000, ':', 'f_L', ...
+        'Color', PALETTE.success);
+    xline(ax, (app.sys.fc + bw_rx/2)/1000, ':', 'f_H', ...
+        'Color', PALETTE.success);
     xlim(ax, [0, fs_val/2/1000]);
-    ax.XColor = 'k'; ax.YColor = 'k';
+    p3_style_axes(ax);
 
     % --- 均衡分析（4 列，按体制类型分派）---
     ax_cells = {app.tabs.pre_eq, app.tabs.eq_it1, app.tabs.eq_mid, app.tabs.post_eq};
-    for k = 1:4, cla(ax_cells{k}, 'reset'); end
+    for k = 1:4, cla(ax_cells{k}); end
     ref_qpsk = [1+1j,1-1j,-1+1j,-1-1j]/sqrt(2);
     ns_max = 3000;
     has_iters = isfield(info, 'eq_syms_iters') && ~isempty(info.eq_syms_iters);
@@ -1176,57 +1389,81 @@ function update_tabs_from_entry(entry)
             ax = ax_cells{1};
             imagesc(ax, 10*log10(info.energy_matrix.' + 1e-12)); axis(ax,'tight');
             xlabel(ax,'符号 #'); ylabel(ax,'频点 #');
-            title(ax,'能量矩阵 (dB)'); colorbar(ax);
-            ax.XColor='k'; ax.YColor='k';
+            title(ax,'能量矩阵 (dB)', 'Color', PALETTE.primary_hi);
+            colormap(ax, 'turbo'); colorbar(ax);
+            p3_style_axes(ax);
         end
         if isfield(info, 'soft_llr')
             L = info.soft_llr;
             ax = ax_cells{2};
-            histogram(ax, L, 60, 'FaceColor', [0.4 0.6 0.8]);
+            histogram(ax, L, 60, 'FaceColor', PALETTE.chart_cyan, ...
+                'FaceAlpha', 0.7, 'EdgeColor', PALETTE.primary_hi);
             xlabel(ax,'LLR'); ylabel(ax,'count');
-            title(ax, sprintf('软判决 LLR (med=%.1f)', median(abs(L))));
-            grid(ax,'on'); ax.XColor='k'; ax.YColor='k';
+            title(ax, sprintf('软判决 LLR (med=%.1f)', median(abs(L))), ...
+                'Color', PALETTE.primary_hi);
+            p3_style_axes(ax);
 
             ax = ax_cells{3};
-            plot(ax, 1:length(L), L, '.', 'MarkerSize', 3, 'Color', [0.3 0.5 0.7]);
+            plot(ax, 1:length(L), L, '.', 'MarkerSize', 4, 'Color', PALETTE.chart_amber);
             xlabel(ax,'bit #'); ylabel(ax,'LLR');
-            title(ax,'LLR 序列'); grid(ax,'on');
-            ax.XColor='k'; ax.YColor='k';
+            title(ax,'LLR 序列', 'Color', PALETTE.accent_hi);
+            p3_style_axes(ax);
         end
         ax = ax_cells{4};
         text(ax, 0.5, 0.5, sprintf('FH-MFSK\n无星座图\nBER=%.3f%%', entry.ber*100), ...
-            'Units','normalized','HorizontalAlignment','center','FontSize',12);
+            'Units','normalized','HorizontalAlignment','center', ...
+            'FontSize',13, 'Color', PALETTE.text);
         ax.XColor='none'; ax.YColor='none';
+        ax.BackgroundColor = PALETTE.surface;
+        ax.Color = PALETTE.surface;
 
     elseif strcmp(sch, 'DSSS')
         % ---- DSSS：Rake 输出(BPSK) | 差分相关 | LLR | 判决 ----
         if isfield(info, 'pre_eq_syms') && ~isempty(info.pre_eq_syms)
             ax = ax_cells{1};
             s = info.pre_eq_syms; ns = min(ns_max, length(s));
-            plot(ax, real(s(1:ns)), imag(s(1:ns)), '.', 'MarkerSize', 4, 'Color', [0.3 0.4 0.7]);
-            hold(ax,'on'); plot(ax, [-1 1], [0 0], 'rx', 'MarkerSize', 12, 'LineWidth', 2); hold(ax,'off');
-            axis(ax, 'equal'); title(ax, 'Rake 输出(DBPSK)');
-            xlabel(ax,'I'); ylabel(ax,'Q'); grid(ax,'on');
-            ax.XColor='k'; ax.YColor='k';
+            plot(ax, real(s(1:ns)), imag(s(1:ns)), '.', ...
+                'MarkerSize', 5, 'Color', PALETTE.chart_cyan);
+            hold(ax,'on');
+            draw_unit_circle(ax, PALETTE);
+            plot(ax, [-1 1], [0 0], 'x', 'MarkerSize', 13, 'LineWidth', 2.2, ...
+                'Color', PALETTE.accent_hi);
+            hold(ax,'off');
+            axis(ax, 'equal'); title(ax, 'Rake 输出(DBPSK)', 'Color', PALETTE.primary_hi);
+            xlabel(ax,'I'); ylabel(ax,'Q');
+            p3_style_axes(ax);
         end
         if isfield(info, 'post_eq_syms') && ~isempty(info.post_eq_syms)
             ax = ax_cells{2};
             s = info.post_eq_syms; ns = min(ns_max, length(s));
-            plot(ax, real(s(1:ns)), imag(s(1:ns)), '.', 'MarkerSize', 4, 'Color', [0.5 0.3 0.6]);
-            hold(ax,'on'); plot(ax, [-1 1], [0 0], 'rx', 'MarkerSize', 12, 'LineWidth', 2); hold(ax,'off');
-            axis(ax, 'equal'); title(ax, '差分检测后');
-            xlabel(ax,'I'); ylabel(ax,'Q'); grid(ax,'on');
-            ax.XColor='k'; ax.YColor='k';
+            plot(ax, real(s(1:ns)), imag(s(1:ns)), '.', ...
+                'MarkerSize', 5, 'Color', PALETTE.chart_violet);
+            hold(ax,'on');
+            draw_unit_circle(ax, PALETTE);
+            plot(ax, [-1 1], [0 0], 'x', 'MarkerSize', 13, 'LineWidth', 2.2, ...
+                'Color', PALETTE.accent_hi);
+            hold(ax,'off');
+            axis(ax, 'equal'); title(ax, '差分检测后', 'Color', PALETTE.primary_hi);
+            xlabel(ax,'I'); ylabel(ax,'Q');
+            p3_style_axes(ax);
         end
         ax = ax_cells{3};
         text(ax, 0.5, 0.5, sprintf('DSSS Gold31\n无Turbo迭代\n单次 Rake+DCD'), ...
-            'Units','normalized','HorizontalAlignment','center','FontSize',11);
+            'Units','normalized','HorizontalAlignment','center', ...
+            'FontSize',12, 'Color', PALETTE.text_muted);
         ax.XColor='none'; ax.YColor='none';
+        ax.BackgroundColor = PALETTE.surface;
+        ax.Color = PALETTE.surface;
         ax = ax_cells{4};
+        ok_color = PALETTE.success;
+        if entry.ber > 0.05, ok_color = PALETTE.warning; end
+        if entry.ber > 0.20, ok_color = PALETTE.danger; end
         text(ax, 0.5, 0.5, sprintf('BER=%.3f%%\nSNR=%.1fdB', entry.ber*100, info.estimated_snr), ...
-            'Units','normalized','HorizontalAlignment','center','FontSize',13, ...
-            'FontWeight','bold', 'Color', [0.1 0.5 0.1]);
+            'Units','normalized','HorizontalAlignment','center','FontSize',15, ...
+            'FontWeight','bold', 'Color', ok_color, 'FontName', FONTS.code);
         ax.XColor='none'; ax.YColor='none';
+        ax.BackgroundColor = PALETTE.surface;
+        ax.Color = PALETTE.surface;
 
     else
         % ---- Turbo 体制（SC-FDE/OFDM/SC-TDE/OTFS）：迭代星座 ----
@@ -1243,51 +1480,76 @@ function update_tabs_from_entry(entry)
             end
         end
 
-        % 列 1：均衡前
+        % 列 1：均衡前（均衡前 = 冷青色调，标识"未处理"）
         ax = ax_cells{1};
         if isfield(info,'pre_eq_syms') && ~isempty(info.pre_eq_syms)
             s = info.pre_eq_syms; ns = min(ns_max, length(s));
-            scatter(ax, real(s(1:ns)), imag(s(1:ns)), 5, [0.3 0.4 0.7], 'filled', 'MarkerFaceAlpha', 0.3);
-            hold(ax,'on'); plot(ax, real(ref_qpsk), imag(ref_qpsk), 'kx', 'MarkerSize', 10, 'LineWidth', 2); hold(ax,'off');
-            axis(ax, 'equal'); title(ax, '均衡前'); xlabel(ax,'I'); ylabel(ax,'Q'); grid(ax,'on');
+            scatter(ax, real(s(1:ns)), imag(s(1:ns)), 6, PALETTE.chart_cyan, ...
+                'filled', 'MarkerFaceAlpha', 0.35);
+            hold(ax,'on');
+            draw_unit_circle(ax, PALETTE);
+            plot(ax, real(ref_qpsk), imag(ref_qpsk), 'x', ...
+                'MarkerSize', 11, 'LineWidth', 2.2, 'Color', PALETTE.accent_hi);
+            hold(ax,'off');
+            axis(ax, 'equal'); title(ax, '均衡前', 'Color', PALETTE.primary_hi);
+            xlabel(ax,'I'); ylabel(ax,'Q');
         end
-        ax.XColor='k'; ax.YColor='k';
+        p3_style_axes(ax);
 
-        % 列 2/3/4：迭代过程
+        % 列 2/3/4：迭代过程（从冷青渐变到暖琥珀，表达"收敛")
+        iter_colors = {PALETTE.chart_cyan, PALETTE.chart_violet, PALETTE.chart_amber};
         for ci = 2:4
             ax = ax_cells{ci};
+            pt_color = iter_colors{ci-1};
             if has_iters && sel(ci) <= length(info.eq_syms_iters)
                 it_idx = sel(ci);
                 s = info.eq_syms_iters{it_idx}; ns = min(ns_max, length(s));
-                scatter(ax, real(s(1:ns)), imag(s(1:ns)), 5, [0.3 0.4 0.7], 'filled', 'MarkerFaceAlpha', 0.4);
-                hold(ax,'on'); plot(ax, real(ref_qpsk), imag(ref_qpsk), 'kx', 'MarkerSize', 10, 'LineWidth', 2); hold(ax,'off');
+                scatter(ax, real(s(1:ns)), imag(s(1:ns)), 6, pt_color, ...
+                    'filled', 'MarkerFaceAlpha', 0.45);
+                hold(ax,'on');
+                draw_unit_circle(ax, PALETTE);
+                plot(ax, real(ref_qpsk), imag(ref_qpsk), 'x', ...
+                    'MarkerSize', 11, 'LineWidth', 2.2, 'Color', PALETTE.accent_hi);
+                hold(ax,'off');
                 axis(ax, 'equal');
                 if ci == 4
-                    title(ax, sprintf('iter %d (末)', it_idx));
+                    title(ax, sprintf('iter %d (末)', it_idx), 'Color', PALETTE.accent_hi);
                 else
-                    title(ax, sprintf('iter %d', it_idx));
+                    title(ax, sprintf('iter %d', it_idx), 'Color', PALETTE.primary_hi);
                 end
-                xlabel(ax,'I'); grid(ax,'on');
+                xlabel(ax,'I');
             elseif isfield(info,'post_eq_syms') && ~isempty(info.post_eq_syms)
                 s = info.post_eq_syms; ns = min(ns_max, length(s));
-                scatter(ax, real(s(1:ns)), imag(s(1:ns)), 5, [0.3 0.4 0.7], 'filled', 'MarkerFaceAlpha', 0.4);
-                hold(ax,'on'); plot(ax, real(ref_qpsk), imag(ref_qpsk), 'kx', 'MarkerSize', 10, 'LineWidth', 2); hold(ax,'off');
-                axis(ax, 'equal'); title(ax, '均衡后'); xlabel(ax,'I'); grid(ax,'on');
+                scatter(ax, real(s(1:ns)), imag(s(1:ns)), 6, pt_color, ...
+                    'filled', 'MarkerFaceAlpha', 0.45);
+                hold(ax,'on');
+                draw_unit_circle(ax, PALETTE);
+                plot(ax, real(ref_qpsk), imag(ref_qpsk), 'x', ...
+                    'MarkerSize', 11, 'LineWidth', 2.2, 'Color', PALETTE.accent_hi);
+                hold(ax,'off');
+                axis(ax, 'equal'); title(ax, '均衡后', 'Color', PALETTE.accent_hi);
+                xlabel(ax,'I');
             end
-            ax.XColor='k'; ax.YColor='k';
+            p3_style_axes(ax);
         end
     end
 
     % --- 信道（左：时域 CIR，右：频响，均含估计 vs 真实对比）---
-    ax_td = app.tabs.h_td; cla(ax_td,'reset');
-    ax_fd = app.tabs.h_fd; cla(ax_fd,'reset');
+    ax_td = app.tabs.h_td; cla(ax_td);
+    ax_fd = app.tabs.h_fd; cla(ax_fd);
     if length(h_tap) <= 1
-        text(ax_td, 0.5, 0.5, 'AWGN', 'Units','normalized', ...
-            'HorizontalAlignment','center','FontSize',13);
-        text(ax_fd, 0.5, 0.5, 'AWGN', 'Units','normalized', ...
-            'HorizontalAlignment','center','FontSize',13);
+        text(ax_td, 0.5, 0.5, 'AWGN  ·  无多径', 'Units','normalized', ...
+            'HorizontalAlignment','center', 'FontSize', 14, ...
+            'FontWeight', 'bold', 'Color', PALETTE.primary);
+        text(ax_fd, 0.5, 0.5, 'AWGN  ·  平坦频响', 'Units','normalized', ...
+            'HorizontalAlignment','center', 'FontSize', 14, ...
+            'FontWeight', 'bold', 'Color', PALETTE.primary);
         ax_td.XColor='none'; ax_td.YColor='none';
         ax_fd.XColor='none'; ax_fd.YColor='none';
+        ax_td.BackgroundColor = PALETTE.surface;
+        ax_td.Color = PALETTE.surface;
+        ax_fd.BackgroundColor = PALETTE.surface;
+        ax_fd.Color = PALETTE.surface;
     else
         % ===== 确定采样率（h_tap 在哪个速率）=====
         if strcmp(sch, 'DSSS')
@@ -1298,46 +1560,65 @@ function update_tabs_from_entry(entry)
             h_fs = app.sys.fs;  % SC-FDE/OFDM/SC-TDE h_tap at sample rate
         end
 
-        % ===== 左列：时域 CIR（x 轴 = 时间 ms）=====
-        t_true_ms = (0:length(h_tap)-1) / h_fs * 1000;
-        stem(ax_td, t_true_ms, abs(h_tap), 'filled', 'LineWidth', 1.5, ...
-            'Color', [0.2 0.5 0.8], 'MarkerSize', 5);
+        % ===== 左列：时域 CIR（x 轴 = 时间 ms，彩色 stem 梯度）=====
+        t_true_sec = (0:length(h_tap)-1) / h_fs;
+        h_true_handles = p3_plot_channel_stem(ax_td, t_true_sec, h_tap, ...
+            'Label', '|h| 真实');
         hold(ax_td, 'on');
         has_est_td = false;
+        h_est_rep = [];
         if strcmp(sch, 'DSSS') && isfield(info, 'h_est') && isfield(info, 'chip_delays')
             t_est_ms = info.chip_delays * app.sys.dsss.sps / h_fs * 1000;
-            stem(ax_td, t_est_ms, abs(info.h_est), 'LineWidth', 1.2, ...
-                'Color', [0.8 0.2 0.2], 'MarkerSize', 6);
+            h_est_rep = stem(ax_td, t_est_ms, abs(info.h_est), 'LineWidth', 1.2, ...
+                'Color', PALETTE.danger, 'MarkerSize', 5, ...
+                'MarkerFaceColor', PALETTE.danger_bg, ...
+                'MarkerEdgeColor', PALETTE.danger);
             has_est_td = true;
         elseif ismember(sch, {'SC-FDE','OFDM','SC-TDE'}) && isfield(info, 'H_est_block1')
             h_est_td = ifft(info.H_est_block1);
             t_est_ms = (0:length(h_est_td)-1) / app.sys.sym_rate * 1000;
-            stem(ax_td, t_est_ms, abs(h_est_td), 'LineWidth', 1.2, ...
-                'Color', [0.8 0.2 0.2], 'MarkerSize', 4);
+            h_est_rep = stem(ax_td, t_est_ms, abs(h_est_td), 'LineWidth', 1.2, ...
+                'Color', PALETTE.danger, 'MarkerSize', 4, ...
+                'MarkerFaceColor', PALETTE.danger_bg, ...
+                'MarkerEdgeColor', PALETTE.danger);
             has_est_td = true;
         end
         hold(ax_td, 'off');
-        xlabel(ax_td, '时延 (ms)'); ylabel(ax_td, '|h|');
-        title(ax_td, '时域 CIR');
+        title(ax_td, '时域 CIR  ·  真实(渐变) vs 估计(红)', ...
+            'Color', PALETTE.primary_hi);
         if has_est_td
-            legend(ax_td, '真实', '估计', 'Location', 'best');
+            % 只取真实路径首个 stem 作为 legend 代表，避免 50 条上限告警
+            if ~isempty(h_true_handles.stems) && ...
+               isgraphics(h_true_handles.stems(1)) && isgraphics(h_est_rep)
+                lgd = legend(ax_td, [h_true_handles.stems(1), h_est_rep], ...
+                    {'|h| 真实', '|h| 估计'}, 'Location', 'best');
+                lgd.Color = PALETTE.surface_alt;
+                lgd.TextColor = PALETTE.text;
+                lgd.EdgeColor = PALETTE.border_subtle;
+            end
         end
-        grid(ax_td, 'on'); ax_td.XColor='k'; ax_td.YColor='k';
+        p3_style_axes(ax_td);
 
-        % ===== 右列：频域响应（以接收端带宽为窗口）=====
-        bw_rx = downconv_bandwidth(sch);  % 接收端信号带宽 (Hz)
+        % ===== 右列：频域响应（以接收端带宽为窗口，area 填充）=====
+        bw_rx = p3_downconv_bw(sch, app.sys);  % 接收端信号带宽 (Hz)
         Nf = 512;
-        % 真实信道在信号带宽范围画
         H_true = fft(h_tap, Nf);
         f_hz = (0:Nf-1)/Nf * h_fs - h_fs/2;
-        plot(ax_fd, f_hz/1000, 20*log10(abs(fftshift(H_true))+1e-9), 'b-', 'LineWidth', 1.2);
+        H_true_db = 20*log10(abs(fftshift(H_true))+1e-9);
+        baseline_fd = min(H_true_db) - 3;
+        ar_true = area(ax_fd, f_hz/1000, H_true_db, baseline_fd);
+        ar_true.FaceColor = PALETTE.chart_cyan;
+        ar_true.FaceAlpha = 0.25;
+        ar_true.EdgeColor = PALETTE.primary_hi;
+        ar_true.LineWidth = 1.3;
         hold(ax_fd, 'on');
         has_est_fd = false;
         if ismember(sch, {'SC-FDE','OFDM','SC-TDE'}) && isfield(info, 'H_est_block1')
             H_est = info.H_est_block1;
             Nf_est = length(H_est);
             f_est_hz = (0:Nf_est-1)/Nf_est * app.sys.sym_rate - app.sys.sym_rate/2;
-            plot(ax_fd, f_est_hz/1000, 20*log10(abs(fftshift(H_est))+1e-9), 'r--', 'LineWidth', 1.0);
+            plot(ax_fd, f_est_hz/1000, 20*log10(abs(fftshift(H_est))+1e-9), ...
+                '--', 'LineWidth', 1.3, 'Color', PALETTE.chart_amber);
             has_est_fd = true;
         elseif strcmp(sch, 'DSSS') && isfield(info, 'h_est') && isfield(info, 'chip_delays')
             h_est_full = zeros(1, Nf);
@@ -1348,23 +1629,63 @@ function update_tabs_from_entry(entry)
                 end
             end
             H_est_d = fft(h_est_full, Nf);
-            plot(ax_fd, f_hz/1000, 20*log10(abs(fftshift(H_est_d))+1e-9), 'r--', 'LineWidth', 1.0);
+            plot(ax_fd, f_hz/1000, 20*log10(abs(fftshift(H_est_d))+1e-9), ...
+                '--', 'LineWidth', 1.3, 'Color', PALETTE.chart_amber);
             has_est_fd = true;
         end
         hold(ax_fd, 'off');
         xlim(ax_fd, [-bw_rx/2/1000 * 1.1, bw_rx/2/1000 * 1.1]);
         xlabel(ax_fd, '频率 (kHz)'); ylabel(ax_fd, '|H(f)| (dB)');
-        title(ax_fd, sprintf('频域响应 (BW=%.1fkHz)', bw_rx/1000));
+        title(ax_fd, sprintf('频域响应 (BW=%.1fkHz)', bw_rx/1000), ...
+            'Color', PALETTE.primary_hi);
         if has_est_fd
-            legend(ax_fd, '真实', '估计', 'Location', 'best');
+            lgd = legend(ax_fd, {'真实', '估计'}, 'Location', 'best');
+            lgd.Color = PALETTE.surface_alt;
+            lgd.TextColor = PALETTE.text;
+            lgd.EdgeColor = PALETTE.border_subtle;
         end
-        grid(ax_fd, 'on'); ax_fd.XColor='k'; ax_fd.YColor='k';
+        p3_style_axes(ax_fd);
+    end
+
+    % --- 质量历史 tab（读 app.history，本 entry 已追加进去）---
+    try
+        p3_render_quality(app.history, struct( ...
+            'ax_ber', app.tabs.quality_ber, ...
+            'ax_snr', app.tabs.quality_snr));
+    catch ME_q
+        append_log(sprintf('[QUALITY-ERR] %s', ME_q.message));
+    end
+
+    % --- 同步/多普勒 tab ---
+    try
+        p3_render_sync(entry, app.history, struct( ...
+            'ax_hfm_pos', app.tabs.sync_hfm_pos, ...
+            'ax_hfm_neg', app.tabs.sync_hfm_neg, ...
+            'ax_sym_off', app.tabs.sync_sym_off, ...
+            'ax_doppler', app.tabs.sync_doppler), app.sys);
+    catch ME_s
+        append_log(sprintf('[SYNC-ERR] %s', ME_s.message));
     end
 end
 
-function set_status(msg, color)
-    app.status_lbl.Text = msg;
-    app.status_lbl.FontColor = color;
+function set_status(msg, state)
+% state 取值：'ready' | 'busy' | 'warning' | 'error'
+    P = app.palette;
+    switch state
+        case 'ready'
+            bg = P.success_bg; fg = P.success;     dot = '●';
+        case 'busy'
+            bg = P.info_bg;    fg = P.primary;     dot = '◐';
+        case 'warning'
+            bg = P.warning_bg; fg = P.warning;     dot = '▲';
+        case 'error'
+            bg = [1.0 0.92 0.92]; fg = P.danger;   dot = '✕';
+        otherwise
+            bg = P.surface; fg = P.text;           dot = '·';
+    end
+    app.status_lbl.Text = sprintf('  %s  %s', dot, msg);
+    app.status_lbl.FontColor = fg;
+    app.status_lbl.BackgroundColor = bg;
 end
 
 function v = parse_lead_int(s)
@@ -1382,6 +1703,14 @@ function append_log(msg)
     if length(cur) > 120, cur = cur(end-100:end); end
     app.log_area.Value = cur;
     try, scroll(app.log_area, 'bottom'); catch, end
+end
+
+function draw_unit_circle(ax, P)
+    % 星座图辅助：单位圆 + 十字轴，帮助眼睛判断收敛程度
+    th = linspace(0, 2*pi, 128);
+    line(ax, cos(th), sin(th), 'Color', P.text_muted, 'LineWidth', 0.6);
+    line(ax, [-1.3 1.3], [0 0], 'Color', P.divider, 'LineStyle', ':', 'LineWidth', 0.5);
+    line(ax, [0 0], [-1.3 1.3], 'Color', P.divider, 'LineStyle', ':', 'LineWidth', 0.5);
 end
 
 end

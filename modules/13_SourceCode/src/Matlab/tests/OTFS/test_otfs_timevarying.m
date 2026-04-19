@@ -571,11 +571,11 @@ try
             end
         end
         subplot(n_vis,3,(fi-1)*3+1);
-        imagesc(dl_range, dk_range, crop_true); axis xy; colorbar; caxis([0 cmax]);
+        imagesc(dl_range, dk_range, crop_true); axis xy; colorbar; clim([0 cmax]);
         ylabel('dk'); text(-1.5, dk_range(end)-0.5, fading_cfgs{fi,1}, 'FontSize',11, 'FontWeight','bold');
         if fi==1, title('真实DD信道'); end
         subplot(n_vis,3,(fi-1)*3+2);
-        imagesc(dl_range, dk_range, crop_est); axis xy; colorbar; caxis([0 cmax]);
+        imagesc(dl_range, dk_range, crop_est); axis xy; colorbar; clim([0 cmax]);
         if fi==1, title('估计DD信道'); end
         subplot(n_vis,3,(fi-1)*3+3);
         dl_prof = 0:max(delay_bins)+4;
