@@ -884,11 +884,22 @@ function on_transmit()
         frame_ch = conv(frame_bb, h_tap);
         frame_ch = frame_ch(1:length(frame_bb));
 
-        % 注：doppler_edit 字段 UI 有但 TX 链路未施加 Doppler。
-        % P3 demo decoder 当前为静态信道假设，对 Doppler 敏感。
-        % 完整 Doppler 处理需 decoder 时变分支，见
-        %   specs/active/2026-04-19-p3-decoder-timevarying-branch.md
-        % 目前选择"不注入"保持 UI 演示的稳定性（所有体制 BER 0%）。
+        % --- 多普勒注入（真实水声模型 y(t) = x((1+α)·t)·exp(j·2π·fc·α·t)）---
+        % RX 若无 α 反补偿 + 时变信道估计 → 高 Doppler BER 崩溃（已知限制）
+        % 完整处理见 spec 2026-04-19-p3-decoder-timevarying-branch.md (Level 2)
+        dop_hz = app.doppler_edit.Value;
+        if abs(dop_hz) > 1e-3
+            alpha = dop_hz / app.sys.fc;
+            frame_ch_r = comp_resample_spline(frame_ch, alpha);
+            if length(frame_ch_r) > length(frame_ch)
+                frame_ch = frame_ch_r(1:length(frame_ch));
+            else
+                frame_ch = [frame_ch_r, zeros(1, length(frame_ch)-length(frame_ch_r))]; %#ok<AGROW>
+            end
+            t_vec = (0:length(frame_ch)-1) / app.sys.fs;
+            frame_ch = frame_ch .* exp(1j * 2*pi * dop_hz * t_vec);
+            ch_label = sprintf('%s + Doppler %+gHz (α=%.2e)', ch_label, dop_hz, alpha);
+        end
 
         snr_db = app.snr_edit.Value;
         app.tx_meta_pending = meta_tx;
