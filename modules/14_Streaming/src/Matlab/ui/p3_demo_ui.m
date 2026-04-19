@@ -237,8 +237,8 @@ if isprop(tx_panel, 'BorderColor'),  tx_panel.BorderColor = PALETTE.border_subtl
 if isprop(tx_panel, 'BorderWidth'),  tx_panel.BorderWidth = 1; end
 tx_panel.Layout.Column = 1;
 app.tx_panel = tx_panel;
-tx_grid = uigridlayout(tx_panel, [13 2]);
-tx_grid.RowHeight = {25, 55, 25, 28, 28, 28, 28, 28, 28, 28, 28, 25, '1x'};
+tx_grid = uigridlayout(tx_panel, [14 2]);
+tx_grid.RowHeight = {25, 55, 25, 28, 28, 28, 28, 28, 28, 28, 28, 28, 25, '1x'};
 tx_grid.ColumnWidth = {140, '1x'};
 tx_grid.RowSpacing = 4;
 
@@ -297,13 +297,24 @@ app.pl_dd  = uidropdown(tx_grid, ...
     'Items', {'256', '512', '1024', '2048 (默认)'}, 'Value', '2048 (默认)');
 app.pl_dd.Layout.Row = 10; app.pl_dd.Layout.Column = 2;
 
+% OTFS 导频模式（row 12，仅 OTFS 可见）
+app.lbl_pilot = uilabel(tx_grid, 'Text', 'OTFS 导频:');
+app.lbl_pilot.Layout.Row = 12; app.lbl_pilot.Layout.Column = 1;
+app.pilot_dd = uidropdown(tx_grid, ...
+    'Items', {'impulse (冲激，高 SNR 最优，PAPR 20dB)', ...
+              'sequence (ZC，PAPR ↓9dB，5dB 轻微误码)', ...
+              'superimposed (叠加，能效最优)'}, ...
+    'Value', 'impulse (冲激，高 SNR 最优，PAPR 20dB)', ...
+    'ValueChangedFcn', @(~,~) on_pilot_mode_changed());
+app.pilot_dd.Layout.Row = 12; app.pilot_dd.Layout.Column = 2;
+
 % TX 信号信息面板（替换原 Log 区域）
 txinfo_panel = uipanel(tx_grid, 'Title', '  TX 信号信息', 'FontSize', SIZES.body, ...
     'FontWeight', 'bold', 'BackgroundColor', PALETTE.surface, ...
     'ForegroundColor', PALETTE.text_muted, 'BorderType', 'line');
 if isprop(txinfo_panel, 'BorderColor'), txinfo_panel.BorderColor = PALETTE.border_subtle; end
 if isprop(txinfo_panel, 'BorderWidth'), txinfo_panel.BorderWidth = 1; end
-txinfo_panel.Layout.Row = [12 13]; txinfo_panel.Layout.Column = [1 2];
+txinfo_panel.Layout.Row = [13 14]; txinfo_panel.Layout.Column = [1 2];
 txinfo_grid = uigridlayout(txinfo_panel, [1 1]); txinfo_grid.Padding = [5 5 5 5];
 txinfo_grid.BackgroundColor = PALETTE.surface;
 app.txinfo_area = uitextarea(txinfo_grid, 'Editable', 'off', ...
@@ -648,6 +659,8 @@ function on_scheme_changed()
     show(app.blk_dd,   ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE'}));
     show(app.lbl_iter, is_turbo); show(app.iter_edit, is_turbo);
     show(app.lbl_pl,   is_fhmfsk); show(app.pl_dd,    is_fhmfsk);
+    is_otfs = strcmp(sch, 'OTFS');
+    show(app.lbl_pilot, is_otfs); show(app.pilot_dd, is_otfs);
     % 更新文本容量提示（单一事实源：p3_text_capacity）
     nb = p3_text_capacity(sch, app.sys);
     app.lbl_txt.Text = sprintf('发射文本 (max ~%dB):', nb);
@@ -667,6 +680,16 @@ end
 
 function show(h, vis)
     if vis, h.Visible = 'on'; else, h.Visible = 'off'; end
+end
+
+function on_pilot_mode_changed()
+    sel = app.pilot_dd.Value;
+    if     startsWith(sel, 'impulse'),      app.sys.otfs.pilot_mode = 'impulse';
+    elseif startsWith(sel, 'sequence'),     app.sys.otfs.pilot_mode = 'sequence';
+    elseif startsWith(sel, 'superimposed'), app.sys.otfs.pilot_mode = 'superimposed';
+    end
+    append_log(sprintf('[OTFS] pilot_mode → %s', app.sys.otfs.pilot_mode));
+    on_scheme_changed();
 end
 
 function on_bypass_changed()
@@ -1536,10 +1559,65 @@ function update_tabs_from_entry(entry)
         end
     end
 
-    % --- 信道（左：时域 CIR，右：频响，均含估计 vs 真实对比）---
+    % --- 信道（OTFS: DD 域热图 + path 散点；其他: 时域 CIR + 频响）---
     ax_td = app.tabs.h_td; cla(ax_td);
     ax_fd = app.tabs.h_fd; cla(ax_fd);
-    if length(h_tap) <= 1
+
+    if strcmp(sch, 'OTFS') && isfield(info, 'h_dd') && ~isempty(info.h_dd)
+        % ===== OTFS DD 域可视化 =====
+        h_dd = info.h_dd;
+        [N_dd, M_dd] = size(h_dd);
+
+        % 左：DD 域幅度热图（|h_dd|）
+        hdd_mag = abs(h_dd);
+        dl_range = 0:M_dd-1;
+        dk_range = -floor(N_dd/2) : ceil(N_dd/2)-1;
+        hdd_shift = fftshift(hdd_mag, 1);   % 把 Doppler 0 放中间
+        imagesc(ax_td, dl_range, dk_range, hdd_shift);
+        axis(ax_td, 'xy');
+        cmax = max(hdd_mag(:));
+        if cmax > 0, clim(ax_td, [0, cmax]); end
+        colormap(ax_td, 'turbo');
+        cbar = colorbar(ax_td);
+        cbar.Color = PALETTE.text_muted;
+        title(ax_td, sprintf('DD 域 |h_{dd}|  (N=%d, M=%d)', N_dd, M_dd), ...
+            'Color', PALETTE.primary_hi);
+        xlabel(ax_td, '时延 delay (l)'); ylabel(ax_td, '多普勒 doppler (k)');
+        p3_style_axes(ax_td);
+
+        % 右：path 散点（delay × doppler，大小=|gain|，色=相位）
+        if isfield(info, 'path_info') && ~isempty(info.path_info) && ...
+           info.path_info.num_paths > 0
+            pi_ = info.path_info;
+            dl = pi_.delay_idx(:);
+            dk = pi_.doppler_idx(:);
+            % 把 doppler wrap 到 [-N/2, N/2-1]
+            dk_c = dk;
+            dk_c(dk_c >= N_dd/2) = dk_c(dk_c >= N_dd/2) - N_dd;
+            gn = abs(pi_.gain(:));
+            ph = angle(pi_.gain(:));
+            gn_norm = gn / max(gn + eps);
+            sizes = 40 + 300 * gn_norm;
+            scatter(ax_fd, dl, dk_c, sizes, ph, 'filled', ...
+                'MarkerEdgeColor', PALETTE.text);
+            colormap(ax_fd, 'hsv'); clim(ax_fd, [-pi pi]);
+            cbar2 = colorbar(ax_fd);
+            cbar2.Color = PALETTE.text_muted;
+            cbar2.Label.String = '相位 (rad)';
+            title(ax_fd, sprintf('path\\_info 散点  (%d 径, 大小=|h|, 色=∠h)', ...
+                pi_.num_paths), 'Color', PALETTE.primary_hi);
+            xlabel(ax_fd, '时延 delay (l)'); ylabel(ax_fd, '多普勒 doppler (k)');
+            xlim(ax_fd, [-0.5, M_dd-0.5]);
+            ylim(ax_fd, [-floor(N_dd/2)-0.5, ceil(N_dd/2)-0.5]);
+            p3_style_axes(ax_fd);
+        else
+            text(ax_fd, 0.5, 0.5, '(无 path_info)', 'Units','normalized', ...
+                'HorizontalAlignment','center', 'Color', PALETTE.text_muted);
+            ax_fd.XColor='none'; ax_fd.YColor='none';
+            ax_fd.BackgroundColor = PALETTE.surface;
+            ax_fd.Color = PALETTE.surface;
+        end
+    elseif length(h_tap) <= 1
         text(ax_td, 0.5, 0.5, 'AWGN  ·  无多径', 'Units','normalized', ...
             'HorizontalAlignment','center', 'FontSize', 14, ...
             'FontWeight', 'bold', 'Color', PALETTE.primary);
