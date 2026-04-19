@@ -102,9 +102,7 @@
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
-| **OTFS 两级同步架构** | 待做 | 对齐其他体制 HFM+LFM 帧结构（spec: `2026-04-13-otfs-sync-architecture.md`） |
-| **eq_bem_turbo_fde 真去 Oracle** | 待做 | 当前只加了警告 + 变量重命名 `h_time_block_oracle`；需加 `h_est_block1` 参数接收估计信道，删除 oracle 路径 |
-| **rx_chain.rx_otfs 真重写** | 待做 | 当前只标注 5 处 Oracle；需调 `otfs_demodulate` + guard 估噪 + `ch_est_otfs_dd` 估信道 |
+| **rx_chain.rx_otfs 真重写（main_sim_single 改造）** | 骨架占位 | rx_otfs_real 已加入 switch 路径但未实现；需 main_sim_single 开启真实 passband + 信道 + rx_otfs_real 填充。独立 spec 待创建 |
 
 ### 🟡 中优先
 
@@ -144,6 +142,9 @@
 | **P3 真同步 + Quality/Sync tab** | **2026-04-17** | `detect_frame_stream` 替代 cheat，UI 6→8 tab |
 | **全项目 code review + 4 批修复** | **2026-04-19** | 5 Agent 并行审计；Turbo La_dec_info / Doppler 方向 / convergence 扩散 / Oracle 标注等 10 条 |
 | **根 README 更新对齐代码状态** | **2026-04-19** | 规模/架构/快速开始/项目状态同步 |
+| **eq_bem_turbo_fde V2.0.0 真去 Oracle** | 2026-04-19 | h_time_block_oracle → h_est_block1；Q 保守上界估计 |
+| **P3 UI 加 OTFS dropdown** | 2026-04-19 | scheme_dd 增加 OTFS 选项，后端 current_scheme 已支持 |
+| **OTFS 两级同步架构（spec 归档）** | 2026-04-19 | frame_assemble/parse_otfs V2.0 + test 迁移，发现早已实施，补填 Result |
 
 ---
 

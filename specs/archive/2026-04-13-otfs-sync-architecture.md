@@ -83,7 +83,48 @@ tags: [模块08, 模块13, OTFS, 同步, 帧结构]
 ## Log
 
 - 2026-04-13: Spec 创建
+- 2026-04-14: frame_assemble_otfs V2.0.0 实施（代码审查 2026-04-19 确认）
+- 2026-04-14: frame_parse_otfs V2.0.0 实施（迭代式多普勒估计 + 两级同步）
+- 2026-04-14: test_otfs_timevarying.m 迁移（use_oracle=false 默认，调 V2.0 帧函数）
+- 2026-04-19: Spec 审查确认全部落地，Result 填写
 
 ## Result
 
-_待填写_
+✅ **已完成**。Spec 定义的 4 项核心工作已实施：
+
+1. **`frame_assemble_otfs.m` V2.0.0**
+   - 帧结构：`[HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|OTFS_pb]`
+   - 同步序列通带归一化（RMS×sync_gain 对齐数据 RMS）
+   - 同步序列边界加窗（2ms 过渡），消除与 guard 突变
+   - 输出 `info.hfm_pos_bb` / `.hfm_neg_bb` / `.lfm_bb` 三组基带模板 + `.S_bias`
+
+2. **`frame_parse_otfs.m` V2.0.0**
+   - Level 1：迭代式 `sync_dual_hfm` 粗同步（3 轮迭代解决"鸡生蛋"）
+     - 从 α=0 开始，每轮 comp_resample_spline(α) 补偿后重估 Δα → 收敛
+     - 补偿下变频后基带 HFM 的残余 `exp(j·2π·fc·α·t)` 相位
+   - Level 2：`sync_detect(LFM2)` 精确定时
+   - 综合输出 `.alpha_est / .tau_coarse / .tau_fine / .sync_quality`
+
+3. **`test_otfs_timevarying.m` 迁移**
+   - 默认 `use_oracle=false`
+   - 调 V2.0 帧函数（L175 assemble / L211 parse）替代手动拼帧
+   - 保留 oracle 分支做 baseline 对比（`use_oracle=true` 可显式开）
+
+4. **`test_sync.m` OTFS 帧回环**（可选项）
+   - 未做，非阻塞。当前 `test_otfs_timevarying` 已验证端到端回环
+
+### 验收状态
+
+| 指标 | 验收方式 | 状态 |
+|------|---------|------|
+| 帧回环数据完整恢复 | test_otfs_timevarying 无信道路径 | ✅ |
+| 静态信道 BER 0%@10dB+ | test_otfs_timevarying | ✅ |
+| 离散 Doppler 盲 α 估计 | sync_dual_hfm 迭代 3 轮 | ✅ |
+| 不用 oracle α | `use_oracle=false` 默认，RX 仅用 sync_info.alpha_est | ✅ |
+| 现有测试不回归 | 本次 code review 确认 | ✅ |
+
+### 后续
+
+- 可选：`test_sync.m` 加 OTFS 帧回环单元测试
+- 可选：将 OTFS 真实接收链路推广到 `main_sim_single.m` + `rx_chain.rx_otfs_real`
+  （独立 spec 待创建）

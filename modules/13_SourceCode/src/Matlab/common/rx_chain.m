@@ -228,19 +228,29 @@ function bits_out = rx_sctde(rx_signal, params, tx_info, ch_info)
 end
 
 function bits_out = rx_otfs(rx_signal, params, tx_info, ch_info)
-%% ⚠️ ORACLE 警告（2026-04-19 代码审查 CRITICAL-1）
-%  本函数当前**多重 oracle 泄漏**，违反 CLAUDE.md §2/§7 Oracle 排查清单第 2/3/4/6 条：
-%    1. dd_data 直接读 tx_info.dd_data（TX 发射符号）
-%    2. gains 直接读 ch_info.gains_init（真实信道增益）
-%    3. sd 可能直接读 params.channel.sym_delays（真实时延）
-%    4. nv 由 params.snr_db 推算（真实 SNR）
-%    5. h_dd 由真实 gains 直接构造（无估计步骤）
-%  end-to-end OTFS 测试由此获得 oracle 性能上界，**非真实接收链路**。
-%  未来 fix：
-%    - dd_data ← otfs_demodulate(rx_signal, ...)
-%    - sd / gains ← ch_est_otfs_dd / ch_est_otfs_zc / ch_est_otfs_superimposed
-%    - nv ← guard 区域估计
-%  本函数保留供性能上界对比（类似 oracle baseline），生产必须走真实接收。
+%% ⚠️ ORACLE BASELINE — 由 params.rx.otfs_mode 选择路径
+%  默认 'oracle': 多重 oracle 泄漏，仅用作性能上界基准（见下方 ORACLE 标注）
+%  'real':       走真实接收（否则需 main_sim_single 同时开启 passband 路径）
+%
+%  真实接收路径参考 test_otfs_timevarying.m，需要 rx_signal 为通带信号（非占位）：
+%    - bb_rx = downconvert(rx_signal, fs_pb, fc)
+%    - [Y_dd, ~] = otfs_demodulate(bb_rx, N, M, cp_len, 'dft')
+%    - [h_dd, path_info] = ch_est_otfs_dd(Y_dd, pilot_info, N, M)
+%    - guard 区能量 → noise_var
+%    - 送 turbo_equalizer_otfs
+%  生产用户应直接用 test_otfs_timevarying 的完整路径。
+%
+%  main_sim_single DD 模式（`rx_signal = tx_signal` 占位）**本质就是 oracle 模式**，
+%  无法通过本函数 'real' 开关简单切换。真正的去 oracle 需要 main_sim_single 重构
+%  （独立 spec，2026-04-13-otfs-sync-architecture.md 的 DD→通带 集成）。
+%
+%  违反 CLAUDE.md §2/§7 第 2/3/4/6 条（接收端使用 TX 数据/真实信道/SNR）
+if isfield(params, 'rx') && isfield(params.rx, 'otfs_mode') && ...
+   strcmpi(params.rx.otfs_mode, 'real')
+    bits_out = rx_otfs_real(rx_signal, params, tx_info, ch_info);
+    return;
+end
+% 以下是 ORACLE BASELINE 路径（默认）
     N = params.tx.N_doppler;
     M = params.tx.M_delay;
 
@@ -369,4 +379,28 @@ function H_est = build_H_est(ch_info, N_fft, params)
         end
     end
     H_est = fft(h_td);
+end
+
+
+%% ============================================================
+%% rx_otfs_real — 真实接收链路（无 oracle）
+%% 参考 test_otfs_timevarying.m 的完整路径
+%% ============================================================
+function bits_out = rx_otfs_real(rx_signal, params, tx_info, ch_info) %#ok<INUSD>
+% 真实 OTFS 接收：rx_signal 应为通带实信号（非占位）
+% 前提：main_sim_single 已开启真实 passband 生成 + 信道施加
+%
+% 处理链：
+%   1. downconvert → bb_rx（复基带）
+%   2. otfs_demodulate → Y_dd (N×M)
+%   3. ch_est_otfs_dd → h_dd / path_info（从导频估计）
+%   4. guard 区能量 → noise_var
+%   5. turbo_equalizer_otfs
+%
+% 实现状态：骨架占位，详细逻辑待 main_sim_single 改造完成后填充
+% （独立 spec: 2026-04-13-otfs-sync-architecture.md 落地）
+    error('rx_otfs_real:not_implemented', ...
+        ['rx_otfs_real 未实现。 当前 main_sim_single 的 OTFS 模式仍走 DD 域 oracle。\n' ...
+         '生产用户请直接参考 test_otfs_timevarying.m 的完整通带接收链路。\n' ...
+         '本函数将在 spec 2026-04-13-otfs-sync-architecture 落地时填充。']);
 end

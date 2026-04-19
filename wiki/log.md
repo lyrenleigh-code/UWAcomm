@@ -2,6 +2,16 @@
 
 ## 2026-04-19
 
+- **高优先算法实施（HP1/HP2/HP3）**
+  - HP1 `eq_bem_turbo_fde` V2.0.0 真去 Oracle：h_time_block_oracle → h_est_block1；
+    Q 保守上界估计（取 fd_est_from_hest vs fd_hz_max*0.1 最大值）；判决引导 LS 逻辑保留
+  - HP2 `rx_chain.rx_otfs` 分路：加 `params.rx.otfs_mode='real'` 入口 + rx_otfs_real 骨架
+    （error 抛指向 test_otfs_timevarying 为参考）；oracle baseline 路径保留
+  - HP3 OTFS 两级同步架构：审查发现 `frame_assemble/parse_otfs` V2.0.0 已落地 + 
+    test_otfs_timevarying 已迁移（use_oracle=false 默认）；补填 Result 并归档 spec
+- P3 demo UI 加入 OTFS scheme dropdown（current_scheme 后端已支持）
+- test_p3_3_dsss_otfs 3/3 PASS 回归验证
+
 - **全项目 Code Review + 修复完成**（5 个并行 Agent 审计 + 4 批修复）
   - Batch A（极低代价）：5 个 turbo_equalizer_* 加 `La_dec_info = Le_dec_info` 反馈；OFDM est_snr 去 sps 减法；comp_resample_farrow V4→V5 方向统一
   - Batch B（局部修复）：新建 `common/decode_convergence.m` 三选一判据 helper，扩散到 modem_decode_{ofdm,sctde,otfs}.m；LDPC LLR 符号对齐；07 README OTFS 均衡器签名修正
