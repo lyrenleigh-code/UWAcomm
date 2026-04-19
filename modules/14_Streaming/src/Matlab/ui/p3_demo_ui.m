@@ -884,29 +884,11 @@ function on_transmit()
         frame_ch = conv(frame_bb, h_tap);
         frame_ch = frame_ch(1:length(frame_bb));
 
-        % --- 多普勒注入（V3：真实水声 Doppler = time-scale + 载波频偏）---
-        % 公式: y(t) = x((1+α)·t) · exp(j·2π·fc·α·t)
-        %   time-scale (1+α) 由 comp_resample_spline 实现
-        %   载波相位旋转 exp(j·2π·fc·α·t) = exp(j·2π·fd·t)
-        % 注：RX 端 detect_frame_stream 用双 HFM 偏置差估计 α，
-        %   然后 try_decode_frame 反补偿（对齐 13_SourceCode/rx_chain）
-        dop_hz = app.doppler_edit.Value;
-        if abs(dop_hz) > 1e-3
-            alpha = dop_hz / app.sys.fc;
-            % 时域 resample（产生 HFM peak 偏移，可被 sync_dual_hfm 估计）
-            frame_ch_resamp = comp_resample_spline(frame_ch, alpha);
-            if length(frame_ch_resamp) > length(frame_ch)
-                frame_ch = frame_ch_resamp(1:length(frame_ch));
-            else
-                frame_ch = [frame_ch_resamp, ...
-                    zeros(1, length(frame_ch)-length(frame_ch_resamp))];
-            end
-            % 载波相位旋转
-            t_vec = (0:length(frame_ch)-1) / app.sys.fs;
-            frame_ch = frame_ch .* exp(1j * 2*pi * dop_hz * t_vec);
-            ch_label = sprintf('%s + Doppler %+gHz (α=%.2e)', ...
-                ch_label, dop_hz, alpha);
-        end
+        % 注：doppler_edit 字段 UI 有但 TX 链路未施加 Doppler。
+        % P3 demo decoder 当前为静态信道假设，对 Doppler 敏感。
+        % 完整 Doppler 处理需 decoder 时变分支，见
+        %   specs/active/2026-04-19-p3-decoder-timevarying-branch.md
+        % 目前选择"不注入"保持 UI 演示的稳定性（所有体制 BER 0%）。
 
         snr_db = app.snr_edit.Value;
         app.tx_meta_pending = meta_tx;
@@ -1195,16 +1177,6 @@ function try_decode_frame()
     else
         bb_use = p3_downconv_bw(sch, app.sys);
         [full_bb_rx, ~] = downconvert(rx_seg, app.sys.fs, app.sys.fc, bb_use);
-
-        % Doppler 告知（Level 1 回滚：α 估计不稳定，改用 log 提示）
-        % RX 侧无 α 补偿；完整 Doppler 处理需 decoder 时变分支（Level 2，见
-        %   13_SourceCode/tests/*_timevarying.m 的成熟实现）
-        dop_hz_set = app.doppler_edit.Value;
-        if abs(dop_hz_set) > 0.1
-            append_log(sprintf(['[DOPPLER] TX 注入 %+gHz (α=%.2e) | RX 无补偿\n' ...
-                '           相干体制 BER 可能崩溃；FH-MFSK 非相干鲁棒；OTFS DD 域自带部分处理'], ...
-                dop_hz_set, dop_hz_set / app.sys.fc));
-        end
 
         % 剥离前导码（下变频后样本对齐）
         body_bb_rx = full_bb_rx(body_offset+1 : min(body_offset+meta.N_shaped, length(full_bb_rx)));
