@@ -1,6 +1,6 @@
-function [LLR_ext, LLR_post, LLR_post_coded] = siso_decode_conv(LLR_ch, LLR_prior, gen_polys, constraint_len, decode_mode)
+function [LLR_ext, LLR_post, LLR_post_coded] = siso_decode_conv(LLR_ch, LLR_prior, gen_polys, constraint_len, decode_mode, tail_mode)
 % 功能：BCJR (MAP) SISO卷积码译码器——输出外信息，用于Turbo均衡
-% 版本：V3.0.0
+% 版本：V3.1.0（2026-04-19 加 tail_mode 参数，支持无尾比特终止场景）
 % 输入：
 %   LLR_ch        - 信道LLR (1xM，均衡器输出的编码比特LLR)
 %                   正值→bit 1，负值→bit 0
@@ -10,6 +10,9 @@ function [LLR_ext, LLR_post, LLR_post_coded] = siso_decode_conv(LLR_ch, LLR_prio
 %   decode_mode   - 译码模式 (字符串，默认 'max-log')
 %                   'max-log' : Max-Log-MAP（快速，损失~0.2-0.5dB）
 %                   'log-map' : 真Log-MAP（Jacobian对数，精确）
+%   tail_mode     - β 终止假设（默认 'zero'）
+%                   'zero'    : encoder 追加尾比特使状态归零（conv_encode 默认）
+%                   'unknown' : 编码器无尾比特，所有终止状态等概率（turbo_encode）
 % 输出：
 %   LLR_ext       - 外信息LLR (1xN_info，= LLR_post - LLR_prior)
 %   LLR_post      - 后验LLR (1xN_info，信息比特后验概率)
@@ -22,6 +25,7 @@ function [LLR_ext, LLR_post, LLR_post_coded] = siso_decode_conv(LLR_ch, LLR_prio
 %   - rate = 1/n，n由gen_polys长度决定
 
 %% ========== 入参 ========== %%
+if nargin < 6 || isempty(tail_mode), tail_mode = 'zero'; end
 if nargin < 5 || isempty(decode_mode), decode_mode = 'max-log'; end
 if nargin < 4 || isempty(constraint_len), constraint_len = 3; end
 if nargin < 3 || isempty(gen_polys), gen_polys = [7, 5]; end
@@ -130,7 +134,11 @@ end
 
 %% ========== 后向递推β ========== %%
 beta = -INF_VAL * ones(num_states, N_total+1);
-beta(1, N_total+1) = 0;               % 终止状态0（尾比特归零）
+if strcmpi(tail_mode, 'unknown')
+    beta(:, N_total+1) = 0;           % 所有终止状态等概率（无尾比特）
+else
+    beta(1, N_total+1) = 0;           % 终止状态0（尾比特归零，conv_encode 默认）
+end
 
 for t = N_total:-1:1
     if t <= N_info

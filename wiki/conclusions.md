@@ -56,3 +56,13 @@ updated: 2026-04-17
 27. **SC-FDE convergence_flag 单阈值失效 (2026-04-17)**：`modem_decode_scfde` 原 `med_llr > 5` 判据在 LLR clip ±30 下过严，BER=0 场景仍显示未收敛；改三选一（`med_llr > 5 || 硬判决稳定 || 高置信LLR>70%`）。详见 [[SC-FDE调试日志]]
 28. **estimated_snr 不应减 10*log10(sps) (2026-04-17)**：`rx_filt` 未做 RRC 能量归一化，`P_sig_train / nv_eq` 本身就是符号域 SNR；旧代码额外减 sps 增益导致恒定偏低 ~10dB。去掉后 est_snr 贴近真实值 ±4dB
 29. **est_ber 估计依赖 LLR 正确归一化**：`mean(0.5*exp(-|L|))` 在 LLR scale 偏小（L157 clip ±30）时虚高，不能作 BER 参考；建议用 `hard_converged_iter > 0` 直接置 0。暂留独立修复
+
+## 全项目 Code Review 修复（2026-04-19）
+
+30. **Turbo 均衡 La_dec_info 反馈缺失 (2026-04-19)**：模块 12 的 5 个 turbo_equalizer_*（scfde/ofdm/sctde/otfs/scfde_crossblock）原始实现 `La_dec_info = []` 后迭代内从不更新，BCJR 始终用零先验。这是 2026-04-17 记录的 SC-FDE convergence 问题的**真实根因**。修复：每轮末尾 `La_dec_info = Le_dec_info;` 反馈。影响所有 Turbo 均衡体制
+31. **SC-FDE convergence 三选一判据应扩散 (2026-04-19)**：已抽出 `common/decode_convergence.m`，在 modem_decode_{ofdm,sctde,otfs}.m 同步使用；OFDM estimated_snr 同 SC-FDE V2.1.0 去 `10*log10(sps)` 减法
+32. **多普勒重采样符号约定统一 (2026-04-19)**：`comp_resample_farrow` V4 的 `pos=(1:N)*(1+α)` 方向与 `comp_resample_spline` V7 的 `pos=(1:N)/(1+α)` 相反，切换 comp_method 产生二倍补偿误差。Farrow 升 V5.0.0 统一为除法方向
+33. **turbo_decode Lc 缩放外提 (2026-04-19)**：`L_sys = Lc*sys` 等 4 个表达式在迭代循环内每次重算，值完全相同。外提到循环前，iter=10 时节省 ~40 次冗余计算
+34. **siso_decode_conv 加 tail_mode 参数 (2026-04-19)**：V3.1.0 支持 'zero'（默认，conv_encode 配对）和 'unknown'（turbo_encode 无尾比特配对），防止未来误混用两套 BCJR 边界
+35. **LDPC LLR 输出符号统一 (2026-04-19)**：`ldpc_decode` 内部 BP 用 log(P(0)/P(1))，现输出前取反对齐输入约定"正值→bit 1"
+36. **Oracle 泄漏显式标注 (2026-04-19)**：`eq_bem_turbo_fde` / `rx_chain.rx_otfs` 加显眼 ORACLE 警告 + 变量重命名（h_time_block_oracle），供 baseline 对比保留但明确非真实接收链路

@@ -153,8 +153,8 @@
 |------|------|------|
 | `eq_otfs_mp` | `[x_hat, LLR_out, x_mean_out] = eq_otfs_mp(Y_dd, h_dd, path_info, N, M, noise_var, max_iter, constellation, prior_mean, prior_var)` | OTFS消息传递(MP)均衡，高斯近似BP，V3 |
 | `eq_otfs_mp_simplified` | `[x_hat] = eq_otfs_mp_simplified(Y_dd, h_dd, path_info, N, M, noise_var, max_iter)` | OTFS简化MP，MMSE低复杂度近似 |
-| `eq_otfs_lmmse` | `[x_hat, info] = eq_otfs_lmmse(Y_dd, h_dd, path_info, N, M, noise_var)` | OTFS LMMSE 均衡（基于 DD 域稀疏路径构造协方差矩阵），作为 MP 的高 SNR 基准 |
-| `eq_otfs_uamp` | `[x_hat, info] = eq_otfs_uamp(Y_dd, h_dd, path_info, N, M, noise_var, max_iter)` | OTFS UAMP 均衡（统一近似消息传递），离散 Doppler 场景收敛快 |
+| `eq_otfs_lmmse` | `[x_hat, LLR_out, x_mean_out, eq_info] = eq_otfs_lmmse(Y_dd, h_dd, path_info, N, M, noise_var, max_iter, constellation, prior_mean, prior_var)` | OTFS LMMSE-IC 均衡，BCCB 2D FFT 对角化 + Turbo 先验接口 |
+| `eq_otfs_uamp` | `[x_hat, LLR_out, x_mean_out, eq_info] = eq_otfs_uamp(Y_dd, h_dd, path_info, N, M, noise_var, max_iter, constellation, prior_mean, prior_var)` | OTFS UAMP 均衡（统一近似消息传递），离散 Doppler 场景收敛快 |
 
 ### 8 多通道均衡器（1个）
 

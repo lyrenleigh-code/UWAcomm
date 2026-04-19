@@ -1,6 +1,6 @@
 function y_resampled = comp_resample_farrow(y, alpha_est, fs, mode)
 % 功能：Farrow滤波器重采样——支持快速模式和高精度模式
-% 版本：V4.0.0
+% 版本：V5.0.0（2026-04-19 alpha 符号约定与 spline V7 对齐，见代码内注释）
 % 输入：
 %   y         - 接收信号 (1xN，实数或复数)
 %   alpha_est - 估计的多普勒因子
@@ -23,7 +23,10 @@ y = y(:).';
 N = length(y);
 
 %% ========== 新采样位置 ========== %%
-pos = (1:N) * (1 + alpha_est);
+% V5.0.0 修复（2026-04-19）：与 comp_resample_spline V7 对齐符号约定
+% alpha_est > 0 表示接收端靠近（时间压缩），pos 应 < (1:N)
+% 旧 V4 代码 pos = (1:N) * (1+alpha) 方向相反，切换 comp_method 会产生二倍补偿误差
+pos = (1:N) / (1 + alpha_est);
 int_pos = floor(pos);
 frac = pos - int_pos;
 

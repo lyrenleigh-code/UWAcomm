@@ -75,11 +75,12 @@ for titer = 1:num_iter
     Le_eq_deint = max(min(Le_eq_deint, 30), -30);
 
     if strcmpi(codec_params.decode_mode, 'sova')
-        [~, Lpost_info, Lpost_coded] = sova_decode_conv(Le_eq_deint, La_dec_info, gen_polys, K);
+        [Le_dec_info, Lpost_info, Lpost_coded] = sova_decode_conv(Le_eq_deint, La_dec_info, gen_polys, K);
     else
-        [~, Lpost_info, Lpost_coded] = siso_decode_conv(Le_eq_deint, La_dec_info, gen_polys, K, codec_params.decode_mode);
+        [Le_dec_info, Lpost_info, Lpost_coded] = siso_decode_conv(Le_eq_deint, La_dec_info, gen_polys, K, codec_params.decode_mode);
     end
     bits_decoded = double(Lpost_info > 0);
+    La_dec_info = Le_dec_info;     % 译码器信息比特外信息 → 下轮 BCJR 先验
 
     %% 3. 反馈 + DD信道更新
     if titer < num_iter

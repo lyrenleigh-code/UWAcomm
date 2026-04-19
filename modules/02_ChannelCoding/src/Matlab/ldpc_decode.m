@@ -80,7 +80,8 @@ for b = 1:num_blocks
                                         check_to_var, var_to_check, max_iter);
 
     num_iter_done(b) = iters;
-    LLR_out(idx) = llr_final;
+    % BP 内部 LLR 约定 log(P(0)/P(1))，对外输出翻转回"正值→bit 1"与输入约定一致
+    LLR_out(idx) = -llr_final;
 
     % 提取信息位（取前k位，对应系统码）
     idx_out = (b-1)*k + 1 : b*k;

@@ -86,6 +86,7 @@ iter_info.llr_per_iter = {};
 nv_ref = [];
 x_bar_data = [];
 bits_decoded = [];
+La_dec_info = [];           % 译码器信息比特先验（首轮=0）
 
 %% ========== Turbo迭代 ========== %%
 for iter = 1:num_iter
@@ -135,9 +136,9 @@ for iter = 1:num_iter
     Le_eq_deint = max(min(Le_eq_deint, 30), -30);
 
     if strcmpi(codec_params.decode_mode, 'sova')
-        [~, Lpost_info, Lpost_coded] = sova_decode_conv(Le_eq_deint, [], gen_polys, K);
+        [Le_dec_info, Lpost_info, Lpost_coded] = sova_decode_conv(Le_eq_deint, La_dec_info, gen_polys, K);
     else
-        [~, Lpost_info, Lpost_coded] = siso_decode_conv(Le_eq_deint, [], gen_polys, K, codec_params.decode_mode);
+        [Le_dec_info, Lpost_info, Lpost_coded] = siso_decode_conv(Le_eq_deint, La_dec_info, gen_polys, K, codec_params.decode_mode);
     end
     bits_decoded = double(Lpost_info > 0);
 
@@ -155,6 +156,7 @@ for iter = 1:num_iter
             [x_bar_data, ~] = soft_mapper(Lpost_coded_inter, 'qpsk');
         end
         % avg_confidence ≤ 1.0 时保留上一轮x_bar_data（或空=不IC）
+        La_dec_info = Le_dec_info;     % 译码器信息比特外信息 → 下轮 BCJR 先验
     end
 
     %% 4. 记录

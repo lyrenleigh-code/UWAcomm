@@ -60,18 +60,20 @@ Lc = 4 * R * snr_lin;                 % 信道可靠度系数
 Le1 = zeros(1, N);                     % 译码器1输出的外信息
 Le2 = zeros(1, N);                     % 译码器2输出的外信息
 
+% Lc 缩放量常量，外提出迭代循环（2026-04-19 HIGH-4 性能优化）
+L_sys1 = Lc * sys;
+L_par1 = Lc * par1;
+L_sys2 = Lc * sys(interleaver);
+L_par2 = Lc * par2;
+
 for iter = 1:num_iter
     % --- 译码器1：使用原始顺序 ---
     La1 = Le2(deinterleaver);          % 译码器2的外信息经解交织作为先验
-    L_sys1 = Lc * sys;
-    L_par1 = Lc * par1;
     [L_post1, Le1] = bcjr_decode_local(L_sys1, L_par1, La1, ...
                                         next_state_table, output_table, num_states, N);
 
     % --- 译码器2：使用交织顺序 ---
     La2 = Le1(interleaver);            % 译码器1的外信息经交织作为先验
-    L_sys2 = Lc * sys(interleaver);
-    L_par2 = Lc * par2;
     [L_post2, Le2] = bcjr_decode_local(L_sys2, L_par2, La2, ...
                                         next_state_table, output_table, num_states, N);
 end

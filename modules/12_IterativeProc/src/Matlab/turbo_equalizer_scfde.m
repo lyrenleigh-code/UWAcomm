@@ -100,6 +100,7 @@ for iter = 1:num_iter
         var_x = max(var_x_raw, noise_var);    % var_x不低于噪声方差
 
         La_eq = zeros(size(Le_eq));           % IC-only模式
+        La_dec_info = Le_dec_info;             % 译码器信息比特外信息 → 下轮 BCJR 先验
     end
 
     %% 7. 记录

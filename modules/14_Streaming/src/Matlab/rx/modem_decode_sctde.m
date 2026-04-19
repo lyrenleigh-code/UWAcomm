@@ -138,6 +138,7 @@ if ~is_timevarying
     turbo_iter_actual = iter_info_out.num_iter;
     final_llr = iter_info_out.llr_per_iter{end};
     med_llr_final = median(abs(final_llr));
+    Lpost_info = final_llr;   % 统一命名供 decode_convergence 使用
 else
     %% === 时变路径：BEM(DCT) + 手写 ISI 消除 Turbo ===
     pilot_positions = meta.pilot_positions;
@@ -328,6 +329,7 @@ else
     bits_out = bits_decoded;
     turbo_iter_actual = turbo_iter;
     med_llr_final = median(abs(Lp_info));
+    Lpost_info = Lp_info;   % 统一命名供 decode_convergence 使用
 
     % H_est 用于 UI（取训练段中点的 CIR）
     h_mid = zeros(1, L_h);
@@ -356,7 +358,9 @@ P_sig_train = sum(abs(h_scan_vec).^2);
 info.estimated_snr    = 10*log10(max(P_sig_train / nv_eq, 1e-6)) - 10*log10(sys.sps);
 info.estimated_ber    = mean(0.5 * exp(-med_llr_final));
 info.turbo_iter       = turbo_iter_actual;
-info.convergence_flag = double(med_llr_final > 5);
+% 统一收敛判据（decode_convergence helper，三选一 — 2026-04-19 HIGH-1 修复）
+[info.convergence_flag, conv_extra] = decode_convergence(Lpost_info, [], []);
+info.frac_confident = conv_extra.frac_confident;
 info.H_est_block1     = H_est_block1;
 info.noise_var        = nv_eq;
 info.sym_offset       = best_off;

@@ -1,5 +1,15 @@
 # Wiki 操作日志
 
+## 2026-04-19
+
+- **全项目 Code Review + 修复完成**（5 个并行 Agent 审计 + 4 批修复）
+  - Batch A（极低代价）：5 个 turbo_equalizer_* 加 `La_dec_info = Le_dec_info` 反馈；OFDM est_snr 去 sps 减法；comp_resample_farrow V4→V5 方向统一
+  - Batch B（局部修复）：新建 `common/decode_convergence.m` 三选一判据 helper，扩散到 modem_decode_{ofdm,sctde,otfs}.m；LDPC LLR 符号对齐；07 README OTFS 均衡器签名修正
+  - Batch C（接口变更）：`eq_bem_turbo_fde` h_time_block→h_time_block_oracle + 显眼警告；`rx_chain.rx_otfs` 多重 Oracle 显式标注
+  - Batch D（Turbo 理论）：`turbo_decode` Lc 缩放外提循环；`siso_decode_conv` V3.1.0 加 tail_mode 参数（'zero'/'unknown'）
+- 全量回归：test_p3_unified_modem 2/2 + test_p3_2_ofdm_sctde 2/2 + test_p3_3_dsss_otfs 3/3 = **7/7 PASS**
+- conclusions.md 追加结论 30-36（6 条本次修复）
+
 ## 2026-04-17
 
 - 新增 `comparisons/e2e-test-matrix.md`：从 `todo.md` 迁入模块 07 统一测试结果、E2E 逐体制验证表、离散 Doppler 全体制对比矩阵、均衡器调试发现

@@ -265,11 +265,14 @@ end
 %% ---- 9. info ----
 info = struct();
 % 频域 SNR → 信道 SNR：减去 RRC 匹配滤波处理增益
-info.estimated_snr    = 10*log10(max(P_sig_pilot / nv_eq, 1e-6)) - 10*log10(sys.sps);
+% 符号域 SNR（P_sig_pilot/nv_eq 已是符号域比值；同 SC-FDE V2.1.0 修复）
+info.estimated_snr    = 10*log10(max(P_sig_pilot / nv_eq, 1e-6));
 abs_llr = abs(Lpost_info);
 info.estimated_ber    = mean(0.5 * exp(-abs_llr));
 info.turbo_iter       = turbo_iter;
-info.convergence_flag = double(median(abs_llr) > 5);
+% 统一收敛判据（decode_convergence helper，三选一 — 2026-04-19 HIGH-1 修复）
+[info.convergence_flag, conv_extra] = decode_convergence(Lpost_info, [], []);
+info.frac_confident = conv_extra.frac_confident;
 info.H_est_block1     = H_est_init;
 info.noise_var        = nv_eq;
 info.sym_offset       = best_off;

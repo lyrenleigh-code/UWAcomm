@@ -163,7 +163,9 @@ P_ch_otfs = sum(abs(path_info.gain).^2);
 info.estimated_snr    = 10*log10(max(P_ch_otfs / nv, 1e-6));
 info.estimated_ber    = mean(0.5 * exp(-abs(Lpost_info)));
 info.turbo_iter       = turbo_iter;
-info.convergence_flag = double(med_llr > 5);
+% 统一收敛判据（decode_convergence helper，三选一 — 2026-04-19 HIGH-1 修复）
+[info.convergence_flag, conv_extra] = decode_convergence(Lpost_info, [], []);
+info.frac_confident = conv_extra.frac_confident;
 info.noise_var        = nv;
 info.h_dd             = h_dd;
 info.path_info        = path_info;

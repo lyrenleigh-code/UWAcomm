@@ -92,6 +92,7 @@ for iter = 1:num_iter
         var_x = max(var_x_raw, noise_var);
 
         La_eq = zeros(size(Le_eq));
+        La_dec_info = Le_dec_info;     % 译码器信息比特外信息 → 下轮 BCJR 先验
     end
 
     iter_info.x_hat_per_iter{iter} = x_tilde(:).';

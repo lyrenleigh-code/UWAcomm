@@ -1,9 +1,12 @@
-function [bits_out, iter_info] = eq_bem_turbo_fde(Y_freq, h_time_block, delays_sym, N_fft, noise_var, codec_params, num_outer_iter)
+function [bits_out, iter_info] = eq_bem_turbo_fde(Y_freq, h_time_block_oracle_oracle, delays_sym, N_fft, noise_var, codec_params, num_outer_iter)
 % 功能：BEM-Turbo迭代ICI消除频域均衡器
-% 版本：V1.0.0
+% 版本：V1.1.0（2026-04-19 标注 Oracle 警告，无调用方时保留供 baseline 对比）
 % 输入：
-%   Y_freq        - 频域接收信号 (1×N)
-%   h_time_block  - 块内时变信道增益 (P×N, 各路径在N个符号时刻的增益)
+%   Y_freq              - 频域接收信号 (1×N)
+%   h_time_block_oracle_oracle - [ORACLE] 块内时变信道增益真实值 (P×N)，首轮迭代直接
+%                         LS 分解为 BEM 系数。违反 CLAUDE.md §2（接收端禁用发射
+%                         端参数），本函数因此仅作 oracle baseline 用。
+%                         生产环境应改用 h_est_block1（由 ch_est_bem 生成）。
 %   delays_sym    - 符号级时延 (1×P)
 %   N_fft         - FFT点数
 %   noise_var     - 噪声方差
@@ -12,6 +15,12 @@ function [bits_out, iter_info] = eq_bem_turbo_fde(Y_freq, h_time_block, delays_s
 % 输出：
 %   bits_out  - 译码比特
 %   iter_info - 迭代信息（含每次BER追踪数据）
+%
+% ⚠️ Oracle 警告：
+%   本函数当前**使用发射端真实信道** h_time_block_oracle_oracle 初始化 BEM 系数 +
+%   推算 fd_est。num_outer_iter=1 时退化为完全 oracle 均衡器。
+%   代码审查标记（2026-04-19）：CRITICAL Oracle 泄漏。
+%   未来 fix：新增 h_bem_est 参数（来自 ch_est_bem），删除 oracle 路径。
 %
 % 备注：
 %   BEM模型: h_p(n) = Σ_q c_{p,q}·b_q(n)，CE-BEM基函数
@@ -29,7 +38,7 @@ constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
 bits2qpsk = @(b) constellation(bi2de(reshape(b(1:floor(length(b)/2)*2),2,[]).','left-msb')+1);
 
 N = N_fft;
-P = size(h_time_block, 1);
+P = size(h_time_block_oracle, 1);
 Y = Y_freq(:);
 
 gen_polys = codec_params.gen_polys;
@@ -41,7 +50,7 @@ M_coded = n_code * N;
 
 %% ========== 1. BEM基函数构建 ========== %%
 % 估计块内多普勒扩展（从h_time的变化率）
-h_diff = diff(h_time_block, 1, 2);
+h_diff = diff(h_time_block_oracle, 1, 2);
 fd_est = mean(abs(h_diff(:))) * N / (2*pi);
 Q = max(2*ceil(fd_est * 1) + 1, 3);  % 至少3个基函数
 Q = min(Q, 7);                        % 最多7个（防过拟合）
@@ -58,7 +67,7 @@ end
 % 对每条路径: h_p(n) ≈ B·c_p → c_p = B\h_p (LS)
 C = zeros(P, Q);  % C(p,q)
 for p = 1:P
-    C(p,:) = (B \ h_time_block(p,:).').';
+    C(p,:) = (B \ h_time_block_oracle(p,:).').';
 end
 
 iter_info.ber_per_iter = [];

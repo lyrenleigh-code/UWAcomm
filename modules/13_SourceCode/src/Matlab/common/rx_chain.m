@@ -228,25 +228,38 @@ function bits_out = rx_sctde(rx_signal, params, tx_info, ch_info)
 end
 
 function bits_out = rx_otfs(rx_signal, params, tx_info, ch_info)
+%% ⚠️ ORACLE 警告（2026-04-19 代码审查 CRITICAL-1）
+%  本函数当前**多重 oracle 泄漏**，违反 CLAUDE.md §2/§7 Oracle 排查清单第 2/3/4/6 条：
+%    1. dd_data 直接读 tx_info.dd_data（TX 发射符号）
+%    2. gains 直接读 ch_info.gains_init（真实信道增益）
+%    3. sd 可能直接读 params.channel.sym_delays（真实时延）
+%    4. nv 由 params.snr_db 推算（真实 SNR）
+%    5. h_dd 由真实 gains 直接构造（无估计步骤）
+%  end-to-end OTFS 测试由此获得 oracle 性能上界，**非真实接收链路**。
+%  未来 fix：
+%    - dd_data ← otfs_demodulate(rx_signal, ...)
+%    - sd / gains ← ch_est_otfs_dd / ch_est_otfs_zc / ch_est_otfs_superimposed
+%    - nv ← guard 区域估计
+%  本函数保留供性能上界对比（类似 oracle baseline），生产必须走真实接收。
     N = params.tx.N_doppler;
     M = params.tx.M_delay;
 
-    % DD域信道参数
+    % DD域信道参数（ORACLE：真实时延/增益）
     if isfield(params.channel, 'sym_delays')
-        sd = params.channel.sym_delays;
+        sd = params.channel.sym_delays;   % ORACLE
     else
         sd = round(ch_info.delays_samp / params.waveform.sps);
     end
-    gains = ch_info.gains_init;
+    gains = ch_info.gains_init;            % ORACLE
 
-    % DD域直接模式：在此施加信道（circshift）+ 噪声
-    dd_data = tx_info.dd_data;
+    % DD域直接模式：在此施加信道（circshift）+ 噪声（ORACLE：tx_info.dd_data + SNR）
+    dd_data = tx_info.dd_data;             % ORACLE
     Y_dd = zeros(N, M);
     for p = 1:ch_info.num_paths
         Y_dd = Y_dd + gains(p) * circshift(dd_data, [0, sd(p)]);
     end
     sig_pwr = mean(abs(Y_dd(:)).^2);
-    nv = sig_pwr * 10^(-params.snr_db/10);
+    nv = sig_pwr * 10^(-params.snr_db/10); % ORACLE
     Y_dd = Y_dd + sqrt(nv/2)*(randn(N,M)+1j*randn(N,M));
 
     h_dd = zeros(N, M);
