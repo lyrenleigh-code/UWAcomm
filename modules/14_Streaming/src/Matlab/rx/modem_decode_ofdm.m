@@ -1,6 +1,7 @@
 function [bits, info] = modem_decode_ofdm(body_bb, sys, meta)
 % 功能：OFDM RX（RRC匹配滤波 + 导频块信道估计 + CFO + Turbo MMSE-IC/BCJR）
-% 版本：V2.0.0（去oracle：导频块本地重生成，无 all_cp_data / noise_var 依赖）
+% 版本：V3.0.0（2026-04-19 加 BEM 时变信道估计分支，镜像 scfde V3.0；
+%               spec 2026-04-19-p3-decoder-timevarying-branch）
 % 输入：
 %   body_bb - 基带 body（已由外层完成 LFM 对齐 + Doppler 补偿）
 %   sys     - 系统参数
@@ -173,6 +174,10 @@ for bi = 1:N_data_blocks
 end
 
 %% ---- 7. Turbo 均衡（逐子载波 MMSE-IC + BCJR，仅数据块）----
+% V3.0 (2026-04-19): 加 BEM 时变信道估计分支（spec 2026-04-19-p3-decoder-timevarying-branch）
+%   titer=1 用静态 H_est_blocks 做均衡
+%   titer=2 末尾用 soft x_bar 重构时域符号 → ch_est_bem 一次性跨块估计 h_tv
+%   titer=3+ 用时变 H_cur_blocks（每块中点切 h_tv 对应段）
 turbo_iter    = cfg.turbo_iter;
 H_cur_blocks  = H_est_blocks;
 x_bar_freq_blks = cell(1, N_data_blocks);
@@ -183,6 +188,8 @@ end
 La_dec_info   = [];
 bits_decoded  = [];
 eq_syms_iters = cell(1, turbo_iter);
+bem_done      = false;     % BEM 是否已估（只估一次）
+fd_est_bem    = 10;         % 保守上界 (Hz)；后续可读 sys.ofdm.fd_hz_max
 
 for titer = 1:turbo_iter
     LLR_all = zeros(1, M_total);
@@ -236,8 +243,43 @@ for titer = 1:turbo_iter
             x_bar_freq_blks{bi} = x_bar_freq_full;
         end
 
-        % DD 信道重估计（iter >= 2，软符号置信度足够时）
-        if titer >= 2
+        % --- V3.0: BEM 跨块时变信道估计（titer==2 后一次性做）---
+        if ~bem_done && titer >= 2 && mean(var_x_blks) < 0.6
+            try
+                % 频域软符号 → 时域（含 CP）
+                x_bar_td_blks = cell(1, N_data_blocks);
+                for bi = 1:N_data_blocks
+                    x_td = ifft(x_bar_freq_blks{bi}) * ofdm_norm;
+                    x_bar_td_blks{bi} = x_td;    % 长度 blk_fft；CP 由 helper 逻辑访问末 blk_cp 重建
+                end
+                [obs_y, obs_x_mat, obs_n] = build_bem_observations_ofdm( ...
+                    rx_sym_all, pilot_cp, x_bar_td_blks, blk_cp, blk_fft, ...
+                    sym_per_block, N_data_blocks, N_total_sym, ...
+                    sym_delays_est, K_sparse);
+                if length(obs_y) >= 20
+                    bem_opts = struct('Q_mode', 'auto', 'lambda_scale', 1.0);
+                    [h_tv_bem, ~, ~] = ch_est_bem(obs_y(:), obs_x_mat, obs_n(:), ...
+                        N_total_sym, sym_delays_est, fd_est_bem, sys.sym_rate, ...
+                        nv_eq, 'dct', bem_opts);
+                    for bi = 1:N_data_blocks
+                        blk_idx = bi + 1;
+                        blk_mid = (blk_idx-1) * sym_per_block + round(sym_per_block/2);
+                        blk_mid = max(1, min(blk_mid, N_total_sym));
+                        h_td_blk = zeros(1, blk_fft);
+                        for p = 1:K_sparse
+                            h_td_blk(eff_delays(p)+1) = h_tv_bem(p, blk_mid);
+                        end
+                        H_cur_blocks{bi} = fft(h_td_blk);
+                    end
+                    bem_done = true;
+                end
+            catch
+                % BEM 失败 → 回退到下面的 per-block DD 重估计
+            end
+        end
+
+        % --- 原 V2.0: per-block DD 信道重估计（BEM 未成功时的 fallback）---
+        if ~bem_done && titer >= 2
             for bi = 1:N_data_blocks
                 if var_x_blks(bi) < 0.5
                     X_bar_eff = x_bar_freq_blks{bi} * ofdm_norm;
@@ -289,5 +331,77 @@ end
 info.pre_eq_syms = pre_eq_syms;
 info.post_eq_syms = eq_syms_iters{end};
 info.eq_syms_iters = eq_syms_iters;
+
+end
+
+
+%% ============================================================
+%% 辅助: 构造 ch_est_bem 的观测矩阵（OFDM 版 — 导频块 CP + 数据块 CP）
+%% pilot_cp:        1×(blk_cp+blk_fft) — 导频块时域（含 CP）
+%% x_bar_td_blks{bi}: 1×blk_fft       — 数据块 IFFT 后时域软符号（不含 CP；CP=末 blk_cp 符号）
+%% ============================================================
+function [obs_y, obs_x, obs_n] = build_bem_observations_ofdm(rx_sym_all, ...
+    pilot_cp, x_bar_td_blks, blk_cp, blk_fft, sym_per_block, N_data_blocks, ...
+    N_total_sym, sym_delays, K_sparse)
+
+obs_y = []; obs_x = []; obs_n = [];
+max_tau = max(sym_delays);
+
+% 1. 导频块的 CP 段
+for n = max_tau+1 : blk_cp
+    x_vec = zeros(1, K_sparse);
+    for pp = 1:K_sparse
+        idx = n - sym_delays(pp);
+        if idx >= 1 && idx <= length(pilot_cp)
+            x_vec(pp) = pilot_cp(idx);
+        end
+    end
+    if any(x_vec ~= 0) && n <= length(rx_sym_all)
+        obs_y(end+1) = rx_sym_all(n); %#ok<AGROW>
+        obs_x = [obs_x; x_vec];        %#ok<AGROW>
+        obs_n(end+1) = n;              %#ok<AGROW>
+    end
+end
+
+% 2. 数据块的 CP 段（使用 Turbo 判决软符号时域）
+for bi = 1:N_data_blocks
+    blk_idx = bi + 1;
+    blk_start = (blk_idx - 1) * sym_per_block;
+
+    for kk = max_tau+1 : blk_cp
+        n = blk_start + kk;
+        x_vec = zeros(1, K_sparse);
+        for pp = 1:K_sparse
+            idx = n - sym_delays(pp);
+            if idx >= 1 && idx <= N_total_sym
+                blk_of_idx = floor((idx - 1) / sym_per_block);
+                local_n = idx - blk_of_idx * sym_per_block;
+                if blk_of_idx == 0
+                    % 导频块，用 pilot_cp
+                    if local_n >= 1 && local_n <= length(pilot_cp)
+                        x_vec(pp) = pilot_cp(local_n);
+                    end
+                else
+                    bi_idx = blk_of_idx;
+                    if bi_idx >= 1 && bi_idx <= N_data_blocks
+                        xb = x_bar_td_blks{bi_idx};   % 1×blk_fft
+                        if local_n <= blk_cp
+                            % CP 段 = 数据块末 blk_cp 符号
+                            x_vec(pp) = xb(blk_fft - blk_cp + local_n);
+                        else
+                            % 数据段
+                            x_vec(pp) = xb(local_n - blk_cp);
+                        end
+                    end
+                end
+            end
+        end
+        if any(x_vec ~= 0) && n <= length(rx_sym_all)
+            obs_y(end+1) = rx_sym_all(n); %#ok<AGROW>
+            obs_x = [obs_x; x_vec];        %#ok<AGROW>
+            obs_n(end+1) = n;              %#ok<AGROW>
+        end
+    end
+end
 
 end

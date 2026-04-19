@@ -1,6 +1,11 @@
 function [bits, info] = modem_decode_sctde(body_bb, sys, meta)
 % 功能：SC-TDE RX（RRC 匹配滤波 + 符号定时 + 信道估计 + Turbo 均衡）
-% 版本：V1.0.0（P3.2 从 13_SourceCode/tests/SC-TDE/test_sctde_timevarying.m 抽取）
+% 版本：V3.0.0（2026-04-19 对齐 scfde/ofdm V3.0 — 已有 BEM 时变分支
+%               通过 meta.pilot_positions 结构化开关；spec
+%               2026-04-19-p3-decoder-timevarying-branch §SC-TDE 条目）
+% 历史：
+%   V1.0 (P3.2) 从 13_SourceCode/tests/SC-TDE/test_sctde_timevarying.m 抽取
+%   V3.0 (Level 2) 与 scfde/ofdm 版本号对齐；时变分支已存在（is_timevarying gate）
 % 输入：
 %   body_bb - 基带 body（已由外层完成 LFM 对齐 + Doppler 补偿；长度 ≈ meta.N_shaped）
 %   sys     - 系统参数（用 sys.codec, sys.sctde, sys.sps, sys.sym_rate）

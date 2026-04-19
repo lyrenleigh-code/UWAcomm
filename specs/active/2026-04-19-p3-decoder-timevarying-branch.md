@@ -155,7 +155,35 @@ UI 下 Doppler 0/5/10Hz 测试各体制 BER
 ## Log
 
 - 2026-04-19: Spec 创建（侦察 test_scfde_timevarying 发现 oracle 泄漏，调整策略）
+- 2026-04-19: Step 2 完成 — modem_decode_scfde V3.0 加 BEM 跨块时变估计分支
+  + `bem_done` 门控 + `build_bem_observations` helper（训练 CP + 数据块 CP）
+  + 静态回归 test_p3_unified_modem 2/2 PASS（BER=0 @ 5/10/15dB）
+- 2026-04-19: Step 3 完成 — OFDM/SC-TDE 对齐
+  + modem_decode_ofdm V2.0→V3.0：镜像 scfde 模式，加 BEM 分支 +
+    `build_bem_observations_ofdm` helper（频域软符号 → 时域 → CP 观测）
+  + modem_decode_sctde V1.0→V3.0：已有 pilot-gated TV 分支（is_timevarying），
+    仅升版本号对齐（结构化开关，方案 B；自适应检测留 L2-S4）
+  + 静态回归 test_p3_2_ofdm_sctde 2/2 PASS（BER=0 @ 5/10/15dB）
 
 ## Result
 
-_待填写_
+### 已完成（Level 2 Step 2 + Step 3）
+
+| 文件 | 状态 |
+|------|------|
+| modem_decode_scfde.m | V2.1→V3.0 ✓ BEM 分支 + helper |
+| modem_decode_ofdm.m | V2.0→V3.0 ✓ BEM 分支 + helper (freq→td 桥接) |
+| modem_decode_sctde.m | V1.0→V3.0 ✓ 版本对齐（TV 分支已存在） |
+
+### 未完成（Level 2 Step 4 留待后续 session）
+
+1. **UI 端到端 Doppler 有效性验证**：当前 UI 的 Doppler 注入是纯 CFO
+   resample+phase，BEM 只对 Jakes 类时变多径有效。要看到 BER 改善，需：
+   - UI 改用 `gen_uwa_channel_pb`（Jakes 衰落 + Doppler），或
+   - 注入"快变多径增益"（per-sample ρ 时变）
+2. **eq_mmse_ic_tv_fde 替换**：当前 scfde/ofdm 均衡仍是静态 MMSE-IC（只换了
+   H_cur 的来源）。纯 CFO 场景需要 TV-FDE 做 ICI 抑制才能真正改 BER。
+3. **α 盲估计 + 补偿链**：当前 decoder 假设外层已做 Doppler 补偿，UI 侧依然
+   没有 α 估计/补偿（Level 3 范围）。
+4. **SC-TDE 自适应检测**：当前 is_timevarying 只看 meta.pilot_positions（结构
+   化 B 方案）。方案 A（仅凭接收信号自动切换）需要跨块信道观测比较。
