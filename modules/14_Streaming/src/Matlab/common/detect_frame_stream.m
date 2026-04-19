@@ -56,7 +56,8 @@ if ~isfield(opts, 'min_gap_samples'),   opts.min_gap_samples = preamble_total; e
 det = struct('found', false, 'fs_pos', 0, 'peak_val', 0, ...
     'peak_ratio', 0, 'noise_floor', 0, 'threshold', 0, ...
     'hfm_pos_corr', [], 'hfm_neg_corr', [], ...
-    'search_abs_lo', 0, 'search_abs_hi', 0, 'confidence', 0);
+    'search_abs_lo', 0, 'search_abs_hi', 0, 'confidence', 0, ...
+    'alpha_est', 0, 'alpha_confidence', 0);
 
 %% 3. 前置检查
 if fifo_write < N_pre + opts.min_samples_ahead
@@ -154,11 +155,42 @@ sidelobe = median(corr_pos_mag(mask));
 if sidelobe < 1e-9, sidelobe = 1e-9; end
 peak_ratio = peak_val / sidelobe;
 
+%% 8b. 多普勒 α 估计（双 HFM 偏置对消）
+% 原理: sync_dual_hfm V1.1 的公式
+%   HFM 在 α≠0 时, peak 出现偏置 Δt = S_bias × α
+%   HFM+ 偏置 = +S_bias × α, HFM- 偏置 = -S_bias × α
+%   差分: (tau_pos - tau_neg) = 2 × S_bias × α
+% S_bias = T_hfm × fc / bw （秒）
+alpha_est = 0;
+alpha_confidence = 0;
+% 在 HFM- corr 中搜索 peak（粗窗口: 距 HFM+ peak 约 N_pre + guard 样本后）
+% assemble_physical_frame 帧结构: HFM+ | guard | HFM- | ...
+hfm_neg_expected = abs_rel_peak + N_pre + guard;  % HFM- peak 期望位置
+half_win = round(N_pre * 0.3);   % 搜索窗 ±0.3×N_pre
+win_lo = max(valid_start, hfm_neg_expected - half_win);
+win_hi = min(length(corr_neg_mag), hfm_neg_expected + half_win);
+if win_hi > win_lo
+    [neg_peak_val, rel_neg] = max(corr_neg_mag(win_lo:win_hi));
+    abs_neg_peak = win_lo + rel_neg - 1;
+    % 双 HFM 偏置差
+    actual_sep = abs_neg_peak - abs_rel_peak;
+    nominal_sep = N_pre + guard;
+    dt_sec = (actual_sep - nominal_sep) / fs;   % HFM- 比预期延迟的秒数
+    S_bias = dur * fc / bw;
+    if abs(S_bias) > 1e-9
+        alpha_est = dt_sec / (2 * S_bias);
+        % 置信度: 两个 HFM peak 的归一化强度比
+        alpha_confidence = min(neg_peak_val / max(peak_val, eps), 1);
+    end
+end
+
 %% 9. 输出
 det.found = true;
 det.fs_pos = fs_pos_abs;
 det.peak_val = peak_val;
 det.peak_ratio = peak_ratio;
 det.confidence = min(peak_ratio / 20, 1);
+det.alpha_est = alpha_est;
+det.alpha_confidence = alpha_confidence;
 
 end

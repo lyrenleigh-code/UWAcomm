@@ -1187,8 +1187,26 @@ function try_decode_frame()
     else
         bb_use = p3_downconv_bw(sch, app.sys);
         [full_bb_rx, ~] = downconvert(rx_seg, app.sys.fs, app.sys.fc, bb_use);
+
+        % Doppler 补偿（Level 1 对齐 13_SourceCode 端到端架构）
+        % decoder 文档要求"已由外层完成 Doppler 补偿"，这里在 RX 前应用 α 反补偿
+        alpha_est = sync_det.alpha_est;
+        if abs(alpha_est) > 1e-5 && sync_det.alpha_confidence > 0.2
+            % 先补偿载波相位（exp(-j·2π·fc·α·t) 反 TX 的相位旋转）
+            t_vec = (0:length(full_bb_rx)-1) / app.sys.fs;
+            full_bb_rx = full_bb_rx .* exp(-1j * 2*pi * app.sys.fc * alpha_est * t_vec);
+            % 再做时域 resample 反补偿（如有 time-scale）
+            try
+                full_bb_rx = comp_resample_spline(full_bb_rx, -alpha_est);
+            catch
+                % 无 addpath 时跳过
+            end
+            append_log(sprintf('[DOPPLER] α=%.2e (conf=%.2f) 已反补偿', ...
+                alpha_est, sync_det.alpha_confidence));
+        end
+
         % 剥离前导码（下变频后样本对齐）
-        body_bb_rx = full_bb_rx(body_offset+1 : end);
+        body_bb_rx = full_bb_rx(body_offset+1 : min(body_offset+meta.N_shaped, length(full_bb_rx)));
         % 去oracle：噪声方差由 decoder 内部盲估计，不再外部注入
     end
     app.last_body_bb_rx = body_bb_rx;
