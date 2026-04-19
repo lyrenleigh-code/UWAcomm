@@ -155,8 +155,10 @@ perm_all = meta.perm_all;
 prior_mean = [];
 prior_var  = [];
 bits_decoded = [];
+bits_prev    = [];                % 上一轮硬判决（收敛检测用）
 Lpost_info = [];
 post_eq_syms_dd = [];
+hard_converged_iter = 0;           % 连续两轮硬判决相同时的 iter 号
 
 for titer = 1:turbo_iter
     % 7a. LMMSE 均衡（全 NxM 格点）
@@ -176,6 +178,13 @@ for titer = 1:turbo_iter
     [~, Lpost_info, Lpost_coded] = siso_decode_conv(Le_deint, [], ...
         codec.gen_polys, codec.constraint_len, codec.decode_mode);
     bits_decoded = double(Lpost_info > 0);
+
+    % 硬判决稳定性：连续两轮相同视为收敛（同 SC-FDE V2.1.0）
+    if ~isempty(bits_prev) && length(bits_prev) == length(bits_decoded) && ...
+       hard_converged_iter == 0 && isequal(bits_prev, bits_decoded)
+        hard_converged_iter = titer;
+    end
+    bits_prev = bits_decoded;
 
     % 7d. 反馈：soft_mapper → 填回 NxM DD 格点（列优先）
     if titer < turbo_iter
@@ -212,9 +221,15 @@ P_ch_otfs = sum(abs(path_info.gain).^2);
 info.estimated_snr    = 10*log10(max(P_ch_otfs / nv, 1e-6));
 info.estimated_ber    = mean(0.5 * exp(-abs(Lpost_info)));
 info.turbo_iter       = turbo_iter;
-% 统一收敛判据（decode_convergence helper，三选一 — 2026-04-19 HIGH-1 修复）
-[info.convergence_flag, conv_extra] = decode_convergence(Lpost_info, [], []);
-info.frac_confident = conv_extra.frac_confident;
+% 统一收敛判据（decode_convergence helper，三选一 — 2026-04-19 HIGH-1 + OTFS 修复）
+% 传入 bits_prev 相同序列启用硬判决稳定性判据
+if hard_converged_iter > 0
+    [info.convergence_flag, conv_extra] = decode_convergence(Lpost_info, bits_decoded, bits_decoded);
+else
+    [info.convergence_flag, conv_extra] = decode_convergence(Lpost_info, [], []);
+end
+info.frac_confident       = conv_extra.frac_confident;
+info.hard_converged_iter  = hard_converged_iter;
 info.noise_var        = nv;
 info.h_dd             = h_dd;
 info.path_info        = path_info;
