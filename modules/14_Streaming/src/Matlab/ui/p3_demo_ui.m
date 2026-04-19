@@ -31,6 +31,7 @@ addpath(fullfile(modules_root, '06_MultiCarrier',  'src', 'Matlab'));
 addpath(fullfile(modules_root, '07_ChannelEstEq',  'src', 'Matlab'));
 addpath(fullfile(modules_root, '08_Sync',          'src', 'Matlab'));
 addpath(fullfile(modules_root, '09_Waveform',      'src', 'Matlab'));
+addpath(fullfile(modules_root, '10_DopplerProc',   'src', 'Matlab'));
 addpath(fullfile(modules_root, '12_IterativeProc', 'src', 'Matlab'));
 
 %% ---- 全局状态 ----
@@ -882,6 +883,28 @@ function on_transmit()
         [h_tap, ch_label] = p3_channel_tap(sch, app.sys, app.preset_dd.Value);
         frame_ch = conv(frame_bb, h_tap);
         frame_ch = frame_ch(1:length(frame_bb));
+
+        % --- 多普勒注入（基于 UI doppler_edit，V2 接入）---
+        % α = fd_Hz / fc，时域 resample + 载波相位旋转
+        dop_hz = app.doppler_edit.Value;
+        if abs(dop_hz) > 1e-3
+            alpha = dop_hz / app.sys.fc;
+            t_vec = (0:length(frame_ch)-1) / app.sys.fs;
+            % 载波相位旋转（基带里 alpha 等效于载波偏移 fc*alpha）
+            frame_ch = frame_ch .* exp(1j * 2*pi * app.sys.fc * alpha * t_vec);
+            % 时域重采样（压缩 / 扩展）—— 用简单线性插值避免 toolbox 依赖
+            try
+                frame_ch = comp_resample_spline(frame_ch, alpha);
+                if length(frame_ch) > length(frame_bb)
+                    frame_ch = frame_ch(1:length(frame_bb));
+                elseif length(frame_ch) < length(frame_bb)
+                    frame_ch = [frame_ch, zeros(1, length(frame_bb)-length(frame_ch))]; %#ok<AGROW>
+                end
+            catch
+                % 未 addpath 时跳过 resample，仅保留载波相位旋转
+            end
+            ch_label = sprintf('%s + Doppler %+gHz (α=%.1e)', ch_label, dop_hz, alpha);
+        end
 
         snr_db = app.snr_edit.Value;
         app.tx_meta_pending = meta_tx;
