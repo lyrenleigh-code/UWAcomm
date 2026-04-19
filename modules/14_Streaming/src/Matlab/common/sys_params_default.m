@@ -106,7 +106,9 @@ sys.otfs.N             = 32;                % 多普勒格点
 sys.otfs.M             = 64;                % 时延格点
 sys.otfs.cp_len        = 32;                % per-subblock CP
 sys.otfs.turbo_iter    = 3;
-sys.otfs.pilot_mode    = 'impulse';         % 'impulse' | 'sequence' | 'superimposed'
+sys.otfs.pilot_mode    = 'sequence';        % 'impulse' | 'sequence' | 'superimposed'
+% sequence (ZC) 比 impulse 降 PAPR ~9dB（conclusions.md #19）
+% decoder 按 pilot_mode 自动分派 ch_est_otfs_{dd,zc,superimposed}
 sys.otfs.fading_type   = 'static';
 sys.otfs.fd_hz         = 0;
 sys.otfs.sym_delays    = [0, 1, 3, 5, 8];  % DD 域时延（格点）

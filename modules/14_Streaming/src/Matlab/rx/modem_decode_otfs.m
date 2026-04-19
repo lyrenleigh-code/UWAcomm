@@ -90,8 +90,17 @@ else
     nv = max(0.1 * var(Y_dd(:)), 1e-8);
 end
 
-%% ---- 6. DD 域信道估计 ----
-[h_dd, path_info] = ch_est_otfs_dd(Y_dd, pilot_info, N, M);
+%% ---- 6. DD 域信道估计（按 pilot_mode 分派）----
+switch cfg.pilot_mode
+    case 'impulse'
+        [h_dd, path_info] = ch_est_otfs_dd(Y_dd, pilot_info, N, M);
+    case 'sequence'
+        [h_dd, path_info] = ch_est_otfs_zc(Y_dd, pilot_info, N, M);
+    case 'superimposed'
+        [h_dd, path_info] = ch_est_otfs_superimposed(Y_dd, pilot_info, N, M);
+    otherwise
+        error('modem_decode_otfs: 未知 pilot_mode %s', cfg.pilot_mode);
+end
 
 %% ---- 7. 导频贡献去除 ----
 Y_dd_eq = Y_dd;

@@ -66,3 +66,9 @@ updated: 2026-04-17
 34. **siso_decode_conv 加 tail_mode 参数 (2026-04-19)**：V3.1.0 支持 'zero'（默认，conv_encode 配对）和 'unknown'（turbo_encode 无尾比特配对），防止未来误混用两套 BCJR 边界
 35. **LDPC LLR 输出符号统一 (2026-04-19)**：`ldpc_decode` 内部 BP 用 log(P(0)/P(1))，现输出前取反对齐输入约定"正值→bit 1"
 36. **Oracle 泄漏显式标注 (2026-04-19)**：`eq_bem_turbo_fde` / `rx_chain.rx_otfs` 加显眼 ORACLE 警告 + 变量重命名（h_time_block_oracle），供 baseline 对比保留但明确非真实接收链路
+
+37. **OTFS pilot_mode 分派 + 默认 sequence (2026-04-19)**：`modem_decode_otfs` 
+  原仅调 `ch_est_otfs_dd`（impulse 专用），导频去除已分派但信道估计未分派。
+  修复：按 `cfg.pilot_mode` 分派到 `ch_est_otfs_{dd,zc,superimposed}`。默认改为 
+  **sequence (ZC)** 降 PAPR ~9dB（20dB→12dB），解决 UI 时域波形多脉冲问题。
+  trade-off：5dB BER 从 0% → 7.59%（低 SNR 略差），15dB 仍 0%
