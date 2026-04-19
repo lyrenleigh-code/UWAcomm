@@ -2,6 +2,13 @@
 
 ## 2026-04-19
 
+- **P3 UI OTFS 采样率桥接完成**（spec `2026-04-19-p3-otfs-sampling-bridge.md` 归档）
+  - Step 1: `modem_encode_otfs` V2.0.0 加 RRC 上采样（sym_rate → fs）
+  - Step 2: `modem_decode_otfs` V2.0.0 匹配滤波 + 本地 pilot 参考的符号定时 + 下采样
+  - Step 3: UI dropdown 恢复 OTFS；sys_params_default 加 `sys.otfs.rolloff/span`
+  - 回归 7/7 PASS（test_p3_unified_modem 2/2 + test_p3_2_ofdm_sctde 2/2 + test_p3_3_dsss_otfs 3/3）
+  - OTFS body_bb 从 3072 样本 @ 6kHz → 24608 样本 @ 48kHz，与其他 5 体制接口统一
+
 - **高优先算法实施（HP1/HP2/HP3）**
   - HP1 `eq_bem_turbo_fde` V2.0.0 真去 Oracle：h_time_block_oracle → h_est_block1；
     Q 保守上界估计（取 fd_est_from_hest vs fd_hz_max*0.1 最大值）；判决引导 LS 逻辑保留

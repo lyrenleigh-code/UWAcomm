@@ -1,11 +1,11 @@
 function [body_bb, meta] = modem_encode_otfs(bits, sys)
-% 功能：OTFS TX（编码+交织+QPSK+DD域导频嵌入+OTFS调制 → 基带 body）
-% 版本：V1.0.0（P3.3 从 13_SourceCode/tests/OTFS/test_otfs_timevarying.m 抽取）
+% 功能：OTFS TX（编码+交织+QPSK+DD域导频嵌入+OTFS调制+RRC 上采样到 fs → 基带 body）
+% 版本：V2.0.0（2026-04-19 采样率桥接：body_bb 从 sym_rate 上采样到 fs 对齐其他体制）
 % 输入：
 %   bits - 1×N_info 信息比特
-%   sys  - 系统参数（用 sys.codec, sys.otfs）
+%   sys  - 系统参数（用 sys.codec, sys.otfs, sys.sps）
 % 输出：
-%   body_bb - 基带复信号 (1×L)，OTFS 调制后（采样率 = sym_rate）
+%   body_bb - 基带复信号 (1×L)，**采样率 fs = sys.fs**（V1.0 是 sym_rate，V2.0 桥接到 fs）
 %   meta    - struct
 %       .N_info              原始输入比特数
 %       .dd_frame            TX DD域帧 (NxM)
@@ -14,13 +14,21 @@ function [body_bb, meta] = modem_encode_otfs(bits, sys)
 %       .data_indices        数据格点线性索引
 %       .pilot_info          导频信息（由 otfs_pilot_embed 返回）
 %       .guard_mask          保护区掩模
-%       .pilot_sym           DD 域前 10 个数据符号（定时 hint）
-%       .N_shaped            输出样本数
+%       .N_shaped            输出样本数（@ fs）
+%       .N_otfs_sym          OTFS 符号域样本数（N×(M+cp_len)）— RX 下采样后应对齐
+%       .sps                 上采样因子（同 sys.sps）
+%       .rolloff / .span     RRC 参数（RX 匹配滤波同步）
+%
+% V2.0 桥接理由：
+%   V1.0 输出符号域 (sym_rate=6000) 与 P3 demo UI 的 assemble_physical_frame
+%   (preamble @ fs=48000) 拼接产生 Frankenstein 信号。V2.0 通过 pulse_shape
+%   RRC 上采样 sps=8 倍到 fs，与其他 5 体制接口统一。
 %
 % 依赖：
 %   02_ChannelCoding/conv_encode
 %   03_Interleaving/random_interleave
 %   06_MultiCarrier/otfs_pilot_embed, otfs_modulate
+%   09_Waveform/pulse_shape (V2.0 新增)
 
 cfg   = sys.otfs;
 codec = sys.codec;
@@ -76,7 +84,15 @@ data_sym = constellation(idx_qpsk);
 
 %% ---- 8. OTFS 调制 ----
 [otfs_signal, ~] = otfs_modulate(dd_frame, N, M, cp_len, 'dft');
-body_bb = otfs_signal(:).';
+otfs_signal = otfs_signal(:).';   % 符号域，N×(M+cp_len) 样本 @ sym_rate
+N_otfs_sym = length(otfs_signal);
+
+%% ---- 9. RRC 上采样到 fs（V2.0 采样率桥接）----
+sps     = sys.sps;
+rolloff = cfg.rolloff;
+span    = cfg.span;
+% pulse_shape: 内部先 upsample sps 倍再 RRC 卷积；输出长度 = N_otfs_sym*sps + span*sps
+body_bb = pulse_shape(otfs_signal, sps, 'rrc', rolloff, span);
 
 %% ---- meta ----
 meta = struct();
@@ -92,7 +108,11 @@ meta.pilot_info   = pilot_info;
 meta.pilot_config = pilot_config;
 meta.guard_mask   = guard_mask;
 meta.N_data_slots = N_data_slots;
-meta.N_shaped     = length(body_bb);
+meta.N_shaped     = length(body_bb);    % @ fs
+meta.N_otfs_sym   = N_otfs_sym;          % @ sym_rate (RX 下采样目标)
+meta.sps          = sps;
+meta.rolloff      = rolloff;
+meta.span         = span;
 % 去oracle：pilot_sym 不再导出，RX 用 DD 域导频估计
 
 end

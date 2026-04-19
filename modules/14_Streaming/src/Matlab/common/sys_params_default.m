@@ -112,7 +112,9 @@ sys.otfs.fd_hz         = 0;
 sys.otfs.sym_delays    = [0, 1, 3, 5, 8];  % DD 域时延（格点）
 sys.otfs.gains_raw     = [1, 0.6*exp(1j*0.3), 0.45*exp(1j*0.9), ...
                            0.3*exp(1j*1.5), 0.2*exp(1j*2.1)];
-sys.otfs.total_bw      = sys.sym_rate;      % OTFS 基带带宽 = sym_rate
+sys.otfs.rolloff       = 0.35;              % RRC 滚降（14_Streaming 采样率桥接用）
+sys.otfs.span          = 6;                 % RRC 跨度（符号）
+sys.otfs.total_bw      = sys.sym_rate * (1 + sys.otfs.rolloff); % 含滚降带宽
 
 %% 帧协议
 sys.frame.magic             = uint16(hex2dec('A5C3'));

@@ -1,15 +1,16 @@
 function [bits, info] = modem_decode_otfs(body_bb, sys, meta)
-% 功能：OTFS RX（OTFS 解调 + DD 域信道估计 + 导频去除 + Turbo 均衡 → 译码）
-% 版本：V1.0.0（P3.3 从 13_SourceCode/tests/OTFS/test_otfs_timevarying.m 抽取）
+% 功能：OTFS RX（RRC 匹配滤波 + 符号定时 + OTFS 解调 + DD 域信道估计 + Turbo）
+% 版本：V2.0.0（2026-04-19 采样率桥接：body_bb @ fs 匹配滤波后下采样回 sym_rate）
 % 输入：
-%   body_bb - 基带 body（已由外层完成对齐 + Doppler 补偿；长度 ≈ meta.N_shaped）
-%   sys     - 系统参数（用 sys.codec, sys.otfs）
-%   meta    - TX 侧 modem_encode_otfs 产出
+%   body_bb - 基带 body **@ fs**（V1.0 假设 @ sym_rate，V2.0 与 modem_encode V2.0 对齐）
+%   sys     - 系统参数（用 sys.codec, sys.otfs, sys.sps）
+%   meta    - TX 侧 modem_encode_otfs V2.0 产出（含 .sps, .rolloff, .span, .N_otfs_sym）
 % 输出：
 %   bits - 1×N_info 解码信息比特
 %   info - struct（含统一 API 字段 + 诊断）
 %
 % 依赖：
+%   09_Waveform/match_filter (V2.0 新增)
 %   06_MultiCarrier/otfs_demodulate
 %   07_ChannelEstEq/{ch_est_otfs_dd, eq_otfs_lmmse, soft_mapper}
 %   02_ChannelCoding/siso_decode_conv
@@ -23,6 +24,7 @@ N            = meta.N;
 M            = meta.M;
 cp_len       = meta.cp_len;
 N_shaped     = meta.N_shaped;
+N_otfs_sym   = meta.N_otfs_sym;
 data_indices = meta.data_indices;
 pilot_info   = meta.pilot_info;
 pilot_config = meta.pilot_config;
@@ -30,8 +32,11 @@ guard_mask   = meta.guard_mask;
 N_data_slots = meta.N_data_slots;
 M_coded      = meta.M_coded;
 turbo_iter   = cfg.turbo_iter;
+sps          = meta.sps;
+rolloff      = meta.rolloff;
+span         = meta.span;
 
-%% ---- 2. body 长度对齐 ----
+%% ---- 2. body 长度对齐（@ fs）----
 body_bb = body_bb(:).';
 if length(body_bb) < N_shaped
     body_bb = [body_bb, zeros(1, N_shaped - length(body_bb))];
@@ -39,10 +44,45 @@ elseif length(body_bb) > N_shaped
     body_bb = body_bb(1:N_shaped);
 end
 
-%% ---- 3. OTFS 解调 ----
-[Y_dd, ~] = otfs_demodulate(body_bb, N, M, cp_len, 'dft');
+%% ---- 3. RRC 匹配滤波 + 符号定时（V2.0 下采样桥接）----
+[rx_filt, ~] = match_filter(body_bb, sps, 'rrc', rolloff, span);
 
-%% ---- 4. 噪声方差盲估计（guard 区域）----
+% 符号定时：用 pilot-only 帧的 OTFS 时域波形作本地参考
+pilot_only_dd = zeros(N, M);
+for k = 1:size(pilot_info.positions, 1)
+    kk = pilot_info.positions(k, 1);
+    ll = pilot_info.positions(k, 2);
+    pilot_only_dd(kk, ll) = pilot_info.values(k);
+end
+[pilot_ref_sym, ~] = otfs_modulate(pilot_only_dd, N, M, cp_len, 'dft');
+pilot_ref_sym = pilot_ref_sym(:).';
+N_ref = min(64, length(pilot_ref_sym));   % 前 64 个参考符号
+
+best_off = 0; best_corr = 0;
+sym_off_corr = zeros(1, sps);
+for off = 0:sps-1
+    st = rx_filt(off+1 : sps : end);
+    if length(st) >= N_ref
+        c = abs(sum(st(1:N_ref) .* conj(pilot_ref_sym(1:N_ref))));
+        sym_off_corr(off+1) = c;
+        if c > best_corr
+            best_corr = c;
+            best_off = off;
+        end
+    end
+end
+rx_sym = rx_filt(best_off+1 : sps : end);
+% 长度对齐到 N_otfs_sym（OTFS 符号域）
+if length(rx_sym) < N_otfs_sym
+    rx_sym = [rx_sym, zeros(1, N_otfs_sym - length(rx_sym))];
+elseif length(rx_sym) > N_otfs_sym
+    rx_sym = rx_sym(1:N_otfs_sym);
+end
+
+%% ---- 4. OTFS 解调（输入 rx_sym @ sym_rate）----
+[Y_dd, ~] = otfs_demodulate(rx_sym, N, M, cp_len, 'dft');
+
+%% ---- 5. 噪声方差盲估计（guard 区域）----
 guard_indices = find(guard_mask);
 if ~isempty(guard_indices)
     nv = max(mean(abs(Y_dd(guard_indices)).^2), 1e-8);
@@ -50,10 +90,10 @@ else
     nv = max(0.1 * var(Y_dd(:)), 1e-8);
 end
 
-%% ---- 5. DD 域信道估计 ----
+%% ---- 6. DD 域信道估计 ----
 [h_dd, path_info] = ch_est_otfs_dd(Y_dd, pilot_info, N, M);
 
-%% ---- 6. 导频贡献去除 ----
+%% ---- 7. 导频贡献去除 ----
 Y_dd_eq = Y_dd;
 if ~isempty(pilot_info.positions)
     pk_pos = pilot_info.positions(1,1);
@@ -100,7 +140,7 @@ switch cfg.pilot_mode
         end
 end
 
-%% ---- 7. 手写 Turbo（turbo_equalizer_otfs 不支持 pilot grid，需手动处理 data_indices）----
+%% ---- 8. 手写 Turbo（turbo_equalizer_otfs 不支持 pilot grid，需手动处理 data_indices）----
 constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
 perm_all = meta.perm_all;
 prior_mean = [];
@@ -147,7 +187,7 @@ for titer = 1:turbo_iter
 end
 post_eq_syms_dd = x_mean_dd(data_indices);
 
-%% ---- 8. 截取信息比特 ----
+%% ---- 9. 截取信息比特 ----
 N_info = meta.N_info;
 if length(bits_decoded) >= N_info
     bits = bits_decoded(1:N_info);
@@ -155,7 +195,7 @@ else
     bits = [bits_decoded, zeros(1, N_info - length(bits_decoded))];
 end
 
-%% ---- 9. info ----
+%% ---- 10. info ----
 med_llr = median(abs(Lpost_info));
 info = struct();
 % 信道总功率 / guard 区噪声
@@ -169,12 +209,15 @@ info.frac_confident = conv_extra.frac_confident;
 info.noise_var        = nv;
 info.h_dd             = h_dd;
 info.path_info        = path_info;
-% 同步诊断（sync tab 用）：DD 域路径快照
+% 同步诊断（sync tab 用）：DD 域路径快照 + 符号定时
 info.dd_path_info = struct( ...
     'num_paths',   path_info.num_paths, ...
     'delay_idx',   path_info.delay_idx, ...
     'doppler_idx', path_info.doppler_idx, ...
     'gain',        path_info.gain);
+info.sym_off_best     = best_off;
+info.sym_off_corr     = sym_off_corr;
+info.sym_off_best_val = best_corr;
 
 info.pre_eq_syms  = Y_dd(data_indices).';
 info.post_eq_syms = post_eq_syms_dd(:).';
