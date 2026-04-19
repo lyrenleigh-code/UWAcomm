@@ -884,26 +884,20 @@ function on_transmit()
         frame_ch = conv(frame_bb, h_tap);
         frame_ch = frame_ch(1:length(frame_bb));
 
-        % --- 多普勒注入（基于 UI doppler_edit，V2 接入）---
-        % α = fd_Hz / fc，时域 resample + 载波相位旋转
+        % --- 多普勒注入（V2 简化版：仅基带相位旋转，不做时域 resample）---
+        % 理由：P3 demo UI 的 RX 无 α 盲估计（sync_dual_hfm 未接入），
+        %   若施加 resample 会产生时间漂移破坏 OTFS 数据结构；
+        %   仅相位旋转相当于引入频偏 fc*α Hz，OTFS DD 域 Doppler 轴呈现扩散但
+        %   数据流本身不漂移，RX 即使不补偿 BER 也不会崩（仅轻微升）。
+        % 完整 Doppler（含 time-scale）需先做 HFM+/HFM- α 估计，见
+        %   后续 spec 2026-04-20-p3-doppler-full-integration.md（待创建）。
         dop_hz = app.doppler_edit.Value;
         if abs(dop_hz) > 1e-3
             alpha = dop_hz / app.sys.fc;
             t_vec = (0:length(frame_ch)-1) / app.sys.fs;
-            % 载波相位旋转（基带里 alpha 等效于载波偏移 fc*alpha）
-            frame_ch = frame_ch .* exp(1j * 2*pi * app.sys.fc * alpha * t_vec);
-            % 时域重采样（压缩 / 扩展）—— 用简单线性插值避免 toolbox 依赖
-            try
-                frame_ch = comp_resample_spline(frame_ch, alpha);
-                if length(frame_ch) > length(frame_bb)
-                    frame_ch = frame_ch(1:length(frame_bb));
-                elseif length(frame_ch) < length(frame_bb)
-                    frame_ch = [frame_ch, zeros(1, length(frame_bb)-length(frame_ch))]; %#ok<AGROW>
-                end
-            catch
-                % 未 addpath 时跳过 resample，仅保留载波相位旋转
-            end
-            ch_label = sprintf('%s + Doppler %+gHz (α=%.1e)', ch_label, dop_hz, alpha);
+            frame_ch = frame_ch .* exp(1j * 2*pi * dop_hz * t_vec);
+            ch_label = sprintf('%s + Doppler %+gHz (仅相位, 无 time-scale)', ...
+                ch_label, dop_hz);
         end
 
         snr_db = app.snr_edit.Value;
@@ -1587,59 +1581,70 @@ function update_tabs_from_entry(entry)
     ax_fd = app.tabs.h_fd; cla(ax_fd);
 
     if strcmp(sch, 'OTFS') && isfield(info, 'h_dd') && ~isempty(info.h_dd)
-        % ===== OTFS DD 域可视化 =====
-        h_dd = info.h_dd;
-        [N_dd, M_dd] = size(h_dd);
+        % ===== OTFS DD 域可视化（左真实 / 右估计，与其他体制一致）=====
+        h_dd_est = info.h_dd;
+        [N_dd, M_dd] = size(h_dd_est);
+        sps_use = entry.meta.sps;
 
-        % 左：DD 域幅度热图（|h_dd|）
-        hdd_mag = abs(h_dd);
+        % 构造真实信道 DD 表达（从 h_tap 时域抽头 → 符号延迟 → DD 格点）
+        % 注：仅显示静态多径位置；UI 注入的 Doppler α 不在 h_tap 内（α 施加在 frame_ch
+        %     上，真实 h_tap 本身无 Doppler 维度）
+        h_dd_true = zeros(N_dd, M_dd);
+        for k_tap = 1:length(h_tap)
+            if abs(h_tap(k_tap)) > 1e-6
+                tau_sym = round((k_tap-1) / sps_use);
+                if tau_sym >= 0 && tau_sym < M_dd
+                    h_dd_true(1, tau_sym+1) = h_dd_true(1, tau_sym+1) + h_tap(k_tap);
+                end
+            end
+        end
+
         dl_range = 0:M_dd-1;
         dk_range = -floor(N_dd/2) : ceil(N_dd/2)-1;
-        hdd_shift = fftshift(hdd_mag, 1);   % 把 Doppler 0 放中间
-        imagesc(ax_td, dl_range, dk_range, hdd_shift);
+
+        % --- 左：真实 DD 域 ---
+        hdd_true_mag = abs(h_dd_true);
+        hdd_true_shift = fftshift(hdd_true_mag, 1);
+        imagesc(ax_td, dl_range, dk_range, hdd_true_shift);
         axis(ax_td, 'xy');
-        cmax = max(hdd_mag(:));
-        if cmax > 0, clim(ax_td, [0, cmax]); end
+        cmax_t = max(hdd_true_mag(:));
+        if cmax_t > 0, clim(ax_td, [0, cmax_t]); end
         colormap(ax_td, 'turbo');
-        cbar = colorbar(ax_td);
-        cbar.Color = PALETTE.text_muted;
-        title(ax_td, sprintf('DD 域 |h_{dd}|  (N=%d, M=%d)', N_dd, M_dd), ...
+        cbar_t = colorbar(ax_td); cbar_t.Color = PALETTE.text_muted;
+        n_true_paths = sum(hdd_true_mag(:) > 1e-6);
+        title(ax_td, sprintf('真实 DD |h_{true}| (%d 径, k=0 行)', n_true_paths), ...
             'Color', PALETTE.primary_hi);
         xlabel(ax_td, '时延 delay (l)'); ylabel(ax_td, '多普勒 doppler (k)');
         p3_style_axes(ax_td);
 
-        % 右：path 散点（delay × doppler，大小=|gain|，色=相位）
+        % --- 右：估计 DD 域 + 叠加估计路径散点 ---
+        hdd_est_mag = abs(h_dd_est);
+        hdd_est_shift = fftshift(hdd_est_mag, 1);
+        imagesc(ax_fd, dl_range, dk_range, hdd_est_shift);
+        axis(ax_fd, 'xy');
+        cmax_e = max(hdd_est_mag(:));
+        if cmax_e > 0, clim(ax_fd, [0, cmax_e]); end
+        colormap(ax_fd, 'turbo');
+        cbar_e = colorbar(ax_fd); cbar_e.Color = PALETTE.text_muted;
+
         if isfield(info, 'path_info') && ~isempty(info.path_info) && ...
            info.path_info.num_paths > 0
             pi_ = info.path_info;
-            dl = pi_.delay_idx(:);
-            dk = pi_.doppler_idx(:);
-            % 把 doppler wrap 到 [-N/2, N/2-1]
-            dk_c = dk;
+            dk_c = pi_.doppler_idx(:);
             dk_c(dk_c >= N_dd/2) = dk_c(dk_c >= N_dd/2) - N_dd;
-            gn = abs(pi_.gain(:));
-            ph = angle(pi_.gain(:));
-            gn_norm = gn / max(gn + eps);
-            sizes = 40 + 300 * gn_norm;
-            scatter(ax_fd, dl, dk_c, sizes, ph, 'filled', ...
-                'MarkerEdgeColor', PALETTE.text);
-            colormap(ax_fd, 'hsv'); clim(ax_fd, [-pi pi]);
-            cbar2 = colorbar(ax_fd);
-            cbar2.Color = PALETTE.text_muted;
-            cbar2.Label.String = '相位 (rad)';
-            title(ax_fd, sprintf('path\\_info 散点  (%d 径, 大小=|h|, 色=∠h)', ...
-                pi_.num_paths), 'Color', PALETTE.primary_hi);
-            xlabel(ax_fd, '时延 delay (l)'); ylabel(ax_fd, '多普勒 doppler (k)');
-            xlim(ax_fd, [-0.5, M_dd-0.5]);
-            ylim(ax_fd, [-floor(N_dd/2)-0.5, ceil(N_dd/2)-0.5]);
-            p3_style_axes(ax_fd);
+            hold(ax_fd, 'on');
+            scatter(ax_fd, pi_.delay_idx(:), dk_c, ...
+                40 + 200*abs(pi_.gain(:))/(max(abs(pi_.gain))+eps), ...
+                PALETTE.text, 'o', 'LineWidth', 1.2);
+            hold(ax_fd, 'off');
+            title(ax_fd, sprintf('估计 DD |h_{est}| + path (%d 径)', pi_.num_paths), ...
+                'Color', PALETTE.accent_hi);
         else
-            text(ax_fd, 0.5, 0.5, '(无 path_info)', 'Units','normalized', ...
-                'HorizontalAlignment','center', 'Color', PALETTE.text_muted);
-            ax_fd.XColor='none'; ax_fd.YColor='none';
-            ax_fd.BackgroundColor = PALETTE.surface;
-            ax_fd.Color = PALETTE.surface;
+            title(ax_fd, '估计 DD |h_{est}| (无 path)', 'Color', PALETTE.accent_hi);
         end
+        xlabel(ax_fd, '时延 delay (l)'); ylabel(ax_fd, '多普勒 doppler (k)');
+        p3_style_axes(ax_fd);
+
     elseif length(h_tap) <= 1
         text(ax_td, 0.5, 0.5, 'AWGN  ·  无多径', 'Units','normalized', ...
             'HorizontalAlignment','center', 'FontSize', 14, ...
