@@ -1602,30 +1602,36 @@ function update_tabs_from_entry(entry)
         dl_range = 0:M_dd-1;
         dk_range = -floor(N_dd/2) : ceil(N_dd/2)-1;
 
-        % --- 左：真实 DD 域 ---
+        % --- 色阶：dB 对数尺度显示 ±30dB 范围（看弱径）---
+        to_dB = @(M) 20*log10(max(M, eps) / max(max(M(:)), eps));
+        db_lo = -30;
+
+        % --- 左：真实 DD 域（dB）---
         hdd_true_mag = abs(h_dd_true);
-        hdd_true_shift = fftshift(hdd_true_mag, 1);
+        hdd_true_db = to_dB(hdd_true_mag);
+        hdd_true_shift = fftshift(hdd_true_db, 1);
         imagesc(ax_td, dl_range, dk_range, hdd_true_shift);
         axis(ax_td, 'xy');
-        cmax_t = max(hdd_true_mag(:));
-        if cmax_t > 0, clim(ax_td, [0, cmax_t]); end
+        clim(ax_td, [db_lo, 0]);
         colormap(ax_td, 'turbo');
         cbar_t = colorbar(ax_td); cbar_t.Color = PALETTE.text_muted;
+        cbar_t.Label.String = 'dB';
         n_true_paths = sum(hdd_true_mag(:) > 1e-6);
-        title(ax_td, sprintf('真实 DD |h_{true}| (%d 径, k=0 行)', n_true_paths), ...
+        title(ax_td, sprintf('真实 DD |h_{true}|  (%d 径)', n_true_paths), ...
             'Color', PALETTE.primary_hi);
         xlabel(ax_td, '时延 delay (l)'); ylabel(ax_td, '多普勒 doppler (k)');
         p3_style_axes(ax_td);
 
-        % --- 右：估计 DD 域 + 叠加估计路径散点 ---
+        % --- 右：估计 DD 域（dB）+ 叠加估计路径散点 ---
         hdd_est_mag = abs(h_dd_est);
-        hdd_est_shift = fftshift(hdd_est_mag, 1);
+        hdd_est_db = to_dB(hdd_est_mag);
+        hdd_est_shift = fftshift(hdd_est_db, 1);
         imagesc(ax_fd, dl_range, dk_range, hdd_est_shift);
         axis(ax_fd, 'xy');
-        cmax_e = max(hdd_est_mag(:));
-        if cmax_e > 0, clim(ax_fd, [0, cmax_e]); end
+        clim(ax_fd, [db_lo, 0]);
         colormap(ax_fd, 'turbo');
         cbar_e = colorbar(ax_fd); cbar_e.Color = PALETTE.text_muted;
+        cbar_e.Label.String = 'dB';
 
         if isfield(info, 'path_info') && ~isempty(info.path_info) && ...
            info.path_info.num_paths > 0
