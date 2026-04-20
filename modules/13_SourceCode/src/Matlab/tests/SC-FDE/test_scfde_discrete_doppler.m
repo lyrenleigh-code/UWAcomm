@@ -5,12 +5,18 @@
 % RX: 09下变频 → ①双LFM相位→alpha估计 → ②CP精估 → ③resample补偿 →
 %     ④LFM精确定时 → 提取数据 → 09 RRC匹配 → 分块去CP+FFT →
 %     BEM(DCT)信道估计 + 跨块Turbo均衡(LMMSE-IC+BCJR+DD)
-% 版本: V1.0.0 — 6种信道模型对比 (对标OTFS V2.0信道配置)
+% 版本: V1.1.0 — 加 benchmark_mode 注入（spec 2026-04-19-e2e-timevarying-baseline）
 % 目的: 验证SC-FDE在离散Doppler/Rician混合信道下是否显著优于Jakes连续谱
 
-clc; close all;
+%% ========== Benchmark mode 注入（2026-04-19） ========== %%
+if ~exist('benchmark_mode','var') || isempty(benchmark_mode)
+    benchmark_mode = false;
+end
+if ~benchmark_mode
+    clc; close all;
+end
 fprintf('========================================\n');
-fprintf('  SC-FDE 离散Doppler信道对比 V1.0\n');
+fprintf('  SC-FDE 离散Doppler信道对比 V1.1\n');
 fprintf('========================================\n\n');
 
 proj_root = fileparts(fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))))));
@@ -65,8 +71,14 @@ HFM_bb_neg = exp(1j*(phase_hfm_neg - 2*pi*fc*t_pre));
 chirp_rate_lfm = (f_hi - f_lo) / preamble_dur;
 phase_lfm = 2*pi * (f_lo * t_pre + 0.5 * chirp_rate_lfm * t_pre.^2);
 LFM_bb = exp(1j*(phase_lfm - 2*pi*fc*t_pre));
+% LFM- 基带版本（down-chirp，激活 est_alpha_dual_chirp）—— 2026-04-20 spec dual-chirp-refinement
+chirp_rate_lfm = (f_hi - f_lo) / preamble_dur;
+phase_lfm_neg = 2*pi * (f_hi * t_pre - 0.5 * chirp_rate_lfm * t_pre.^2);
+LFM_bb_neg = exp(1j*(phase_lfm_neg - 2*pi*fc*t_pre));
 N_lfm = length(LFM_bb);
-guard_samp = max(sym_delays) * sps + 80;
+% guard 扩展：容纳 α=3e-2 下 LFM peak 漂移 —— 2026-04-20 dual-chirp 改造
+alpha_max_design = 3e-2;
+guard_samp = max(sym_delays) * sps + 80 + ceil(alpha_max_design * max(N_preamble, N_lfm));
 
 %% ========== 信道配置（6种，对标OTFS V2.0）========== %%
 % {名称, 信道类型, 参数, blk_fft, blk_cp, N_blocks, fd_hz_bem}
@@ -86,6 +98,30 @@ fading_cfgs = {
 };
 
 snr_list = [0, 5, 10, 15, 20];
+
+%% ========== Benchmark 覆盖（benchmark_mode=true 时生效） ========== %%
+if benchmark_mode
+    if exist('bench_snr_list','var') && ~isempty(bench_snr_list)
+        snr_list = bench_snr_list;
+    end
+    if exist('bench_fading_cfgs','var') && ~isempty(bench_fading_cfgs)
+        fading_cfgs = bench_fading_cfgs;
+    end
+    if ~exist('bench_channel_profile','var') || isempty(bench_channel_profile)
+        bench_channel_profile = 'custom6';
+    end
+    if ~exist('bench_seed','var') || isempty(bench_seed)
+        bench_seed = 42;
+    end
+    if ~exist('bench_stage','var') || isempty(bench_stage)
+        bench_stage = 'B';
+    end
+    if ~exist('bench_scheme_name','var') || isempty(bench_scheme_name)
+        bench_scheme_name = 'SC-FDE';
+    end
+    fprintf('[BENCHMARK] snr_list=%s, fading rows=%d, stage=%s\n', ...
+            mat2str(snr_list), size(fading_cfgs,1), bench_stage);
+end
 
 fprintf('通带: fs=%dHz, fc=%dHz, sps=%d, HFM/LFM=%.0f~%.0fHz\n', fs, fc, sps, f_lo, f_hi);
 fprintf('帧: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]\n');
@@ -155,10 +191,12 @@ for fi = 1:N_fading
     HFM_bb_n = HFM_bb * lfm_scale;
     HFM_bb_neg_n = HFM_bb_neg * lfm_scale;
     LFM_bb_n = LFM_bb * lfm_scale;
+    LFM_bb_neg_n = LFM_bb_neg * lfm_scale;
 
     % 帧组装: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]
+    % 2026-04-20：LFM2 改 down-chirp
     frame_bb = [HFM_bb_n, zeros(1,guard_samp), HFM_bb_neg_n, zeros(1,guard_samp), ...
-                LFM_bb_n, zeros(1,guard_samp), LFM_bb_n, zeros(1,guard_samp), shaped_bb];
+                LFM_bb_n, zeros(1,guard_samp), LFM_bb_neg_n, zeros(1,guard_samp), shaped_bb];
     T_v_lfm = (N_lfm + guard_samp) / fs;  % LFM1头→LFM2头间隔(秒)
     lfm_data_offset = N_lfm + guard_samp;  % LFM2头→data头
 
@@ -197,21 +235,36 @@ for fi = 1:N_fading
         % 1. 下变频
         [bb_raw, ~] = downconvert(rx_pb, fs, fc, bw_lfm);
 
-        % 2. LFM相位法粗估alpha
+        % 2. 双 LFM（up+down）时延差法 α 估计 —— 2026-04-20 dual-chirp 改造
         mf_lfm = conj(fliplr(LFM_bb_n));
         lfm2_search_len = min(3*N_preamble + 4*guard_samp + 2*N_lfm, length(bb_raw));
         lfm2_start = 2*N_preamble + 2*guard_samp + N_lfm + 1;
-        corr_est = filter(mf_lfm, 1, bb_raw);
-        corr_est_abs = abs(corr_est);
         lfm1_search_start = 2*N_preamble + 2*guard_samp + 1;
         lfm1_end = 2*N_preamble + 2*guard_samp + N_lfm + guard_samp;
-        [~, p1_rel] = max(corr_est_abs(lfm1_search_start:min(lfm1_end,length(corr_est_abs))));
-        p1_idx = lfm1_search_start + p1_rel - 1;
+        if isempty(which('est_alpha_dual_chirp'))
+            dop_dir = fullfile(fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))))), ...
+                                '10_DopplerProc','src','Matlab');
+            addpath(dop_dir);
+        end
+        cfg_alpha = struct();
+        cfg_alpha.up_start = lfm1_search_start;
+        cfg_alpha.up_end   = lfm1_end;
+        cfg_alpha.dn_start = lfm2_start;
+        cfg_alpha.dn_end   = min(lfm2_search_len, length(bb_raw));
+        cfg_alpha.nominal_delta_samples = N_lfm + guard_samp;
+        cfg_alpha.use_subsample = true;
+        k_chirp = chirp_rate_lfm;
+        [alpha_lfm_raw, alpha_diag] = est_alpha_dual_chirp(bb_raw, LFM_bb_n, LFM_bb_neg_n, ...
+                                                           fs, fc, k_chirp, cfg_alpha);
+        alpha_lfm = -alpha_lfm_raw;  % 符号约定对齐 gen_uwa_channel
+        % R1/p1_idx/p2_idx 保留旧变量名（下游 sync/BEM 使用）
+        corr_est = filter(mf_lfm, 1, bb_raw);
+        corr_est_abs = abs(corr_est);
+        p1_idx = alpha_diag.tau_up;
+        p2_idx = alpha_diag.tau_dn;
+        R1 = corr_est(p1_idx);
+        R2 = NaN;
         T_v_samp = round(T_v_lfm * fs);
-        [~, p2_rel] = max(corr_est_abs(lfm2_start:min(lfm2_search_len,length(corr_est_abs))));
-        p2_idx = lfm2_start + p2_rel - 1;
-        R1 = corr_est(p1_idx); R2 = corr_est(p2_idx);
-        alpha_lfm = angle(R2 * conj(R1)) / (2*pi*fc*T_v_lfm);
         sync_peak = abs(R1) / sum(abs(LFM_bb_n).^2);
 
         % 3. 粗补偿+CP精估
@@ -220,7 +273,9 @@ for fi = 1:N_fading
         else
             bb_comp1 = bb_raw;
         end
-        corr_c1 = abs(filter(mf_lfm, 1, bb_comp1(1:min(lfm2_search_len,length(bb_comp1)))));
+        % LFM2 是 down-chirp，用 mf_lfm_neg 找 peak
+        mf_lfm_neg = conj(fliplr(LFM_bb_neg_n));
+        corr_c1 = abs(filter(mf_lfm_neg, 1, bb_comp1(1:min(lfm2_search_len,length(bb_comp1)))));
         [~, l1] = max(corr_c1(lfm2_start:end));
         lp1 = lfm2_start + l1 - 1 - N_lfm + 1;
         d1 = lp1 + lfm_data_offset; e1 = d1 + N_shaped - 1;
@@ -512,6 +567,42 @@ for fi = 1:N_fading
         fprintf(' %6.2f%%', ber*100);
     end
     fprintf('  (blk=%d, rate=%.0fbps)\n', blk_fft, info_rate_bps);
+end
+
+%% ========== Benchmark CSV 写入（benchmark_mode=true 时生效） ========== %%
+if benchmark_mode
+    bench_dir = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'bench_common');
+    addpath(bench_dir);
+    if ~exist('bench_csv_path','var') || isempty(bench_csv_path)
+        bench_csv_path = fullfile(bench_dir, 'e2e_baseline_unspecified.csv');
+    end
+    for fi_b = 1:size(fading_cfgs,1)
+        for si_b = 1:length(snr_list)
+            row = bench_init_row(bench_stage, bench_scheme_name);
+            % profile 记录 "custom6|static/disc-5Hz/..."
+            row.profile          = sprintf('%s|%s', bench_channel_profile, fading_cfgs{fi_b,1});
+            ch_type = fading_cfgs{fi_b,2};
+            if strcmp(ch_type,'jakes') && isnumeric(fading_cfgs{fi_b,3})
+                row.fd_hz = fading_cfgs{fi_b,3};
+            else
+                row.fd_hz = NaN;
+            end
+            row.doppler_rate     = 0;
+            row.snr_db           = snr_list(si_b);
+            row.seed             = bench_seed;
+            row.ber_coded        = ber_matrix(fi_b, si_b);
+            row.ber_uncoded      = NaN;
+            row.nmse_db          = NaN;
+            row.sync_tau_err     = NaN;
+            row.frame_detected   = 1;
+            row.turbo_final_iter = 6;
+            row.runtime_s        = NaN;
+            bench_append_csv(bench_csv_path, row);
+        end
+    end
+    fprintf('[BENCHMARK] CSV 写入: %s (%d 行)\n', bench_csv_path, ...
+            size(fading_cfgs,1) * length(snr_list));
+    return;
 end
 
 %% ========== 同步信息 ========== %%

@@ -5,12 +5,19 @@
 % RX: 09下变频 → ①LFM相位+CP多普勒估计 → ②重采样补偿 → ③LFM精确定时 →
 %     提取数据 → 09 RRC匹配 → 去CP+FFT → 信道估计+MMSE-IC →
 %     FFT恢复频域符号 → 跨块BCJR
-% 版本：V4.2.0 — 基于SC-FDE V4.0两级分离架构，OFDM调制（IFFT at TX）
+% 版本：V4.3.0 — 基于SC-FDE V4.0两级分离架构，OFDM调制（IFFT at TX）；支持 benchmark_mode
 %   V4.1: 静态信道估计由GAMP改为OMP（修复高SNR发散）
 %   V4.2: nv_post实测噪声兜底nv_k（修复fd=1Hz高SNR非单调）+ TX/RX波形频谱可视化
+%   V4.3: 加 benchmark_mode 注入开关（spec 2026-04-19-e2e-timevarying-baseline）
 % 与SC-FDE区别：TX有IFFT(06 ofdm_modulate)，RX均衡后FFT恢复频域符号
 
-clc; close all;
+%% ========== Benchmark mode 注入（2026-04-19） ========== %%
+if ~exist('benchmark_mode','var') || isempty(benchmark_mode)
+    benchmark_mode = false;
+end
+if ~benchmark_mode
+    clc; close all;
+end
 fprintf('========================================\n');
 fprintf('  OFDM 通带仿真 — 时变信道测试\n');
 fprintf('========================================\n\n');
@@ -81,6 +88,31 @@ fading_cfgs = {
     'fd=1Hz', 'slow',     1,   1/fc,        256,  128,  16;
     'fd=5Hz', 'slow',     5,   5/fc,        128,  96,   32;
 };
+
+%% ========== Benchmark 覆盖（benchmark_mode=true 时生效） ========== %%
+if benchmark_mode
+    if exist('bench_snr_list','var') && ~isempty(bench_snr_list)
+        snr_list = bench_snr_list;
+    end
+    if exist('bench_fading_cfgs','var') && ~isempty(bench_fading_cfgs)
+        fading_cfgs = bench_fading_cfgs;
+    end
+    if ~exist('bench_channel_profile','var') || isempty(bench_channel_profile)
+        bench_channel_profile = 'custom6';
+    end
+    if ~exist('bench_seed','var') || isempty(bench_seed)
+        bench_seed = 42;
+    end
+    if ~exist('bench_stage','var') || isempty(bench_stage)
+        bench_stage = 'A1';
+    end
+    if ~exist('bench_scheme_name','var') || isempty(bench_scheme_name)
+        bench_scheme_name = 'OFDM';
+    end
+    fprintf('[BENCHMARK] snr_list=%s, fading rows=%d, profile=%s, seed=%d, stage=%s\n', ...
+            mat2str(snr_list), size(fading_cfgs,1), ...
+            bench_channel_profile, bench_seed, bench_stage);
+end
 
 fprintf('通带: fs=%dHz, fc=%dHz, HFM/LFM=%.0f~%.0fHz\n', fs, fc, f_lo, f_hi);
 fprintf('帧: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]\n');
@@ -639,6 +671,36 @@ for fi = 1:size(fading_cfgs,1)
         fprintf(' %6.2f%%', ber*100);
     end
     fprintf('  (blk=%d, lfm=%d, peak=%.3f)\n', blk_fft, sync_info_matrix(fi,1), sync_info_matrix(fi,2));
+end
+
+%% ========== Benchmark CSV 写入（benchmark_mode=true 时生效） ========== %%
+if benchmark_mode
+    bench_dir = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'bench_common');
+    addpath(bench_dir);
+    if ~exist('bench_csv_path','var') || isempty(bench_csv_path)
+        bench_csv_path = fullfile(bench_dir, 'e2e_baseline_unspecified.csv');
+    end
+    for fi_b = 1:size(fading_cfgs,1)
+        for si_b = 1:length(snr_list)
+            row = bench_init_row(bench_stage, bench_scheme_name);
+            row.profile          = bench_channel_profile;
+            row.fd_hz            = fading_cfgs{fi_b, 3};
+            row.doppler_rate     = fading_cfgs{fi_b, 4};
+            row.snr_db           = snr_list(si_b);
+            row.seed             = bench_seed;
+            row.ber_coded        = ber_matrix(fi_b, si_b);
+            row.ber_uncoded      = NaN;
+            row.nmse_db          = NaN;
+            row.sync_tau_err     = NaN;
+            row.frame_detected   = 1;
+            row.turbo_final_iter = 10;   % OFDM turbo_iter=10
+            row.runtime_s        = NaN;
+            bench_append_csv(bench_csv_path, row);
+        end
+    end
+    fprintf('[BENCHMARK] CSV 写入: %s (%d 行)\n', bench_csv_path, ...
+            size(fading_cfgs,1) * length(snr_list));
+    return;
 end
 
 %% ========== 同步信息 ========== %%

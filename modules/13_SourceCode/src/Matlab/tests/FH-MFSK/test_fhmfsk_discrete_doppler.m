@@ -2,12 +2,18 @@
 % TX: 编码->交织->8-FSK映射->跳频(16位)->基带FSK波形->帧组装
 % 信道: apply_channel(离散Doppler/Rician混合/Jakes) — 等效基带
 % RX: 下变频->LFM定时->FFT能量检测->去跳频->硬判决->译码
-% 版本：V1.0.0 — 6种信道模型对比 (对标SC-FDE V1.0/OTFS V2.0信道配置)
+% 版本：V1.1.0 — 加 benchmark_mode 注入（spec 2026-04-19-e2e-timevarying-baseline）
 % 特点：非相干能量检测，无需信道估计/均衡，跳频提供频率分集
 
-clc; close all;
+%% ========== Benchmark mode 注入（2026-04-19） ========== %%
+if ~exist('benchmark_mode','var') || isempty(benchmark_mode)
+    benchmark_mode = false;
+end
+if ~benchmark_mode
+    clc; close all;
+end
 fprintf('========================================\n');
-fprintf('  FH-MFSK 离散Doppler信道对比 V1.0\n');
+fprintf('  FH-MFSK 离散Doppler信道对比 V1.1\n');
 fprintf('========================================\n\n');
 
 proj_root = fileparts(fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))))));
@@ -95,6 +101,30 @@ fading_cfgs = {
     'hyb-K5',   'hybrid',   struct('doppler_hz',doppler_per_path, 'fd_scatter',1.0, 'K_rice',5),  5;
     'jakes5Hz', 'jakes',    5, 5;
 };
+
+%% ========== Benchmark 覆盖（benchmark_mode=true 时生效） ========== %%
+if benchmark_mode
+    if exist('bench_snr_list','var') && ~isempty(bench_snr_list)
+        snr_list = bench_snr_list;
+    end
+    if exist('bench_fading_cfgs','var') && ~isempty(bench_fading_cfgs)
+        fading_cfgs = bench_fading_cfgs;
+    end
+    if ~exist('bench_channel_profile','var') || isempty(bench_channel_profile)
+        bench_channel_profile = 'custom6';
+    end
+    if ~exist('bench_seed','var') || isempty(bench_seed)
+        bench_seed = 42;
+    end
+    if ~exist('bench_stage','var') || isempty(bench_stage)
+        bench_stage = 'B';
+    end
+    if ~exist('bench_scheme_name','var') || isempty(bench_scheme_name)
+        bench_scheme_name = 'FH-MFSK';
+    end
+    fprintf('[BENCHMARK] snr_list=%s, fading rows=%d, stage=%s\n', ...
+            mat2str(snr_list), size(fading_cfgs,1), bench_stage);
+end
 
 fprintf('FH-MFSK: %d-FSK, %d跳频位, df=%dHz, T_sym=%.1fms\n', M, num_freqs, freq_spacing, sym_duration*1000);
 fprintf('通信速率: %.0f bps (R=1/%d, %d bits/sym)\n', info_rate_bps, n_code, bits_per_sym);
@@ -236,6 +266,40 @@ for fi = 1:N_fading
         fprintf(' %6.2f%%', ber*100);
     end
     fprintf('  (lfm=%d)\n', sync_info_matrix(fi,1));
+end
+
+%% ========== Benchmark CSV 写入（benchmark_mode=true 时生效） ========== %%
+if benchmark_mode
+    bench_dir = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'bench_common');
+    addpath(bench_dir);
+    if ~exist('bench_csv_path','var') || isempty(bench_csv_path)
+        bench_csv_path = fullfile(bench_dir, 'e2e_baseline_unspecified.csv');
+    end
+    for fi_b = 1:size(fading_cfgs,1)
+        for si_b = 1:length(snr_list)
+            row = bench_init_row(bench_stage, bench_scheme_name);
+            row.profile          = sprintf('%s|%s', bench_channel_profile, fading_cfgs{fi_b,1});
+            if strcmp(fading_cfgs{fi_b,2},'jakes') && isnumeric(fading_cfgs{fi_b,3})
+                row.fd_hz = fading_cfgs{fi_b,3};
+            else
+                row.fd_hz = NaN;
+            end
+            row.doppler_rate     = 0;
+            row.snr_db           = snr_list(si_b);
+            row.seed             = bench_seed;
+            row.ber_coded        = ber_matrix(fi_b, si_b);
+            row.ber_uncoded      = ber_unc_matrix(fi_b, si_b);
+            row.nmse_db          = NaN;
+            row.sync_tau_err     = NaN;
+            row.frame_detected   = 1;
+            row.turbo_final_iter = NaN;
+            row.runtime_s        = NaN;
+            bench_append_csv(bench_csv_path, row);
+        end
+    end
+    fprintf('[BENCHMARK] CSV 写入: %s (%d 行)\n', bench_csv_path, ...
+            size(fading_cfgs,1) * length(snr_list));
+    return;
 end
 
 %% ========== 可视化 ========== %%

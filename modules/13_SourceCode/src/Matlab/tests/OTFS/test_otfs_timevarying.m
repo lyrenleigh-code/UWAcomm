@@ -2,10 +2,17 @@
 % TX: 编码→交织→QPSK→DD域导频→OTFS调制→frame_assemble_otfs(两级同步)→通带
 % 信道: 等效基带(离散Doppler/Rician混合/Jakes)
 % RX: frame_parse_otfs(sync_dual_hfm+LFM精定时)→OTFS解调→DD估计→LMMSE+Turbo→译码
-% 版本：V5.0.0 — 集成frame_assemble/parse_otfs V2.0 两级同步架构
+% 版本：V5.1.0 — 集成frame_assemble/parse_otfs V2.0 两级同步架构；支持 benchmark_mode
 % 特点：[HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|OTFS] + 双HFM粗同步+LFM精定时
+% V5.1: 加 benchmark_mode 注入（spec 2026-04-19-e2e-timevarying-baseline）
 
-clc; close all;
+%% ========== Benchmark mode 注入（2026-04-19） ========== %%
+if ~exist('benchmark_mode','var') || isempty(benchmark_mode)
+    benchmark_mode = false;
+end
+if ~benchmark_mode
+    clc; close all;
+end
 use_oracle = false;
 eq_type = 'lmmse';
 uamp_inner = 5;
@@ -107,6 +114,31 @@ fading_cfgs = {
     'hyb-K5',   'hybrid',   struct('doppler_hz',[0,3,-4,5,-2], 'fd_scatter',1.0, 'K_rice',5);
     'jakes5Hz', 'jakes',    5;
 };
+
+%% ========== Benchmark 覆盖（benchmark_mode=true 时生效） ========== %%
+if benchmark_mode
+    if exist('bench_snr_list','var') && ~isempty(bench_snr_list)
+        snr_list = bench_snr_list;
+    end
+    if exist('bench_fading_cfgs','var') && ~isempty(bench_fading_cfgs)
+        fading_cfgs = bench_fading_cfgs;
+    end
+    if ~exist('bench_channel_profile','var') || isempty(bench_channel_profile)
+        bench_channel_profile = 'custom6';
+    end
+    if ~exist('bench_seed','var') || isempty(bench_seed)
+        bench_seed = 42;
+    end
+    if ~exist('bench_stage','var') || isempty(bench_stage)
+        bench_stage = 'A1';
+    end
+    if ~exist('bench_scheme_name','var') || isempty(bench_scheme_name)
+        bench_scheme_name = 'OTFS';
+    end
+    fprintf('[BENCHMARK] snr_list=%s, fading rows=%d, profile=%s, seed=%d, stage=%s\n', ...
+            mat2str(snr_list), size(fading_cfgs,1), ...
+            bench_channel_profile, bench_seed, bench_stage);
+end
 
 fprintf('OTFS: N=%d x M=%d, CP=%d, df=%.1fHz, fs_bb=%dHz\n', N, M, cp_len, subcarrier_spacing, sym_rate);
 if passband_mode
@@ -422,6 +454,42 @@ for fi = 1:size(fading_cfgs,1)
     if ~isempty(diag_info)
         fprintf('  nv_post=%.4f, v_x=%.4f\n', diag_info.nv_post, diag_info.v_x);
     end
+end
+
+%% ========== Benchmark CSV 写入（benchmark_mode=true 时生效） ========== %%
+if benchmark_mode
+    bench_dir = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'bench_common');
+    addpath(bench_dir);
+    if ~exist('bench_csv_path','var') || isempty(bench_csv_path)
+        bench_csv_path = fullfile(bench_dir, 'e2e_baseline_unspecified.csv');
+    end
+    for fi_b = 1:size(fading_cfgs,1)
+        for si_b = 1:length(snr_list)
+            row = bench_init_row(bench_stage, bench_scheme_name);
+            row.profile          = bench_channel_profile;
+            % OTFS fading_cfgs 第 3 列是向量/struct/标量，记录名称到 profile
+            row.profile          = sprintf('%s|%s', bench_channel_profile, fading_cfgs{fi_b,1});
+            fd_val = NaN;
+            if strcmp(fading_cfgs{fi_b, 2}, 'jakes') && isnumeric(fading_cfgs{fi_b,3})
+                fd_val = fading_cfgs{fi_b,3};
+            end
+            row.fd_hz            = fd_val;
+            row.doppler_rate     = 0;  % OTFS 框架无固定 α
+            row.snr_db           = snr_list(si_b);
+            row.seed             = bench_seed;
+            row.ber_coded        = ber_matrix(fi_b, si_b);
+            row.ber_uncoded      = ber_unc_matrix(fi_b, si_b);
+            row.nmse_db          = NaN;
+            row.sync_tau_err     = NaN;
+            row.frame_detected   = 1;
+            row.turbo_final_iter = NaN;
+            row.runtime_s        = NaN;
+            bench_append_csv(bench_csv_path, row);
+        end
+    end
+    fprintf('[BENCHMARK] CSV 写入: %s (%d 行)\n', bench_csv_path, ...
+            size(fading_cfgs,1) * length(snr_list));
+    return;
 end
 
 %% ========== 可视化 ========== %%

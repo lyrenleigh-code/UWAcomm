@@ -4,10 +4,20 @@
 % 信道: 等效基带帧 → gen_uwa_channel(多径+Jakes+多普勒) → 09上变频 → +实噪声
 % RX: 09下变频 → ①双HFM多普勒估计 → ②重采样补偿 → ③LFM精确定时 →
 %     提取数据 → 09 RRC匹配 → 分块去CP+FFT → 信道估计+MMSE → 跨块BCJR
-% 版本：V4.0.0 — 两级分离架构：双HFM多普勒+LFM精确定时
+% 版本：V4.1.0 — 两级分离架构：双HFM多普勒+LFM精确定时；支持 benchmark_mode 注入
 % 变更：V3→V4 帧结构[HFM+|HFM-|LFM|data]，解耦多普勒估计与定时同步
+%       V4→V4.1 加 benchmark_mode 开关（spec 2026-04-19-e2e-timevarying-baseline）
 
-clc; close all;
+%% ========== Benchmark mode 注入（2026-04-19） ========== %%
+% 默认 benchmark_mode=false，行为与改造前完全一致
+% benchmark_mode=true 时外部注入 bench_* 变量，末尾写 CSV，跳过可视化
+if ~exist('benchmark_mode','var') || isempty(benchmark_mode)
+    benchmark_mode = false;
+end
+
+if ~benchmark_mode
+    clc; close all;
+end
 fprintf('========================================\n');
 fprintf('  SC-FDE 通带仿真 — 时变信道测试\n');
 fprintf('========================================\n\n');
@@ -59,12 +69,18 @@ else
     phase_hfm_neg = -2*pi*k_neg*log(1 - (f0-f1)/f0*t_pre/T_pre);
 end
 HFM_bb_neg = exp(1j*(phase_hfm_neg - 2*pi*fc*t_pre));
-% LFM基带版本（线性调频，多普勒补偿后精确定时用）
+% LFM 基带版本（up-chirp：f_lo → f_hi，精确定时用）
 chirp_rate_lfm = (f_hi - f_lo) / preamble_dur;
 phase_lfm = 2*pi * (f_lo * t_pre + 0.5 * chirp_rate_lfm * t_pre.^2);
 LFM_bb = exp(1j*(phase_lfm - 2*pi*fc*t_pre));
+% LFM- 基带版本（down-chirp：f_hi → f_lo，双 LFM 时延差 α 估计用）
+% 2026-04-20：激活 est_alpha_dual_chirp（spec 2026-04-20-alpha-estimator-dual-chirp-refinement.md）
+phase_lfm_neg = 2*pi * (f_hi * t_pre - 0.5 * chirp_rate_lfm * t_pre.^2);
+LFM_bb_neg = exp(1j*(phase_lfm_neg - 2*pi*fc*t_pre));
 N_lfm = length(LFM_bb);
-guard_samp = max(sym_delays) * sps + 80;
+% guard 扩展：容纳 α=3e-2 下 LFM peak 最大漂移（α·N_preamble ≈ 72 样本）
+alpha_max_design = 3e-2;
+guard_samp = max(sym_delays) * sps + 80 + ceil(alpha_max_design * max(N_preamble, N_lfm));
 
 snr_list = [5, 10, 15, 20];
 fading_cfgs = {
@@ -72,6 +88,31 @@ fading_cfgs = {
     'fd=1Hz', 'slow',     1,   1/fc,        256,  128,  16;
     'fd=5Hz', 'slow',     5,   5/fc,        128,  128,  32;
 };
+
+%% ========== Benchmark 覆盖（benchmark_mode=true 时生效） ========== %%
+if benchmark_mode
+    if exist('bench_snr_list','var') && ~isempty(bench_snr_list)
+        snr_list = bench_snr_list;
+    end
+    if exist('bench_fading_cfgs','var') && ~isempty(bench_fading_cfgs)
+        fading_cfgs = bench_fading_cfgs;
+    end
+    if ~exist('bench_channel_profile','var') || isempty(bench_channel_profile)
+        bench_channel_profile = 'custom6';
+    end
+    if ~exist('bench_seed','var') || isempty(bench_seed)
+        bench_seed = 42;
+    end
+    if ~exist('bench_stage','var') || isempty(bench_stage)
+        bench_stage = 'A1';
+    end
+    if ~exist('bench_scheme_name','var') || isempty(bench_scheme_name)
+        bench_scheme_name = 'SC-FDE';
+    end
+    fprintf('[BENCHMARK] snr_list=%s, fading rows=%d, profile=%s, seed=%d, stage=%s\n', ...
+            mat2str(snr_list), size(fading_cfgs,1), ...
+            bench_channel_profile, bench_seed, bench_stage);
+end
 
 fprintf('通带: fs=%dHz, fc=%dHz, HFM/LFM=%.0f~%.0fHz\n', fs, fc, f_lo, f_hi);
 fprintf('帧: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]\n');
@@ -82,6 +123,26 @@ alpha_est_matrix = zeros(size(fading_cfgs,1), length(snr_list));
 sync_info_matrix = zeros(size(fading_cfgs,1), 2);
 H_est_blocks_save = cell(1, size(fading_cfgs,1));
 ch_info_save = cell(1, size(fading_cfgs,1));
+
+%% ========== 诊断插桩（2026-04-20 α-pipeline-debug spec） ========== %%
+if ~exist('bench_diag','var') || ~isstruct(bench_diag), bench_diag = struct('enable', false); end
+if ~isfield(bench_diag,'enable'), bench_diag.enable = false; end
+if ~isfield(bench_diag,'out_path'), bench_diag.out_path = 'diag_default.mat'; end
+if bench_diag.enable, diag_rec = struct(); end
+
+if ~exist('bench_toggles','var') || ~isstruct(bench_toggles)
+    bench_toggles = struct();
+end
+tog = struct('skip_resample', false, 'skip_downconvert_lpf', false, ...
+             'force_best_off', false, 'oracle_h', false, ...
+             'force_lfm_pos', false, 'pad_tx_tail', false, ...
+             'skip_alpha_cp', false, 'force_bem_q', []);
+tog_fields = fieldnames(tog);
+for tog_k = 1:numel(tog_fields)
+    if isfield(bench_toggles, tog_fields{tog_k})
+        tog.(tog_fields{tog_k}) = bench_toggles.(tog_fields{tog_k});
+    end
+end
 
 fprintf('%-8s |', '');
 for si=1:length(snr_list), fprintf(' %6ddB', snr_list(si)); end
@@ -122,12 +183,22 @@ for fi = 1:size(fading_cfgs,1)
     HFM_bb_n = HFM_bb * lfm_scale;
     HFM_bb_neg_n = HFM_bb_neg * lfm_scale;
     LFM_bb_n = LFM_bb * lfm_scale;
+    LFM_bb_neg_n = LFM_bb_neg * lfm_scale;
 
-    % 帧组装：[HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]
+    % 帧组装：[HFM+|g|HFM-|g|LFM_up|g|LFM_dn|g|data]
     frame_bb = [HFM_bb_n, zeros(1,guard_samp), HFM_bb_neg_n, zeros(1,guard_samp), ...
-                LFM_bb_n, zeros(1,guard_samp), LFM_bb_n, zeros(1,guard_samp), shaped_bb];
-    T_v_lfm = (N_lfm + guard_samp) / fs;  % LFM1头到LFM2头间隔(秒)
-    lfm_data_offset = N_lfm + guard_samp;  % LFM2头到data头的距离
+                LFM_bb_n, zeros(1,guard_samp), LFM_bb_neg_n, zeros(1,guard_samp), shaped_bb];
+    % 【H6 toggle】TX 尾部 zero-pad，防 α 压缩后 data 截断
+    if tog.pad_tx_tail
+        frame_bb = [frame_bb, zeros(1, 1000)];
+    end
+    T_v_lfm = (N_lfm + guard_samp) / fs;  % LFM_up 头到 LFM_dn 头间隔（秒）
+    lfm_data_offset = N_lfm + guard_samp;  % LFM_dn 头到 data 头的距离
+
+    % 【N0】 TX 基带（ground truth reference）
+    if bench_diag.enable
+        diag_rec.frame_bb = frame_bb(1:min(end, 10000));
+    end
 
     %% ===== 信道（固定，不随SNR变）===== %%
     ch_params = struct('fs',fs,'delay_profile','custom',...
@@ -139,6 +210,12 @@ for fi = 1:size(fading_cfgs,1)
     ch_info_save{fi} = ch_info;  % 保存用于CIR可视化
     [rx_pb_clean,~] = upconvert(rx_bb_frame, fs, fc);
     sig_pwr = mean(rx_pb_clean.^2);
+
+    % 【N1】 rx_pb_clean（通过信道，无噪声）
+    if bench_diag.enable
+        diag_rec.rx_pb_clean = rx_pb_clean(1:min(end, 10000));
+        diag_rec.ch_info_h_time = ch_info.h_time;  % 备 H4 oracle_h 用
+    end
 
     L_h = max(sym_delays) + 1;
     K_sparse = length(sym_delays);
@@ -154,25 +231,68 @@ for fi = 1:size(fading_cfgs,1)
         rx_pb = rx_pb_clean + sqrt(noise_var)*randn(size(rx_pb_clean));
 
         % 1. 下变频（有噪声信号）
-        [bb_raw,~] = downconvert(rx_pb, fs, fc, bw_lfm);
+        % 【H2 toggle】skip LPF: 扩大 cutoff 到 Nyquist 边缘（近似无 LPF）
+        if tog.skip_downconvert_lpf
+            [bb_raw,~] = downconvert(rx_pb, fs, fc, fs/2 - 100);
+        else
+            [bb_raw,~] = downconvert(rx_pb, fs, fc, bw_lfm);
+        end
 
-        % ===== LFM相位粗估 + CP精估 =====
-        mf_lfm = conj(fliplr(LFM_bb_n));
+        % 【N2】 bb_raw（下变频后，含 α 效应）
+        if bench_diag.enable && si == 1
+            diag_rec.bb_raw = bb_raw(1:min(end, 10000));
+        end
+
+        % ===== 双 LFM（up+down）时延差法 α 估计 =====
+        % 2026-04-20：替换旧"双 LFM 相位差法"（同形 LFM 对 α 不敏感）
+        % 新 estimator: modules/10_DopplerProc/est_alpha_dual_chirp.m
+        mf_lfm = conj(fliplr(LFM_bb_n));  % up 模板（保留，用于 R1/精定时）
         lfm2_search_len = min(3*N_preamble + 4*guard_samp + 2*N_lfm, length(bb_raw));
         lfm2_start = 2*N_preamble + 2*guard_samp + N_lfm + 1;
+        lfm1_end   = 2*N_preamble + 2*guard_samp + N_lfm + guard_samp;
+        lfm1_search_start = 2*N_preamble + 2*guard_samp + 1;
 
-        % LFM相位法粗估（搜索范围跳过HFM区域，防HFM-LFM互相关干扰）
-        corr_est = filter(mf_lfm, 1, bb_raw);
+        % 调 est_alpha_dual_chirp（10_DopplerProc 模块）
+        if isempty(which('est_alpha_dual_chirp'))
+            dop_dir = fullfile(fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))))), ...
+                                '10_DopplerProc','src','Matlab');
+            addpath(dop_dir);
+        end
+        cfg_alpha = struct();
+        cfg_alpha.up_start = lfm1_search_start;
+        cfg_alpha.up_end   = lfm1_end;
+        cfg_alpha.dn_start = lfm2_start;
+        cfg_alpha.dn_end   = min(lfm2_search_len, length(bb_raw));
+        cfg_alpha.nominal_delta_samples = N_lfm + guard_samp;   % LFM_up tail 到 LFM_dn tail
+        cfg_alpha.use_subsample = true;
+        k_chirp = chirp_rate_lfm;  % (f_hi-f_lo)/T_pre
+        [alpha_lfm_raw, alpha_diag] = est_alpha_dual_chirp(bb_raw, LFM_bb_n, LFM_bb_neg_n, ...
+                                                            fs, fc, k_chirp, cfg_alpha);
+        % 符号约定对齐：gen_uwa_channel 的 doppler_rate 与 est_alpha_dual_chirp 的 α 取反
+        alpha_lfm = -alpha_lfm_raw;
+
+        % 【2026-04-20】迭代 α refinement（突破 CP 精修 ±2.4e-4 相位模糊）
+        % 原理：est_alpha_dual_chirp 基于 peak 位置（无相位模糊），在补偿后的 bb 上重估残余
+        if ~exist('bench_alpha_iter','var') || isempty(bench_alpha_iter)
+            bench_alpha_iter = 2;   % 默认 2 次迭代
+        end
+        if bench_alpha_iter > 0 && abs(alpha_lfm) > 1e-10
+            for iter_a = 1:bench_alpha_iter
+                bb_iter = comp_resample_spline(bb_raw, alpha_lfm, fs, 'fast');
+                [delta_raw, ~] = est_alpha_dual_chirp(bb_iter, LFM_bb_n, LFM_bb_neg_n, ...
+                                                      fs, fc, k_chirp, cfg_alpha);
+                alpha_lfm = alpha_lfm + (-delta_raw);  % 符号对齐
+            end
+        end
+
+        % R1 保留：up-LFM peak 复数值，sync_peak 基于 up 峰
+        corr_est = filter(mf_lfm, 1, bb_raw);  % up 相关（用于 R1 复数值）
         corr_est_abs = abs(corr_est);
-        lfm1_end = 2*N_preamble + 2*guard_samp + N_lfm + guard_samp;
-        lfm1_search_start = 2*N_preamble + 2*guard_samp + 1;  % 跳过HFM+/-区域
-        [~, p1_rel] = max(corr_est_abs(lfm1_search_start:min(lfm1_end, length(corr_est_abs))));
-        p1_idx = lfm1_search_start + p1_rel - 1;
+        p1_idx = alpha_diag.tau_up;
+        p2_idx = alpha_diag.tau_dn;  % 兼容旧 p2_idx 变量名
+        R1 = corr_est(p1_idx);
+        R2 = NaN;  % 旧 R2 相位法已不再使用；保留变量名防下游未知引用
         T_v_samp = round(T_v_lfm * fs);
-        [~, p2_rel] = max(corr_est_abs(lfm2_start:min(lfm2_search_len, length(corr_est_abs))));
-        p2_idx = lfm2_start + p2_rel - 1;
-        R1 = corr_est(p1_idx); R2 = corr_est(p2_idx);
-        alpha_lfm = angle(R2 * conj(R1)) / (2*pi*fc*T_v_lfm);
         sync_peak = abs(R1) / sum(abs(LFM_bb_n).^2);
 
         % 粗补偿+粗提取（仅用于CP估计）
@@ -205,19 +325,54 @@ for fi = 1:size(fading_cfgs,1)
         end
         alpha_cp = angle(Rcp) / (2*pi*fc*blk_fft/sym_rate);
         alpha_est = alpha_lfm + alpha_cp;
+        % 【诊断开关】bench_oracle_alpha：用 α 真值做主补偿
+        if exist('bench_oracle_alpha','var') && bench_oracle_alpha
+            alpha_lfm = dop_rate;
+            alpha_est = alpha_lfm + alpha_cp;
+        end
+        % 【H7 toggle】skip_alpha_cp=true 忽略 CP 精修
+        if tog.skip_alpha_cp
+            alpha_est = alpha_lfm;
+        end
         sync_peak = abs(R1) / sum(abs(LFM_bb_n).^2);
 
         % ---- Round 2: 精补偿 + 最终提取 ----
-        if abs(alpha_est) > 1e-10
-            bb_comp = comp_resample_spline(bb_raw, alpha_est, fs, 'fast');
+        % 【H1 toggle】skip_resample=true 时不补偿 α，直接用 bb_raw
+        if tog.skip_resample
+            bb_comp = bb_raw;
+        elseif abs(alpha_est) > 1e-10
+            if exist('bench_resample_method','var') && strcmpi(bench_resample_method, 'matlab')
+                bb_comp = comp_resample_matlab(bb_raw, alpha_est, fs, 'default');
+            else
+                bb_comp = comp_resample_spline(bb_raw, alpha_est, fs, 'fast');
+            end
         else
             bb_comp = bb_raw;
         end
 
-        corr_lfm_comp = abs(filter(mf_lfm, 1, bb_comp(1:min(lfm2_search_len,length(bb_comp)))));
+        % 【N3】 bb_comp（resample 补偿后）
+        if bench_diag.enable && si == 1
+            diag_rec.bb_comp = bb_comp(1:min(end, 10000));
+            diag_rec.alpha_est = alpha_est;
+            diag_rec.alpha_lfm = alpha_lfm;
+            diag_rec.alpha_cp  = alpha_cp;
+        end
+
+        % LFM2 是 down-chirp，用 mf_lfm_neg 找 peak（α 补偿后 peak 应在 nominal 位置）
+        mf_lfm_neg = conj(fliplr(LFM_bb_neg_n));
+        corr_lfm_comp = abs(filter(mf_lfm_neg, 1, bb_comp(1:min(lfm2_search_len,length(bb_comp)))));
         [~, lfm2_local] = max(corr_lfm_comp(lfm2_start:end));
         lfm2_peak_idx = lfm2_start + lfm2_local - 1;
         lfm_pos = lfm2_peak_idx - N_lfm + 1;
+        % 【H5 toggle】force_lfm_pos: 用 nominal 位置（α=0 时 LFM2 起始）
+        nominal_lfm_pos = 2*N_preamble + 2*guard_samp + N_lfm + guard_samp + 1;
+        if tog.force_lfm_pos
+            lfm_pos = nominal_lfm_pos;
+        end
+        if bench_diag.enable && si == 1
+            diag_rec.lfm_pos_obs = lfm_pos;
+            diag_rec.lfm_pos_nom = nominal_lfm_pos;
+        end
 
         sync_offset_samp = 0;
         sync_offset_sym = 0;
@@ -243,10 +398,21 @@ for fi = 1:size(fading_cfgs,1)
                 if c>best_pwr, best_pwr=c; best_off=off; end
             end
         end
+        % 【H3 toggle】force_best_off=true 强制 best_off=0，不搜索
+        if tog.force_best_off
+            best_off = 0;
+        end
         rx_sym_all = rx_filt(best_off+1:sps:end);
         N_total_sym = N_blocks * sym_per_block;
         if length(rx_sym_all)>N_total_sym, rx_sym_all=rx_sym_all(1:N_total_sym);
         elseif length(rx_sym_all)<N_total_sym, rx_sym_all=[rx_sym_all,zeros(1,N_total_sym-length(rx_sym_all))]; end
+
+        % 【N4】 rx_sym_all（匹配滤波 + sps 抽取后，symbol-rate）
+        if bench_diag.enable && si == 1
+            diag_rec.rx_sym_all = rx_sym_all;
+            diag_rec.sym_all_tx = sym_all;   % TX ground truth (M_total/2 symbols)
+            diag_rec.best_off  = best_off;
+        end
 
         % 6. 信道估计（有噪声信号，每个SNR独立估计）
         nv_eq = max(noise_var, 1e-10);
@@ -294,6 +460,9 @@ for fi = 1:size(fading_cfgs,1)
                 end
             end
             bem_opts = struct('Q_mode', 'auto', 'lambda_scale', 1.0);
+            if ~isempty(tog.force_bem_q)  % 【H8 toggle】强制 BEM 阶数
+                bem_opts.Q_mode = tog.force_bem_q;
+            end
             [h_tv_bem, ~, bem_info] = ch_est_bem(obs_y(:), obs_x, obs_n(:), N_total_sym, ...
                 sym_delays, fd_hz, sym_rate, nv_eq, 'dct', bem_opts);
             H_est_blocks = cell(1, N_blocks);
@@ -309,12 +478,37 @@ for fi = 1:size(fading_cfgs,1)
         end
         if si == 1, H_est_blocks_save{fi} = H_est_blocks{1}; end
 
+        % 【H4 toggle】oracle_h：用 ch_info.h_time 注入 BEM 估计
+        if tog.oracle_h
+            h_true = ch_info.h_time;  % [num_paths × N_tx]
+            for bi = 1:N_blocks
+                blk_mid = (bi-1)*sym_per_block + round(sym_per_block/2);
+                blk_mid = max(1, min(blk_mid, size(h_true,2)));
+                h_td_est = zeros(1, blk_fft);
+                for p = 1:K_sparse
+                    h_td_est(eff_delays(p)+1) = h_true(p, blk_mid);
+                end
+                H_est_blocks{bi} = fft(h_td_est) .* phase_ramp_frac;
+            end
+        end
+
+        % 【N6】 信道估计（首块）
+        if bench_diag.enable && si == 1
+            diag_rec.H_est_blocks = H_est_blocks;
+        end
+
         % 7. 分块去CP+FFT
         Y_freq_blocks = cell(1, N_blocks);
         for bi = 1:N_blocks
             blk_sym = rx_sym_all((bi-1)*sym_per_block+1:bi*sym_per_block);
             rx_nocp = blk_sym(blk_cp+1:end);
             Y_freq_blocks{bi} = fft(rx_nocp);
+        end
+
+        % 【N5】 分块 FFT 输出（前 2 块，避免 MAT 过大）
+        if bench_diag.enable && si == 1
+            diag_rec.Y_freq_blk1 = Y_freq_blocks{1};
+            if N_blocks >= 2, diag_rec.Y_freq_blk2 = Y_freq_blocks{2}; end
         end
 
         % 8. 跨块Turbo均衡: LMMSE-IC ⇌ BCJR + DD信道重估计
@@ -377,8 +571,65 @@ for fi = 1:size(fading_cfgs,1)
         ber_matrix(fi,si) = ber;
         alpha_est_matrix(fi,si) = alpha_est;
         fprintf(' %6.2f%%', ber*100);
+
+        % 【N7/N8 + 逐块 BER】Turbo 最终迭代的 LLR + 逐块 coded BER（H6 关键诊断）
+        if bench_diag.enable && si == 1
+            hard_coded = double(LLR_all > 0);
+            ber_per_block_coded = zeros(1, N_blocks);
+            for bi_d = 1:N_blocks
+                idx = (bi_d-1)*M_per_blk + (1:M_per_blk);
+                ber_per_block_coded(bi_d) = mean(hard_coded(idx) ~= inter_all(idx));
+            end
+            N_head = min(50, floor(M_per_blk/4));
+            ber_head = mean(hard_coded(1:N_head) ~= inter_all(1:N_head));
+            ber_tail = mean(hard_coded(end-N_head+1:end) ~= inter_all(end-N_head+1:end));
+            diag_rec.LLR_all = LLR_all;
+            diag_rec.hard_coded = hard_coded;
+            diag_rec.ber_per_block_coded = ber_per_block_coded;
+            diag_rec.ber_head = ber_head;
+            diag_rec.ber_tail = ber_tail;
+            diag_rec.ber_info = ber;
+            % 保存至 MAT
+            try
+                save(bench_diag.out_path, 'diag_rec', '-v7');
+                fprintf('\n[DIAG] saved: %s\n', bench_diag.out_path);
+            catch ME
+                fprintf('\n[DIAG] save 失败: %s\n', ME.message);
+            end
+        end
     end
     fprintf('  (blk=%d, lfm=%d, peak=%.3f)\n', blk_fft, sync_info_matrix(fi,1), sync_info_matrix(fi,2));
+end
+
+%% ========== Benchmark CSV 写入（benchmark_mode=true 时生效） ========== %%
+if benchmark_mode
+    bench_dir = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'bench_common');
+    addpath(bench_dir);
+    if ~exist('bench_csv_path','var') || isempty(bench_csv_path)
+        bench_csv_path = fullfile(bench_dir, 'e2e_baseline_unspecified.csv');
+    end
+    for fi_b = 1:size(fading_cfgs,1)
+        for si_b = 1:length(snr_list)
+            row = bench_init_row(bench_stage, bench_scheme_name);
+            row.profile        = bench_channel_profile;
+            row.fd_hz          = fading_cfgs{fi_b, 3};
+            row.doppler_rate   = fading_cfgs{fi_b, 4};
+            row.snr_db         = snr_list(si_b);
+            row.seed           = bench_seed;
+            row.ber_coded      = ber_matrix(fi_b, si_b);
+            row.ber_uncoded    = NaN;              % 贯通版占位
+            row.nmse_db        = NaN;              % 贯通版占位
+            row.sync_tau_err   = NaN;              % 贯通版占位
+            row.frame_detected = 1;                % 此 runner 无检测失败
+            row.turbo_final_iter = 6;
+            row.runtime_s      = NaN;              % 贯通版占位
+            row.alpha_est      = alpha_est_matrix(fi_b, si_b);  % D 阶段诊断
+            bench_append_csv(bench_csv_path, row);
+        end
+    end
+    fprintf('[BENCHMARK] CSV 写入: %s (%d 行)\n', bench_csv_path, ...
+            size(fading_cfgs,1) * length(snr_list));
+    return;   % benchmark 模式跳过可视化
 end
 
 %% ========== 同步信息 ========== %%
