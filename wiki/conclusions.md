@@ -1,11 +1,38 @@
 ---
 tags: [结论, 技术决策]
-updated: 2026-04-17
+updated: 2026-04-19
 ---
 
 # 关键技术结论
 
 累积记录项目中得出的技术结论，作为后续决策依据。
+
+## 迭代 α refinement（2026-04-20，详见 [[modules/10_DopplerProc/α补偿pipeline诊断]]）
+
+- **α=2e-3 断崖 50% BER 根因**：CP 精修 `angle(R_cp)/(2π·fc·T_block)` 有 **±2.4e-4 无模糊阈值**
+  - 对 blk_fft=1024, fc=12kHz: |α_残余| < 1/(2·fc·T_block) = 2.44e-4
+  - Estimator alpha_lfm 在 6 径下有系统 14% 低估 → α≥2e-3 下残余超阈值 CP wrap
+- **修复**：迭代 α refinement（默认 2 次），对 resample 后信号再估残余（est_alpha_dual_chirp 无相位模糊），快速收敛
+- **结果**：SC-FDE α 工作范围从 1e-3 → **1e-2**（10× 扩展），覆盖 15 m/s 快艇/AUV
+- **Pipeline 无其他瓶颈**（8 toggle 诊断证明）；α=3e-2 是 resample 物理极限（另 spec 处理）
+
+## 双 LFM α 估计器（2026-04-20，详见 [[modules/10_DopplerProc/双LFM-α估计器]]）
+
+- **帧里 4 同步头**（HFM+/HFM-/LFM1/LFM2）历来设计本意是无模糊 α 估计，但旧 RX 代码里 LFM1=LFM2=同一 up-chirp，"双 LFM 相位差"法对 α 数学上不敏感（只能测时钟偏置）
+- **把 LFM2 换 down-chirp + est_alpha_dual_chirp**（up/down peak 时延差法）激活后：
+  - A2 α=5e-4 BER 48.7% → **0%** @ SNR=10
+  - A2 α=1e-3 BER 49% → **2%** @ SNR=10
+  - D 阶段核心 α ∈ [±1e-4, +1e-3] 全通
+- **α>1e-3 BEM 外推不动**（estimator 输出正确但残余 α 让 BEM 失效）
+- **α<0 非对称**（疑似 spline/尾部截断）—— 留后续
+
+## E2E 时变基线（2026-04-19，详见 [[comparisons/e2e-timevarying-baseline]]）
+
+- **Jakes 连续谱 + fd≥1Hz 是当前接收机通用杀手**：SC-FDE/OFDM/SC-TDE/OTFS 全部崩 ~50%；离散 Doppler 反而友好（这 4 体制在 B 阶段都 <1%），说明根因是"BEM/LMMSE 对连续谱建模不足"而非多径本身
+- **固定 α≥5e-4 即崩**（fc=12kHz 对应 fd≈6Hz CFO）：SC-FDE/OFDM/SC-TDE 全部 ~50%，暴露接收端缺少 α 盲估计/补偿，与 `specs/active/2026-04-16-deoracle-rx-parameters.md` 方向一致
+- **DSSS 对 α 线性退化**（非断崖），扩频增益吸收部分 CFO
+- **FH-MFSK 是抗时变基准线**（fd=10Hz/α=5e-4 仍 <1% BER）
+- **OTFS 在离散 Doppler 下独自卡 32% BER**（surprising finding），需专项 debug；其他 5 体制在 B 阶段均 <1%
 
 ## 信道估计
 

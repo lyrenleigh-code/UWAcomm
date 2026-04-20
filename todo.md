@@ -103,12 +103,22 @@
 | 任务 | 状态 | 说明 |
 |------|------|------|
 | **rx_chain.rx_otfs 真重写（main_sim_single 改造）** | 骨架占位 | rx_otfs_real 已加入 switch 路径但未实现；需 main_sim_single 开启真实 passband + 信道 + rx_otfs_real 填充。独立 spec 待创建 |
+| **OTFS 离散 Doppler 32% BER 专项 debug** | 待做 | B 阶段 benchmark 发现 OTFS 在 disc-5Hz/hyb-K* 独自卡 32%，其他 5 体制全通；需专题 spec（见 `wiki/comparisons/e2e-timevarying-baseline.md`） |
+| **α 补偿推广到其他 4 体制（OFDM/SC-TDE/DSSS/FH-MFSK）** | 待做 | SC-FDE 已落地双 LFM + 迭代 refinement，核心范围 α≤1e-2 全通；其他体制帧结构相同，可套同款改动。独立 spec 待创建 |
 
 ### 🟡 中优先
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
 | **P3 demo Doppler 链路接入** | 待做 | `app.doppler_edit` 字段 UI 有但 TX 链路未用；spec 预占位 `2026-04-18-p3-doppler-integration.md`（待创建） |
+| **α estimator 符号约定参数化** | 待做 | `est_alpha_dual_chirp` 当前与 `gen_uwa_channel.doppler_rate` 反号，runner 里 hack `-alpha_lfm_raw`；建议在 estimator 内加 `sign_convention` 参数 |
+| **α<0 不对称修复** | 待做 | D 阶段 α=-3e-2 BER=3%，+3e-2 BER=50%；疑似 rx 尾部 spline/truncation，需独立 debug |
+| **α=3e-2 物理极限突破** | 待做 | resample 本身对 α>1e-2 累积误差，需 bandpass 扩展 + 多级 resample 独立 spec |
+| **14_Streaming 去 Oracle α**（推广 13 的盲估计） | 待做 | 14_Streaming/P2/P3 仍 oracle α（从 chinfo 读），需将 13_SourceCode 的双 LFM + 迭代推广，属 `2026-04-16-deoracle-rx-parameters` 范畴 |
+| **SC-FDE runner oracle 清理** | 待做 | `test_scfde_timevarying.m:229` 仍用 `all_cp_data(1:10)` 做 sps 相位选择，属 §7 oracle 泄漏 |
+| **E2E benchmark C 阶段（多 seed 检测率）** | 待做 | 需让 `bench_seed` 驱动 runner 内 rng，改 11 runner 的 rng 调用 |
+| **E2E benchmark profile 扩展** | 待做 | 当前仅 custom6，需 runner 支持 `bench_channel_profile` 切换 ch_params（exponential 等） |
+| **E2E benchmark NMSE/sync/turbo iter 填充** | 待做 | CSV schema 有字段但本期全 NaN，需 runner 暴露 h_est / sync_tau_err / 逐轮 BER |
 | **p3_demo_ui.m refactor Step C** | 进行中 | 主文件 1649→≤900 行（嵌套函数物理分段），spec `2026-04-17-p3-demo-ui-refactor.md` |
 | **OTFS 通带 2D 脉冲整形 Phase 4** | Phase 2 完成 | 端到端 BER 验证待做；spec `2026-04-13-otfs-pulse-shaping.md` |
 | **OTFS PAPR 专项降低** | 待做 | 需 SLM/PTS/削峰等专用技术 |
@@ -145,6 +155,8 @@
 | **eq_bem_turbo_fde V2.0.0 真去 Oracle** | 2026-04-19 | h_time_block_oracle → h_est_block1；Q 保守上界估计 |
 | **P3 UI 加 OTFS dropdown** | 2026-04-19 | scheme_dd 增加 OTFS 选项，后端 current_scheme 已支持 |
 | **OTFS 两级同步架构（spec 归档）** | 2026-04-19 | frame_assemble/parse_otfs V2.0 + test 迁移，发现早已实施，补填 Result |
+| **E2E 时变信道 6 体制 688 点基线 benchmark** | 2026-04-19 | spec `2026-04-19-e2e-timevarying-baseline.md`；4 阶段 20min 跑完；发现 OTFS 32% 独立异常 |
+| **双 LFM α estimator + 迭代 refinement（SC-FDE）** | 2026-04-20 | spec `2026-04-20-alpha-estimator-dual-chirp-refinement.md` + `2026-04-20-alpha-compensation-pipeline-debug.md`；α 工作范围 1e-4 → **1e-2**（15 m/s），A2 α=2e-3 BER 47% → 0% |
 
 ---
 

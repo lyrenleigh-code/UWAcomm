@@ -1,6 +1,37 @@
 # Wiki 操作日志
 
+## 2026-04-20
+
+- **α 补偿 Pipeline 诊断 + 迭代 α refinement（SC-FDE）**（spec `2026-04-20-alpha-compensation-pipeline-debug.md`）
+  - 新 wiki：`wiki/modules/10_DopplerProc/α补偿pipeline诊断.md`
+  - 新图：`figures/D_*_after_iter.png`（3 张，与 before/mvp 对比）
+  - 诊断脚本：`modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_alpha_pipeline.m` + 8 节点插桩 + 10 toggle
+  - 根因定位：**CP 精修 ±2.4e-4 相位模糊阈值** + estimator 14% 系统误差
+  - 修复：runner 内加 2 次迭代 est_alpha_dual_chirp
+  - 关键数字：**SC-FDE α=2e-3 BER 47% → 0%**；工作范围从 1e-3 到 **1e-2**（15 m/s 快艇覆盖）
+
+- **双 LFM α 估计器改造落地（SC-FDE）**（spec `2026-04-20-alpha-estimator-dual-chirp-refinement.md`）
+  - 新模块 `modules/10_DopplerProc/src/Matlab/est_alpha_dual_chirp.m` + 单元测试（9/9 核心范围 PASS）
+  - SC-FDE 帧结构 LFM2 改为 down-chirp，guard 扩展；α 估计入口切换
+  - 新 wiki：`wiki/modules/10_DopplerProc/双LFM-α估计器.md`
+  - D/A2 before/after 对比图：`figures/D_{alpha_est_vs_true, alpha_rel_error, ber_vs_alpha}_{before,after}.png`
+  - 关键数字：A2 α=5e-4 BER **48.7% → 0%**，α=1e-3 **49% → 2%**（SNR=10dB）
+  - 遗留：α<0 不对称、α>1e-3 BEM 外推不动、α∈[1e-2,3e-2] 边界，留后续 incremental
+
 ## 2026-04-19
+
+- **恒定多普勒 α 估计器诊断**（spec `2026-04-19-constant-doppler-isolation.md`）
+  - 复用 E2E benchmark 扩 stage D：α=13 点 × SNR=10dB × SC-FDE，29.7s
+  - 新 PNG：`figures/D_{alpha_est_vs_true, alpha_rel_error, ber_vs_alpha}.png`
+  - **surprising finding**：α 估计**全部失效** — 所有非零 α 估成 ~1e-5 噪声，误差 ≈ α_true
+  - 根因：LFM1/LFM2 是**同一波形**，双 LFM 相位法对 α 数学上不灵敏；真正估 α 应该用双 HFM（up+down chirp）时延差
+  - 下一步：升格 spec `2026-04-20-lfm-alpha-estimator-refinement.md` 走 est_alpha_dual_hfm 改造路径
+
+- **E2E 时变信道 6 体制基线 benchmark 完成**（spec `2026-04-19-e2e-timevarying-baseline.md`，S1+S2+S3 推进）
+  - 新增 `wiki/comparisons/e2e-timevarying-baseline.md` + 10 PNG
+  - 4 新工具：`tests/benchmark_e2e_baseline.m` + `bench_run_single` + `bench_build_fading_cfgs` + `bench_get_fft_params`
+  - 4 阶段扫描：A1 Jakes (180 pts, 4.7 min) / A2 固定α (100 pts, ~3 min) / A3 2D (288 pts, 9.0 min) / B 离散 (120 pts, 3.1 min)
+  - 688 组合 0 失败，关键发现：**OTFS 在 B 离散信道独自卡 32% BER，其他 5 体制全通**；SC-FDE/OFDM/SC-TDE 对 Jakes fd≥1Hz 和固定 α≥5e-4 全崩；FH-MFSK 跨 fd/α 域最抗时变
 
 - **P3 UI OTFS 采样率桥接完成**（spec `2026-04-19-p3-otfs-sampling-bridge.md` 归档）
   - Step 1: `modem_encode_otfs` V2.0.0 加 RRC 上采样（sym_rate → fs）

@@ -1,7 +1,7 @@
 ---
 type: comparison
 created: 2026-04-17
-updated: 2026-04-17
+updated: 2026-04-19
 tags: [测试结果, E2E, BER矩阵, 模块07, 离散Doppler]
 ---
 
@@ -10,6 +10,8 @@ tags: [测试结果, E2E, BER矩阵, 模块07, 离散Doppler]
 > 从 [[todo|UWAcomm todo.md]] 迁入，分离"活跃 TODO"与"历史测试数据"。
 >
 > 相关页面：[[conclusions]]、[[modules/13_SourceCode/离散Doppler全体制对比]]、[[modules/13_SourceCode/SC-FDE调试日志]]
+>
+> **2026-04-19 更新**：新基线 [[comparisons/e2e-timevarying-baseline|E2E 时变信道 6 体制基线]]（688 pts × 4 阶段统一 harness，SNR 0-20 扫完），本页早期稀疏数据（仅 fd=1/5Hz 两点）建议作为历史存档参考。
 
 ---
 
