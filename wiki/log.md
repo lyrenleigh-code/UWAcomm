@@ -1,5 +1,15 @@
 # Wiki 操作日志
 
+## 2026-04-22
+
+- **DSSS 符号级 Doppler 跟踪（Sun-2020）**（spec `2026-04-22-dsss-symbol-doppler-tracking.md`）
+  - 新模块：`est_alpha_dsss_symbol.m`（Sun-2020 JCIN 2020）+ `comp_resample_piecewise.m`
+  - 原理：相邻 Gold31 peak 时差 → 瞬时 α；三点余弦内插 + IIR 平滑
+  - DSSS runner 加 `doppler_track_mode='block|symbol|symbol_per_sym'` 开关
+  - 关键数字：**D α=+3e-2 BER 51% → 2.2%**（25× 改善）；A2/D |α|≤3e-3 维持 0%
+  - 对比：均值 resample 优于逐符号（静态 α 下 per-sym boundary 不连续）
+  - 遗留：α=±1e-2 改善有限（需 adaptive Gold31 bank）、α=-3e-2 仍 35%
+
 ## 2026-04-21
 
 - **α 推广 4 体制（3/4 成功）**（spec `2026-04-21-alpha-refinement-other-schemes.md`）

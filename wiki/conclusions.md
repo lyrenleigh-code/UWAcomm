@@ -7,6 +7,15 @@ updated: 2026-04-19
 
 累积记录项目中得出的技术结论，作为后续决策依据。
 
+## DSSS 符号级 Doppler 跟踪（2026-04-22，Sun-2020 JCIN 2020）
+
+- **DSSS block 估计（整帧单 α）在大 α 下失败**：α=1e-2 帧尾 chip 漂移 ~370 samples，Rake 对齐崩
+- **Sun-2020 符号级跟踪**：相邻 Gold31 peak 时差 → 瞬时 α；三点余弦内插 sub-sample 精度
+- **Sequential tracking 关键**：`tau_expected(k) = tau_peaks(k-1) + T_sym/(1+α)` 动态，突破搜索窗累积偏移
+- **结果**：D α=+3e-2 BER **51% → 2.2%**（25× 改善）；A2/D |α|≤3e-3 全 0% 维持
+- **Symbol mean > Symbol per-sym**（静态 α 下，逐符号 resample 的 symbol-boundary 不连续反而害）
+- 遗留：α=±1e-2 改善小（需 adaptive Gold31 bank）；α<0 不对称（common root cause）
+
 ## α 推广 4 体制（2026-04-21，spec `2026-04-21-alpha-refinement-other-schemes.md`）
 
 3/4 体制推广成功（SC-FDE 模板复用），SC-TDE 下游 α 敏感失败：

@@ -159,6 +159,7 @@
 | **双 LFM α estimator + 迭代 refinement（SC-FDE）** | 2026-04-20 | spec `2026-04-20-alpha-estimator-dual-chirp-refinement.md` + `2026-04-20-alpha-compensation-pipeline-debug.md`；α 工作范围 1e-4 → **1e-2**（15 m/s），A2 α=2e-3 BER 47% → 0% |
 | **OTFS 32% BER 根因定位** | 2026-04-21 | spec `specs/archive/2026-04-21-otfs-disc-doppler-32pct-debug.md`；根因 = pilot_mode='sequence' regression；impulse 回滚后 3 信道 × 3 trial BER 0-0.04%；Yang 2026 理论 (H4) 证伪 |
 | **摄入 6 篇 Doppler 论文** | 2026-04-21 | yang-2026 / zheng-2025 / wei-2020 / muzzammil-2019 / sun-2020 / lalevee-2025；wiki/source-summaries/ 新建 |
+| **DSSS 符号级 Doppler 跟踪（Sun-2020）** | 2026-04-22 | spec `2026-04-22-dsss-symbol-doppler-tracking.md`；est_alpha_dsss_symbol.m + comp_resample_piecewise.m；D α=+3e-2 BER **51% → 2.2%** (25× 改善)；Symbol mean > Symbol per-sym（静态 α），A2/D |α|≤3e-3 维持 0% |
 | **α=3e-2 突破（SC-FDE）** | 2026-04-21 | spec `2026-04-21-alpha-pipeline-large-alpha-debug.md`；TX tail pad + CP 阈值门禁 + 正向大 α 精扫 3 patch；α=+3e-2 BER **50% → 5.4%**，工作范围 1e-2 → **3e-2（45 m/s 鱼雷覆盖）**；VSS spec 中断保留代码 |
 
 ---

@@ -241,6 +241,29 @@ for fi = 1:size(fading_cfgs,1)
         end
         alpha_est = best_a;
     end
+
+    % 【2026-04-22】可选 symbol-level α 跟踪（Sun-2020）
+    % 通过 `doppler_track_mode = 'symbol_per_sym'` 启用；默认 'block'（向后兼容）
+    if ~exist('doppler_track_mode','var') || isempty(doppler_track_mode)
+        doppler_track_mode = 'symbol';   % 默认 'symbol' (均值 resample, 最优)；可切 'block'/'symbol_per_sym'
+    end
+    alpha_est_block = alpha_est;  % 保留块估计
+    alpha_track_sym = [];  % 逐符号 α 序列（symbol mode 下填充）
+    if strcmpi(doppler_track_mode, 'symbol') || strcmpi(doppler_track_mode, 'symbol_per_sym')
+        if isempty(which('est_alpha_dsss_symbol'))
+            addpath(dop_dir);
+        end
+        % Data 段起始 sample（frame_bb 里从 shaped_bb 开始）
+        data_start_sym = 2*N_preamble + 2*N_lfm + 4*guard_samp + 1;
+        n_symbols_total = length(all_chips) / L;  % 总 DSSS symbols（含 training）
+        frame_cfg_sym = struct('data_start_samples', data_start_sym, 'n_symbols', n_symbols_total);
+        track_cfg_sym = struct('alpha_block', alpha_est_block, 'alpha_max', 3e-2, ...
+                               'iir_beta', 0.7, 'iir_warmup', 5, 'use_subsample', true);
+        [alpha_track_sym, alpha_sym_avg, sym_diag] = est_alpha_dsss_symbol( ...
+            bb_clean, spread_code, sps, fs, fc, frame_cfg_sym, track_cfg_sym);
+        alpha_est = alpha_sym_avg;  % 用均值 resample (uniform mode)
+    end
+
     corr_clean = filter(mf_lfm, 1, bb_clean);
     p1_idx = alpha_diag.tau_up;
     p2_idx = alpha_diag.tau_dn;
@@ -276,7 +299,13 @@ for fi = 1:size(fading_cfgs,1)
 
         % 2. 多普勒补偿（复用无噪声估计的alpha_est）
         if abs(alpha_est) > 1e-10
-            bb_comp = comp_resample_spline(bb_raw, alpha_est, fs, 'fast');
+            if strcmpi(doppler_track_mode, 'symbol_per_sym') && ~isempty(alpha_track_sym)
+                % 逐符号 resample（Sun-2020 Phase 2）
+                bb_comp = comp_resample_piecewise(bb_raw, alpha_est, alpha_track_sym, ...
+                    2*N_preamble + 2*N_lfm + 4*guard_samp + 1, L*sps);
+            else
+                bb_comp = comp_resample_spline(bb_raw, alpha_est, fs, 'fast');
+            end
         else
             bb_comp = bb_raw;
         end
