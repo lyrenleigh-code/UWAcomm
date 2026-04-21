@@ -188,7 +188,11 @@ for fi = 1:size(fading_cfgs,1)
     % 帧组装：[HFM+|g|HFM-|g|LFM_up|g|LFM_dn|g|data]
     frame_bb = [HFM_bb_n, zeros(1,guard_samp), HFM_bb_neg_n, zeros(1,guard_samp), ...
                 LFM_bb_n, zeros(1,guard_samp), LFM_bb_neg_n, zeros(1,guard_samp), shaped_bb];
-    % 【H6 toggle】TX 尾部 zero-pad，防 α 压缩后 data 截断
+    % 【2026-04-21】默认 TX 尾部 zero-pad，防 α 压缩后 data 截断（α<0 方向溢出）
+    % 取 α_max_design (3e-2) 对应的漂移量 ×1.5 安全余量
+    default_tail_pad = ceil(alpha_max_design * length(frame_bb) * 1.5);
+    frame_bb = [frame_bb, zeros(1, default_tail_pad)];
+    % 【H6 toggle】额外 pad（测试用，在默认之上再加）
     if tog.pad_tx_tail
         frame_bb = [frame_bb, zeros(1, 1000)];
     end
@@ -285,6 +289,30 @@ for fi = 1:size(fading_cfgs,1)
             end
         end
 
+        % 【2026-04-21】大 α 下 estimator 有 ~2% 系统偏差（主要正向）
+        % 迭代后在 α_lfm ± 2e-3 范围精扫，选 LFM up+dn peak 和最大的 α
+        % 只在 +α > 1.5e-2 启用（-α 方向 estimator 已足够准）
+        if alpha_lfm > 1.5e-2
+            mf_up_tmp = conj(fliplr(LFM_bb_n));
+            mf_dn_tmp = conj(fliplr(LFM_bb_neg_n));
+            a_candidates = alpha_lfm + (-2e-3 : 2e-4 : 2e-3);
+            best_metric = -inf;
+            best_a = alpha_lfm;
+            for ac = a_candidates
+                bb_try = comp_resample_spline(bb_raw, ac, fs, 'fast');
+                up_end_tmp = min(cfg_alpha.up_end, length(bb_try));
+                dn_end_tmp = min(cfg_alpha.dn_end, length(bb_try));
+                c_up = abs(filter(mf_up_tmp, 1, bb_try(cfg_alpha.up_start:up_end_tmp)));
+                c_dn = abs(filter(mf_dn_tmp, 1, bb_try(cfg_alpha.dn_start:dn_end_tmp)));
+                m = max(c_up) + max(c_dn);
+                if m > best_metric
+                    best_metric = m;
+                    best_a = ac;
+                end
+            end
+            alpha_lfm = best_a;
+        end
+
         % R1 保留：up-LFM peak 复数值，sync_peak 基于 up 峰
         corr_est = filter(mf_lfm, 1, bb_raw);  % up 相关（用于 R1 复数值）
         corr_est_abs = abs(corr_est);
@@ -324,7 +352,14 @@ for fi = 1:size(fading_cfgs,1)
             Rcp = Rcp + sum(rc(bs2+1:bs2+blk_cp) .* conj(rc(bs2+blk_fft+1:bi2*sym_per_block)));
         end
         alpha_cp = angle(Rcp) / (2*pi*fc*blk_fft/sym_rate);
-        alpha_est = alpha_lfm + alpha_cp;
+        % 【2026-04-21】CP 精修 ±2.4e-4 相位模糊阈值，大 α 下 estimator 残余 > 阈值 → wrap
+        % 跳过 CP 精修，直接用 alpha_lfm（少 ~2% 精度但避免 wrap 错方向）
+        cp_threshold = 1 / (2*fc*blk_fft/sym_rate);  % ≈ 2.44e-4 for blk=1024
+        if abs(alpha_lfm) > 1.5e-2 || abs(alpha_cp) > 0.7 * cp_threshold
+            alpha_est = alpha_lfm;  % 大 α 或 CP 接近 wrap：跳过 CP 精修
+        else
+            alpha_est = alpha_lfm + alpha_cp;  % 正常小 α 路径
+        end
         % 【诊断开关】bench_oracle_alpha：用 α 真值做主补偿
         if exist('bench_oracle_alpha','var') && bench_oracle_alpha
             alpha_lfm = dop_rate;
