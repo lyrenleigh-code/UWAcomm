@@ -1,11 +1,22 @@
 ---
 tags: [结论, 技术决策]
-updated: 2026-04-19
+updated: 2026-04-22
 ---
 
 # 关键技术结论
 
 累积记录项目中得出的技术结论，作为后续决策依据。
+
+## `comp_resample_spline` α<0 本征不对称修复（2026-04-22，V7.1，详见 [[modules/10_DopplerProc/resample-negative-alpha-fix]]）
+
+- **根因**：V7.0 当 α<0 时 `pos = (1:N)/(1-|α|) > N`，`pos_clamped = min(pos, N)` 导致
+  尾部 |α|·N 样本全被 clamp 到 y(N) 单一值 → 尾部灾难性破坏
+- **诊断**：首次跳出 pipeline 做纯函数单元测试（`test_resample_doppler_error.m`），
+  QPSK-RRC oracle α 下 NMSE +α vs -α 差异 **75-83 dB**（|α|≥1e-2），tail_RMS 暴涨 4 个数量级
+- **修复**：V7.1 单处 5 行 patch，检测 `pos_max > N` 时内部 zero-pad y 尾部，对调用方透明
+- **结果**：单元层面 NMSE 对称性差异 **75-83 → <3 dB**；SC-FDE α=-3e-2 BER **2.66% → 0%**
+- **历史地位**：闭合 2026-04-20~21 多次 "α<0 非对称 疑似 spline/尾部" 诊断循环的真根因
+- **教训**：Oracle pipeline 诊断"某层没问题"的前提是输入符合该层隐含假设（silent failure 陷阱）
 
 ## DSSS 符号级 Doppler 跟踪（2026-04-22，Sun-2020 JCIN 2020）
 

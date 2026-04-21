@@ -2,6 +2,26 @@
 
 ## 2026-04-22
 
+- **`comp_resample_spline` V7.1 α<0 本征不对称修复**
+  - spec: `specs/active/2026-04-22-resample-negative-alpha-asymmetry.md`
+  - 诊断脚本：`modules/10_DopplerProc/test_resample_doppler_error.m`（单元表征）
+  - 根因：V7.0 `pos_clamped = min(pos, N)` 在 α<0 时尾部 |α|·N 样本全被 clamp 到 y(N)，
+    QPSK-RRC |α|≥1e-2 NMSE +α vs -α 差 75-83 dB（单元级），尾部 RMS 暴涨 4 个数量级
+  - 修复：V7.1 单处 5 行 patch，检测 `pos_max > N` 时内部 zero-pad y 尾部
+  - 验证：单元 NMSE 差异 75-83→<3 dB；D 阶段 SC-FDE α=-3e-2 BER 2.66%→**0%**；
+    OFDM/DSSS/FH-MFSK 首次 D α 扫描完成（65 行 CSV）
+  - 回流：`wiki/modules/10_DopplerProc/resample-negative-alpha-fix.md` + conclusions.md 新条目
+  - 历史：闭合 2026-04-20~21 多次"α<0 非对称，疑似 spline/尾部"诊断循环的真根因
+
+- **P4 真实多普勒 fork + gen_doppler_channel V1.1 相位修复（调试中）**
+  - spec: `specs/active/2026-04-22-p4-real-doppler-fork.md`，plan 同名
+  - 已完成：P3 refactor 收尾（Step 2+3，主文件 1832→1359）+ P4 fork 16 文件 + 接入 gen_doppler_channel
+  - 发现 V1.0 bug：基带相位公式 `α·fs·t`（fs/fc=4× 过快） → P4 dop=12Hz 实际等价 P3 dop=48Hz → 碰 4-20 诊断的 24Hz 断崖
+  - V1.1 修复：新增 `fc` 可选参数，相位改 `2π·fc·cumsum(α_t)/fs`，t_stretched 起点 0，`snr_db=Inf` 跳过内部加噪
+  - 单元 case 6 通过；UI 实测待用户数据
+  - 诊断工具：`tests/diag_p4_doppler_isolate.m`（DC 基带 FFT 峰位 + MATLAB 缓存 + t_stretched 对齐 + paths roundtrip）
+  - 回流：`wiki/debug-logs/14_Streaming/流式调试日志.md` 坑 8
+
 - **DSSS 符号级 Doppler 跟踪（Sun-2020）**（spec `2026-04-22-dsss-symbol-doppler-tracking.md`）
   - 新模块：`est_alpha_dsss_symbol.m`（Sun-2020 JCIN 2020）+ `comp_resample_piecewise.m`
   - 原理：相邻 Gold31 peak 时差 → 瞬时 α；三点余弦内插 + IIR 平滑

@@ -88,7 +88,7 @@
 | sync_detect | V2.0.0 | ✅ | 含 doppler 方法 |
 | sync_dual_hfm | V1.1.0 | ✅ | α 公式修正 |
 | phase_track | V1.0.0 | ✅ | PLL/DFPT/Kalman |
-| comp_resample_spline | V7.0.0 | ✅ | 正 α = 时间压缩 |
+| comp_resample_spline | **V7.1.0** | ✅ | 正 α = 时间压缩；**V7.1（2026-04-22）新增 α<0 auto-pad，单元 NMSE 对称性 75-83→<3 dB** |
 | **comp_resample_farrow** | **V5.0.0** | ✅ | 方向统一（2026-04-19 代码审查 HIGH-3 修复） |
 | **decode_convergence** | **V1.0.0** | ✅ | 三选一收敛判据 helper（新建，供全体 decoder 扩散） |
 | **detect_frame_stream** | **V1.0.0** | ✅ | P3 流式 HFM+ 匹配滤波帧检测（本次新建） |
@@ -112,7 +112,7 @@
 |------|------|------|
 | **P3 demo Doppler 链路接入** | 待做 | `app.doppler_edit` 字段 UI 有但 TX 链路未用；spec 预占位 `2026-04-18-p3-doppler-integration.md`（待创建） |
 | **α estimator 符号约定参数化** | 待做 | `est_alpha_dual_chirp` 当前与 `gen_uwa_channel.doppler_rate` 反号，runner 里 hack `-alpha_lfm_raw`；建议在 estimator 内加 `sign_convention` 参数 |
-| **α<0 不对称修复** | 待做 | D 阶段 α=-3e-2 BER=3%，+3e-2 BER=50%；疑似 rx 尾部 spline/truncation，需独立 debug |
+| ~~**α<0 不对称修复**（resample 层）~~ | ✅ 2026-04-22 | spec `2026-04-22-resample-negative-alpha-asymmetry.md`；根因 = `comp_resample_spline` 边界 clamp；V7.1 auto-pad 解决；单元 NMSE 差异 75-83→<3 dB，SC-FDE α=-3e-2 BER 2.66%→0%。**下游链路不对称**（DSSS/FH-MFSK/OFDM α 符号敏感）属独立 spec |
 | ~~**α=3e-2 物理极限突破**~~ | ✅ 完成（2026-04-21） | 诊断显示 Oracle 下 pipeline 无问题，根因是 estimator 2% 系统偏差 + CP wrap；3 patch 修复让 α=+3e-2 BER 50% → 5.4%，工作范围扩到 15→45 m/s |
 | **14_Streaming 去 Oracle α**（推广 13 的盲估计） | 待做 | 14_Streaming/P2/P3 仍 oracle α（从 chinfo 读），需将 13_SourceCode 的双 LFM + 迭代推广，属 `2026-04-16-deoracle-rx-parameters` 范畴 |
 | **SC-FDE runner oracle 清理** | 待做 | `test_scfde_timevarying.m:229` 仍用 `all_cp_data(1:10)` 做 sps 相位选择，属 §7 oracle 泄漏 |
