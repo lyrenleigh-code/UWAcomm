@@ -1,5 +1,15 @@
 # Wiki 操作日志
 
+## 2026-04-21
+
+- **摄入 6 篇 Doppler 论文**（/ingest 批量）
+  - [[yang-2026-uwa-otfs-nonuniform-doppler]] — UWA OTFS 非均匀 Doppler 建模 + off-grid block-sparse 估计（IEEE JOE 2026，哈工程）— **OTFS 32% BER debug 的关键理论参考**，直接解释离散 Doppler 下径间 Δν 导致 on-grid 假设失败
+  - [[zheng-2025-dd-turbo-sc-uwa]] — DD 域 MMSE Turbo 均衡 + 单载波低 PAPR（IEEE JOE 2025）— 潜在 `turbo_equalizer_scfde` 升级路径
+  - [[wei-2020-dual-hfm-speed-spectrum]] — 双 HFM + 速度谱扫描（IEEE SPL 2020）— 项目 `est_alpha_dual_chirp` 思路来源正式引用
+  - [[muzzammil-2019-cpofdm-doppler-interp]] — CP-OFDM 自相关闭式 + 3 种细内插（ICICSP 2019，哈工程）— 对应 `est_doppler_cp` 理论支撑
+  - [[sun-2020-dsss-passband-doppler-tracking]] — DSSS 符号级通带 Doppler 跟踪（JCIN 2020，哈工程）— 未来 DSSS 时变改造参考
+  - [[lalevee-2025-dichotomic-doppler-fpga]] — 滤波器组二分搜索 FPGA 实现（OCEANS 2025）— 工程实现参考（低优先）
+
 ## 2026-04-20
 
 - **α 补偿 Pipeline 诊断 + 迭代 α refinement（SC-FDE）**（spec `2026-04-20-alpha-compensation-pipeline-debug.md`）

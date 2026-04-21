@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
-> 最后更新：2026-04-20
-> 页面总数：43（新增 modules/10_DopplerProc/α补偿pipeline诊断.md）
+> 最后更新：2026-04-21
+> 页面总数：49（新增 6 篇 Doppler 论文 source-summary）
 
 ## Architecture（架构页）
 
@@ -44,3 +44,12 @@
 - `figures/D_*.png` — 恒定 α 估计器诊断图（见 spec `2026-04-19-constant-doppler-isolation.md`，2026-04-19）
 
 ## Source Summaries（资料摘要页）
+
+### Doppler 估计与补偿（2026-04-21 摄入，6 篇）
+
+- [yang-2026-uwa-otfs-nonuniform-doppler](source-summaries/yang-2026-uwa-otfs-nonuniform-doppler.md) — UWA OTFS 非均匀 Doppler 建模 + off-grid block-sparse 估计（**OTFS 32% debug 关键参考**，哈工程）
+- [zheng-2025-dd-turbo-sc-uwa](source-summaries/zheng-2025-dd-turbo-sc-uwa.md) — DD 域 Turbo 均衡 + 单载波低 PAPR 结合（IEEE JOE 2025）
+- [wei-2020-dual-hfm-speed-spectrum](source-summaries/wei-2020-dual-hfm-speed-spectrum.md) — 双 HFM + 速度谱扫描高精度 α 估计（**项目 est_alpha_dual_chirp 思路来源**）
+- [muzzammil-2019-cpofdm-doppler-interp](source-summaries/muzzammil-2019-cpofdm-doppler-interp.md) — CP-OFDM 自相关闭式 + 3 种细内插（哈工程）
+- [sun-2020-dsss-passband-doppler-tracking](source-summaries/sun-2020-dsss-passband-doppler-tracking.md) — DSSS 符号级通带 Doppler 跟踪（哈工程）
+- [lalevee-2025-dichotomic-doppler-fpga](source-summaries/lalevee-2025-dichotomic-doppler-fpga.md) — 滤波器组二分搜索 FPGA 实现（OCEANS 2025）
