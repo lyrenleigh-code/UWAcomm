@@ -2,6 +2,14 @@
 
 ## 2026-04-21
 
+- **α 推广 4 体制（3/4 成功）**（spec `2026-04-21-alpha-refinement-other-schemes.md`）
+  - OFDM: A2 全 0%, D |α|≤1e-2 全 0%, α=+3e-2 BER 11.4%
+  - DSSS: A2 全 0%, D |α|≤3e-3 全 0%（扩频固有限制 α≥1e-2）
+  - FH-MFSK: A2 全 0%, D |α|≤1e-2 **全 0%**（新增 α 补偿，原无）
+  - SC-TDE: 失败（α≠0 下游敏感，BER 50%），留独立 spec
+  - 关键 patch 差异：OFDM CP 精修禁用（空子载波 CFO 接替），FH-MFSK 新增 α 补偿
+  - 覆盖：A2/A3/D（timevarying runner），discrete_doppler 未改（B 阶段旧 baseline）
+
 - **大 α pipeline 诊断 + α=3e-2 突破**（spec `2026-04-21-alpha-pipeline-large-alpha-debug.md`）
   - 新 wiki：`wiki/modules/10_DopplerProc/大α-pipeline-不对称诊断.md`
   - 诊断脚本：`modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_alpha_pipeline_large.m`

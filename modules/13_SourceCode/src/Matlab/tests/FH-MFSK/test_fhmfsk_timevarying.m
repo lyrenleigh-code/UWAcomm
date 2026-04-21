@@ -80,8 +80,13 @@ HFM_bb_neg = exp(1j*(ph_neg - 2*pi*fc*t_pre));
 chirp_rate_lfm=(f_hi-f_lo)/preamble_dur;
 phase_lfm=2*pi*(f_lo*t_pre + 0.5*chirp_rate_lfm*t_pre.^2);
 LFM_bb = exp(1j*(phase_lfm - 2*pi*fc*t_pre));
+% 【P1 2026-04-21】LFM- 基带版本（down-chirp，激活 est_alpha_dual_chirp）
+phase_lfm_neg = 2*pi*(f_hi*t_pre - 0.5*chirp_rate_lfm*t_pre.^2);
+LFM_bb_neg = exp(1j*(phase_lfm_neg - 2*pi*fc*t_pre));
 N_lfm = length(LFM_bb);
-guard_samp = round(max(delays_s)*fs) + 80;
+% 【P2 2026-04-21】guard 扩展
+alpha_max_design = 3e-2;
+guard_samp = round(max(delays_s)*fs) + 80 + ceil(alpha_max_design * max(N_preamble, N_lfm));
 
 % LFM标称位置
 lfm1_peak_nom = 2*N_preamble + 2*guard_samp + N_lfm;
@@ -177,11 +182,15 @@ for fi = 1:size(fading_cfgs,1)
     [fsk_pb_ref,~] = upconvert(fsk_bb, fs, fc);
     data_rms = sqrt(mean(fsk_pb_ref.^2));
     lfm_scale = data_rms / sqrt(mean(HFM_pb.^2));
-    HFM_bb_n=HFM_bb*lfm_scale; HFM_bb_neg_n=HFM_bb_neg*lfm_scale; LFM_bb_n=LFM_bb*lfm_scale;
+    HFM_bb_n=HFM_bb*lfm_scale; HFM_bb_neg_n=HFM_bb_neg*lfm_scale;
+    LFM_bb_n=LFM_bb*lfm_scale; LFM_bb_neg_n=LFM_bb_neg*lfm_scale;  % 【P3】
 
-    % 帧组装
+    % 【P3 2026-04-21】帧 LFM2→down
     frame_bb = [HFM_bb_n, zeros(1,guard_samp), HFM_bb_neg_n, zeros(1,guard_samp), ...
-                LFM_bb_n, zeros(1,guard_samp), LFM_bb_n, zeros(1,guard_samp), fsk_bb];
+                LFM_bb_n, zeros(1,guard_samp), LFM_bb_neg_n, zeros(1,guard_samp), fsk_bb];
+    % 【P6 2026-04-21】TX 默认 tail padding
+    default_tail_pad = ceil(alpha_max_design * length(frame_bb) * 1.5);
+    frame_bb = [frame_bb, zeros(1, default_tail_pad)];
 
     %% ===== 信道 ===== %%
     ch_params = struct('fs',fs, 'delay_profile','custom', ...
@@ -195,9 +204,61 @@ for fi = 1:size(fading_cfgs,1)
 
     % 无噪声sync
     mf_lfm = conj(fliplr(LFM_bb_n));
+    mf_lfm_neg = conj(fliplr(LFM_bb_neg_n));  % 【P5】
     lfm2_search_len = min(3*N_preamble+4*guard_samp+2*N_lfm, length(rx_bb_frame));
     [bb_clean,~] = downconvert(rx_pb_clean, fs, fc, total_bw);
-    corr_c = abs(filter(mf_lfm, 1, bb_clean));
+
+    % 【P4 2026-04-21】双 LFM 时延差 α 估计 + 迭代 refinement
+    if isempty(which('est_alpha_dual_chirp'))
+        dop_dir = fullfile(fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))))), ...
+                            '10_DopplerProc','src','Matlab');
+        addpath(dop_dir);
+    end
+    cfg_alpha = struct();
+    cfg_alpha.up_start = max(1, lfm1_peak_nom - lfm_search_margin);
+    cfg_alpha.up_end   = min(lfm1_peak_nom + lfm_search_margin, length(bb_clean));
+    cfg_alpha.dn_start = max(1, lfm2_peak_nom - lfm_search_margin);
+    cfg_alpha.dn_end   = min(lfm2_peak_nom + lfm_search_margin, length(bb_clean));
+    cfg_alpha.nominal_delta_samples = N_lfm + guard_samp;
+    cfg_alpha.use_subsample = true;
+    k_chirp = chirp_rate_lfm;
+    [alpha_raw, ~] = est_alpha_dual_chirp(bb_clean, LFM_bb_n, LFM_bb_neg_n, ...
+                                           fs, fc, k_chirp, cfg_alpha);
+    alpha_est_fh = -alpha_raw;
+    if ~exist('bench_alpha_iter','var') || isempty(bench_alpha_iter)
+        bench_alpha_iter = 2;
+    end
+    if bench_alpha_iter > 0 && abs(alpha_est_fh) > 1e-10
+        for iter_a = 1:bench_alpha_iter
+            bb_iter = comp_resample_spline(bb_clean, alpha_est_fh, fs, 'fast');
+            [delta_raw, ~] = est_alpha_dual_chirp(bb_iter, LFM_bb_n, LFM_bb_neg_n, ...
+                                                  fs, fc, k_chirp, cfg_alpha);
+            alpha_est_fh = alpha_est_fh + (-delta_raw);
+        end
+    end
+    % 【P8】正向大 α 精扫
+    if alpha_est_fh > 1.5e-2
+        a_candidates = alpha_est_fh + (-2e-3 : 2e-4 : 2e-3);
+        best_metric = -inf; best_a = alpha_est_fh;
+        for ac = a_candidates
+            bb_try = comp_resample_spline(bb_clean, ac, fs, 'fast');
+            up_end_t = min(cfg_alpha.up_end, length(bb_try));
+            dn_end_t = min(cfg_alpha.dn_end, length(bb_try));
+            c_up = abs(filter(mf_lfm, 1, bb_try(cfg_alpha.up_start:up_end_t)));
+            c_dn = abs(filter(mf_lfm_neg, 1, bb_try(cfg_alpha.dn_start:dn_end_t)));
+            m = max(c_up) + max(c_dn);
+            if m > best_metric, best_metric = m; best_a = ac; end
+        end
+        alpha_est_fh = best_a;
+    end
+
+    % 精补偿 + LFM2 定时（用 mf_lfm_neg）
+    if abs(alpha_est_fh) > 1e-10
+        bb_comp_clean = comp_resample_spline(bb_clean, alpha_est_fh, fs, 'fast');
+    else
+        bb_comp_clean = bb_clean;
+    end
+    corr_c = abs(filter(mf_lfm_neg, 1, bb_comp_clean(1:min(lfm2_search_len,length(bb_comp_clean)))));
     c2_lo=max(1,lfm2_peak_nom-lfm_search_margin);
     c2_hi=min(lfm2_peak_nom+lfm_search_margin,length(corr_c));
     [~,l2]=max(corr_c(c2_lo:c2_hi));
@@ -215,7 +276,12 @@ for fi = 1:size(fading_cfgs,1)
         % 1. 下变频
         [bb_raw,~] = downconvert(rx_pb, fs, fc, total_bw);
 
-        % 2. 数据段提取（无多普勒补偿——能量检测天然不需要相位）
+        % 【2026-04-21】α 补偿（原 FH-MFSK 跳过，但 α≥2e-3 下 data 段时间基准漂移破坏跳频 FFT bin）
+        if abs(alpha_est_fh) > 1e-10
+            bb_raw = comp_resample_spline(bb_raw, alpha_est_fh, fs, 'fast');
+        end
+
+        % 2. 数据段提取
         ds = lfm_pos + data_offset;
         de = ds + N_data_samples - 1;
         if de > length(bb_raw)

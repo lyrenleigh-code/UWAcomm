@@ -74,8 +74,13 @@ HFM_bb_neg = exp(1j*(phase_hfm_neg - 2*pi*fc*t_pre));
 chirp_rate_lfm = (f_hi - f_lo) / preamble_dur;
 phase_lfm = 2*pi * (f_lo * t_pre + 0.5 * chirp_rate_lfm * t_pre.^2);
 LFM_bb = exp(1j*(phase_lfm - 2*pi*fc*t_pre));
+% 【P1 2026-04-21】LFM- 基带版本（down-chirp，激活 est_alpha_dual_chirp）
+phase_lfm_neg = 2*pi * (f_hi * t_pre - 0.5 * chirp_rate_lfm * t_pre.^2);
+LFM_bb_neg = exp(1j*(phase_lfm_neg - 2*pi*fc*t_pre));
 N_lfm = length(LFM_bb);
-guard_samp = max(sym_delays) * sps + 80;
+% 【P2 2026-04-21】guard 扩展容纳 α=3e-2 下 LFM peak 漂移
+alpha_max_design = 3e-2;
+guard_samp = max(sym_delays) * sps + 80 + ceil(alpha_max_design * max(N_preamble, N_lfm));
 
 %% ===== 调试开关 ===== %%
 use_oracle_h = false;   % true=用oracle H跳过OMP，验证均衡器本身
@@ -177,10 +182,14 @@ for fi = 1:size(fading_cfgs,1)
     HFM_bb_n = HFM_bb * lfm_scale;
     HFM_bb_neg_n = HFM_bb_neg * lfm_scale;
     LFM_bb_n = LFM_bb * lfm_scale;
+    LFM_bb_neg_n = LFM_bb_neg * lfm_scale;  % 【P3 2026-04-21】
 
-    % 帧组装：[HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]
+    % 帧组装：[HFM+|g|HFM-|g|LFM_up|g|LFM_dn|g|data]（P3：LFM2→down）
     frame_bb = [HFM_bb_n, zeros(1,guard_samp), HFM_bb_neg_n, zeros(1,guard_samp), ...
-                LFM_bb_n, zeros(1,guard_samp), LFM_bb_n, zeros(1,guard_samp), shaped_bb];
+                LFM_bb_n, zeros(1,guard_samp), LFM_bb_neg_n, zeros(1,guard_samp), shaped_bb];
+    % 【P6 2026-04-21】TX 默认 tail padding
+    default_tail_pad = ceil(alpha_max_design * length(frame_bb) * 1.5);
+    frame_bb = [frame_bb, zeros(1, default_tail_pad)];
     T_v_lfm = (N_lfm + guard_samp) / fs;  % LFM1头到LFM2头间隔(秒)
     lfm_data_offset = N_lfm + guard_samp;  % LFM2头到data头的距离
 
@@ -233,19 +242,63 @@ for fi = 1:size(fading_cfgs,1)
         mf_lfm = conj(fliplr(LFM_bb_n));
         lfm2_search_len = min(3*N_preamble + 4*guard_samp + 2*N_lfm, length(bb_raw));
         lfm2_start = 2*N_preamble + 2*guard_samp + N_lfm + 1;
+        lfm1_end = 2*N_preamble + 2*guard_samp + N_lfm + guard_samp;
+        lfm1_search_start = 2*N_preamble + 2*guard_samp + 1;
 
-        % LFM相位法粗估（峰位稳定，不随N_blocks变；搜索范围跳过HFM区域）
+        % 【P4 2026-04-21】双 LFM 时延差法 α 估计 + 迭代 refinement
+        if isempty(which('est_alpha_dual_chirp'))
+            dop_dir = fullfile(fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))))), ...
+                                '10_DopplerProc','src','Matlab');
+            addpath(dop_dir);
+        end
+        cfg_alpha = struct();
+        cfg_alpha.up_start = lfm1_search_start;
+        cfg_alpha.up_end   = lfm1_end;
+        cfg_alpha.dn_start = lfm2_start;
+        cfg_alpha.dn_end   = min(lfm2_search_len, length(bb_raw));
+        cfg_alpha.nominal_delta_samples = N_lfm + guard_samp;
+        cfg_alpha.use_subsample = true;
+        k_chirp = chirp_rate_lfm;
+        [alpha_lfm_raw, alpha_diag] = est_alpha_dual_chirp(bb_raw, LFM_bb_n, LFM_bb_neg_n, ...
+                                                            fs, fc, k_chirp, cfg_alpha);
+        alpha_lfm = -alpha_lfm_raw;
+        % 迭代 refinement（默认 2 次）
+        if ~exist('bench_alpha_iter','var') || isempty(bench_alpha_iter)
+            bench_alpha_iter = 2;
+        end
+        if bench_alpha_iter > 0 && abs(alpha_lfm) > 1e-10
+            for iter_a = 1:bench_alpha_iter
+                bb_iter = comp_resample_spline(bb_raw, alpha_lfm, fs, 'fast');
+                [delta_raw, ~] = est_alpha_dual_chirp(bb_iter, LFM_bb_n, LFM_bb_neg_n, ...
+                                                      fs, fc, k_chirp, cfg_alpha);
+                alpha_lfm = alpha_lfm + (-delta_raw);
+            end
+        end
+        % 【P8 2026-04-21】正向大 α 精扫（α_lfm>1.5e-2 时启用）
+        if alpha_lfm > 1.5e-2
+            mf_up_tmp = conj(fliplr(LFM_bb_n));
+            mf_dn_tmp = conj(fliplr(LFM_bb_neg_n));
+            a_candidates = alpha_lfm + (-2e-3 : 2e-4 : 2e-3);
+            best_metric = -inf; best_a = alpha_lfm;
+            for ac = a_candidates
+                bb_try = comp_resample_spline(bb_raw, ac, fs, 'fast');
+                up_end_t = min(cfg_alpha.up_end, length(bb_try));
+                dn_end_t = min(cfg_alpha.dn_end, length(bb_try));
+                c_up = abs(filter(mf_up_tmp, 1, bb_try(cfg_alpha.up_start:up_end_t)));
+                c_dn = abs(filter(mf_dn_tmp, 1, bb_try(cfg_alpha.dn_start:dn_end_t)));
+                m = max(c_up) + max(c_dn);
+                if m > best_metric, best_metric = m; best_a = ac; end
+            end
+            alpha_lfm = best_a;
+        end
+        % R1/p1_idx/p2_idx 保留旧变量（下游使用）
         corr_est = filter(mf_lfm, 1, bb_raw);
         corr_est_abs = abs(corr_est);
-        lfm1_end = 2*N_preamble + 2*guard_samp + N_lfm + guard_samp;
-        lfm1_search_start = 2*N_preamble + 2*guard_samp + 1;  % 跳过HFM+/-区域
-        [~, p1_rel] = max(corr_est_abs(lfm1_search_start:min(lfm1_end, length(corr_est_abs))));
-        p1_idx = lfm1_search_start + p1_rel - 1;
+        p1_idx = alpha_diag.tau_up;
+        p2_idx = alpha_diag.tau_dn;
+        R1 = corr_est(p1_idx);
+        R2 = NaN;
         T_v_samp = round(T_v_lfm * fs);
-        [~, p2_rel] = max(corr_est_abs(lfm2_start:min(lfm2_search_len, length(corr_est_abs))));
-        p2_idx = lfm2_start + p2_rel - 1;
-        R1 = corr_est(p1_idx); R2 = corr_est(p2_idx);
-        alpha_lfm = angle(R2 * conj(R1)) / (2*pi*fc*T_v_lfm);
         sync_peak = abs(R1) / sum(abs(LFM_bb_n).^2);
 
         % 粗补偿+粗提取（仅用于CP估计）
@@ -270,18 +323,10 @@ for fi = 1:size(fading_cfgs,1)
         if length(rc)>N_total_sym, rc=rc(1:N_total_sym);
         elseif length(rc)<N_total_sym, rc=[rc,zeros(1,N_total_sym-length(rc))]; end
 
-        % CP精估（仅静态信道；时变信道跳过——CP相位被Jakes污染，反而引入错误修正）
-        if strcmpi(ftype, 'static')
-            Rcp = 0;
-            for bi2 = 1:N_blocks
-                bs2 = (bi2-1)*sym_per_block;
-                Rcp = Rcp + sum(rc(bs2+1:bs2+blk_cp) .* conj(rc(bs2+blk_fft+1:bi2*sym_per_block)));
-            end
-            alpha_cp = angle(Rcp) / (2*pi*fc*blk_fft/sym_rate);
-            alpha_est = alpha_lfm + alpha_cp;
-        else
-            alpha_est = alpha_lfm;  % 时变：仅用LFM粗估，残余由BEM跟踪
-        end
+        % 【P7 2026-04-21】OFDM 禁用 CP 精修（有空子载波 CFO 精修接替，CP 精修有系统偏差）
+        % （SC-TDE/DSSS/FH-MFSK 本来就不用 CP 精修）
+        alpha_cp = 0;
+        alpha_est = alpha_lfm;
 
         % ---- Round 2: 精补偿 + 最终提取 ----
         if abs(alpha_est) > 1e-10
@@ -290,7 +335,9 @@ for fi = 1:size(fading_cfgs,1)
             bb_comp = bb_raw;
         end
 
-        corr_lfm_comp = abs(filter(mf_lfm, 1, bb_comp(1:min(lfm2_search_len,length(bb_comp)))));
+        % 【P5 2026-04-21】LFM2 定时改用 down-chirp 模板
+        mf_lfm_neg = conj(fliplr(LFM_bb_neg_n));
+        corr_lfm_comp = abs(filter(mf_lfm_neg, 1, bb_comp(1:min(lfm2_search_len,length(bb_comp)))));
         [~, lfm2_local] = max(corr_lfm_comp(lfm2_start:end));
         lfm2_peak_idx = lfm2_start + lfm2_local - 1;
         lfm_pos = lfm2_peak_idx - N_lfm + 1;

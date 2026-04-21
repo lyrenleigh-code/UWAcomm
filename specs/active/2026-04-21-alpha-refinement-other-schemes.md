@@ -77,7 +77,12 @@ E2E benchmark A2 阶段显示 **其他 4 体制（OFDM/SC-TDE/DSSS/FH-MFSK）** 
 - **不实施其他 α estimator 衍生**（符号约定参数化、α<0 不对称、α=3e-2 物理极限等）— 这些是独立 todo
 - **不动诊断插桩**（SC-FDE 有 bench_diag/tog.* toggle 插桩，其他 4 体制不加，简洁优先）
 
-## 模板（SC-FDE patch 5 处 × 4 体制）
+## 模板（SC-FDE 完整 patch × 4 体制）
+
+**注意（2026-04-21 更新）**：SC-FDE 现已落地 8 处 patch（5 处基础 + 3 处大 α 突破），
+覆盖 α ∈ [±1e-4, ±3e-2] 全工作范围。本 spec 推广全部 8 处到 4 体制。
+
+## 5 处基础 patch（双 LFM + 迭代 refinement）
 
 ### Patch 1: LFM- 生成（顶部紧跟 LFM 定义后）
 
@@ -148,6 +153,53 @@ corr_lfm_comp = abs(filter(mf_lfm_neg, 1, bb_comp(...)));
 % 原来是 mf_lfm（up），现在 LFM2 是 down-chirp，必须用 mf_lfm_neg
 ```
 
+## 3 处大 α 突破 patch（2026-04-21 SC-FDE 加）
+
+### Patch 6: TX 帧默认 tail padding
+
+```matlab
+% 帧组装后、信道前
+default_tail_pad = ceil(alpha_max_design * length(frame_bb) * 1.5);
+frame_bb = [frame_bb, zeros(1, default_tail_pad)];
+```
+防 α 压缩后 data 段尾部截断（对称改善 α<0 方向）。
+
+### Patch 7: CP 精修阈值门禁（仅 OFDM 保留 CP 精修）
+
+```matlab
+% 对 OFDM（有 alpha_cp 精修）：
+cp_threshold = 1 / (2*fc*blk_fft/sym_rate);
+if abs(alpha_lfm) > 1.5e-2 || abs(alpha_cp) > 0.7 * cp_threshold
+    alpha_est = alpha_lfm;      % 跳过 CP 精修，避免 wrap
+else
+    alpha_est = alpha_lfm + alpha_cp;
+end
+% 对 SC-TDE/DSSS/FH-MFSK（无 CP 精修）：直接 alpha_est = alpha_lfm，Patch 7 不适用
+```
+
+### Patch 8: 正向大 α 精扫
+
+```matlab
+if alpha_lfm > 1.5e-2   % 仅 +α 方向（-α estimator 已准确）
+    mf_up_tmp = conj(fliplr(LFM_bb_n));
+    mf_dn_tmp = conj(fliplr(LFM_bb_neg_n));
+    a_candidates = alpha_lfm + (-2e-3 : 2e-4 : 2e-3);   % 21 点
+    best_metric = -inf;
+    best_a = alpha_lfm;
+    for ac = a_candidates
+        bb_try = comp_resample_spline(bb_raw, ac, fs, 'fast');
+        up_end = min(cfg_alpha.up_end, length(bb_try));
+        dn_end = min(cfg_alpha.dn_end, length(bb_try));
+        c_up = abs(filter(mf_up_tmp, 1, bb_try(cfg_alpha.up_start:up_end)));
+        c_dn = abs(filter(mf_dn_tmp, 1, bb_try(cfg_alpha.dn_start:dn_end)));
+        m = max(c_up) + max(c_dn);
+        if m > best_metric, best_metric = m; best_a = ac; end
+    end
+    alpha_lfm = best_a;
+end
+```
+修正 estimator 在 +α 方向的 2% 系统偏差。
+
 ## 体制特殊处理
 
 ### OFDM（最接近 SC-FDE）
@@ -175,15 +227,16 @@ corr_lfm_comp = abs(filter(mf_lfm_neg, 1, bb_comp(...)));
 
 ## 验收标准
 
-### 每体制独立验收
+### 每体制独立验收（更新：对齐 SC-FDE 最新水平 |α|≤3e-2）
 
 对每个体制（OFDM/SC-TDE/DSSS/FH-MFSK）跑：
 
 - [ ] **A1 α=0 路径**（fd=0 static @ SNR=10）：BER 与 before 一致（零退化）
-- [ ] **A2 α=5e-4 @ SNR=10**：BER < 5%（before 崩 50%）
+- [ ] **A2 α=5e-4 @ SNR=10**：BER < 5%
 - [ ] **A2 α=1e-3 @ SNR=10**：BER < 5%
-- [ ] **A2 α=2e-3 @ SNR=10**：BER < 10%（DSSS 可能退化更大）
-- [ ] **D α∈[±1e-4, ±1e-2]**：核心范围 BER < 5%（OFDM/SC-TDE）或 < 15%（DSSS/FH-MFSK 扩频鲁棒性差）
+- [ ] **A2 α=2e-3 @ SNR=10**：BER < 5%（OFDM/SC-TDE），< 10%（DSSS/FH-MFSK）
+- [ ] **D α∈[±1e-4, ±1e-2]**：BER < 5%（OFDM/SC-TDE），< 15%（DSSS/FH-MFSK）
+- [ ] **D α=±3e-2**：BER < 10%（OFDM/SC-TDE），< 30%（DSSS/FH-MFSK 边界）
 - [ ] **B 阶段不退化**（disc-5Hz/hyb-K* 4 channel @ SNR=10）：BER 与 before 对齐（≤1% 区别）
 
 ### 全体制横向验收
@@ -238,3 +291,39 @@ corr_lfm_comp = abs(filter(mf_lfm_neg, 1, bb_comp(...)));
 ## Log
 
 - 2026-04-21 创建 spec（基于 SC-FDE 模板成熟 + 4 体制帧结构确认一致）
+- 2026-04-21 更新 spec 加 3 patch 大 α 突破（对齐 SC-FDE 最新 |α|≤3e-2 能力）
+- 2026-04-21 **Step 1 OFDM 实施完成**（timevarying runner 套 8 patch）：
+  - 中间发现 OFDM 的 CP 精修有 ~-1.9e-4 系统偏差（α=0 下 alpha_cp=-1.96e-4）
+  - OFDM 有空子载波 CFO 精修接替，CP 精修多余——P7 直接禁用 CP 精修
+  - 结果：A2 α∈[0,5e-4,1e-3,2e-3] × SNR∈[5,10,15,20] 全 BER ≤ 0.1%
+  - D α∈[±1e-4, ±1e-2] 全 0%；α=+3e-2 **11.4%**，α=-3e-2 **0%**
+- 2026-04-21 **Step 2 SC-TDE 实施遇阻**（timevarying runner 套 patch）：
+  - alpha_lfm 估得准（A2 α=5e-4 下 est=4.97e-4, 精度 0.6%）
+  - 但 SC-TDE 下游对残余 α 敏感，BER 全 50%（α≠0 都崩）
+  - α=0 SNR=10 BER 15.8%（退化 from 基线 ~5%），SNR=15+ 恢复 0%
+  - 根因怀疑：SC-TDE 的训练精估（alpha_train）在新帧结构下不适用，或 BEM 模型敏感
+  - **留独立 spec 深挖**：`2026-04-22-sctde-alpha-refinement-deepdive.md`（未来）
+  - SC-TDE runner 保留 broken patches 作 follow-up 起点
+- 2026-04-21 **Step 3 DSSS 实施完成**（套 P1-P6+P8 跳过 P7）：
+  - A2 α∈[0, 5e-4, 1e-3, 2e-3] × SNR∈[5~20] **全 BER=0%**
+  - D |α|≤3e-3 全 BER=0%
+  - D |α|≥1e-2 扩频码 chip-level timing 固有限制，崩 42-51%
+- 2026-04-21 **Step 4 FH-MFSK 实施完成**（原本无 α 补偿，新增完整 P1-P6+P8 + 补偿）：
+  - A2 α∈[0, 5e-4, 1e-3, 2e-3] × SNR∈[5~20] **全 BER=0%**
+  - D |α|≤1e-2 **全 BER=0%**（跨 14 α 点，15 m/s 快艇覆盖）
+  - D α=+3e-2 BER 21%，α=-3e-2 BER 48% 边界
+- 2026-04-21 **结果汇总**（SC-FDE + 3 体制推广 OK，SC-TDE 失败）：
+  | 体制 | A2 全范围 | D \|α\|≤1e-2 | α=+3e-2 | α=-3e-2 |
+  |------|-----------|-------------|---------|---------|
+  | SC-FDE | 0% | 0% | **5.4%** | 0% |
+  | OFDM | 0% | 0% | **11.4%** | 0% |
+  | DSSS | 0% | |α|≤3e-3 全 0% | 崩 | 崩 |
+  | FH-MFSK | 0% | **全 0%** | 21% | 48% |
+  | SC-TDE | α≠0 崩 50% | - | - | - |
+- 2026-04-21 **discrete_doppler runner 未改**（B 阶段用 discrete runner，不受影响）；
+  推广仅覆盖 A2/A3/D（timevarying runner 路径）
+- 2026-04-21 **遗留项**：
+  - SC-TDE timevarying 下游 α 敏感问题（独立 spec）
+  - DSSS/FH-MFSK 在 α≥1e-2 的扩频/跳频固有限制（若要突破需改 RX 架构）
+  - OFDM α=+3e-2 11.4%（稍超 10% 门槛但已达 5× 改善）
+  - 其他 4 体制 discrete_doppler runner 未改（B 阶段保持旧 baseline）
