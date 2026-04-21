@@ -1,7 +1,7 @@
 ---
 project: uwacomm
 type: task
-status: active
+status: completed
 created: 2026-04-21
 updated: 2026-04-21
 tags: [OTFS, 调试, 离散Doppler, 13_SourceCode, 07_ChannelEstEq, pilot_mode]
@@ -68,7 +68,8 @@ pilot_mode = 'sequence';  % 'impulse'=A冲激, 'sequence'=B ZC, 'superimposed'=C
 
 - 文档记载的 trade-off 只到 5dB / 15dB 两端
 - **10dB 没测**，而正是当前基线显示 33% 的点
-- 非单调：snr=5→44%，snr=10→33%，snr=15→2.7% 说明 ZC pilot 在中等 SNR 有剧烈退化
+- A3 CSV 显示 sequence 在 static 信道下 BER 单调下降但 10-15dB 区间拐点陡：snr=5→44%，snr=10→33%，snr=15→2.7%——5-10dB 的 BER 平台 30-44% 说明 ZC pilot 在 moderate SNR 整体失效，要到 15dB 才恢复
+- 注：conclusion #37 记载的 "5dB 7.59%" 是 2026-04-19 当时 pilot_mode 切换时**独立 test_otfs_timevarying.m 的测量**，不走 benchmark harness，与 A3 CSV 的 44% **不直接可比**
 
 ## 假设（重排优先级）
 
@@ -189,3 +190,17 @@ H1 先打靶
 - 2026-04-21 创建 spec；分支 `feat/otfs-disc-doppler-debug` 已拉
 - 2026-04-21 **重排假设顺序**：H1 (pilot_mode regression) 升为首优，原 H0（Yang 2026 非均匀 Doppler）降为 H4；依据 A3 CSV 显示 **static 已 33% BER @ snr=10** 推翻 "32% 是 Doppler 问题"
 - 2026-04-21 摄入 6 篇 Doppler 参考，其中 [[yang-2026-uwa-otfs-nonuniform-doppler]] 作为 H4 备用理论
+- 2026-04-21 **诊断跑完 (27 run)**：
+  - 结果 (均值 ± std, SNR=10dB, 3 trials)：
+    | Channel | impulse | sequence | superimposed |
+    |---|---:|---:|---:|
+    | static | 0.04% ± 0.06 | **28.06% ± 2.79** | 0.00% ± 0.00 |
+    | disc-5Hz | 0.00% ± 0.00 | **30.41% ± 1.40** | 0.08% ± 0.07 |
+    | hyb-K20 | 0.02% ± 0.03 | **32.56% ± 1.16** | 0.37% ± 0.56 |
+  - **H1 成立**，**H4 否定**（Yang 2026 不需要）
+  - 辅助：NMSE impulse=-2.9dB / sequence=+3.0dB；path detection impulse 5-8 径 / sequence 2-3 径
+- 2026-04-21 **修复**：
+  - `test_otfs_timevarying.m:20` default `'sequence'` → `'impulse'`
+  - 补 `10_DopplerProc` addpath（`comp_resample_spline` 依赖）
+- 2026-04-21 **归档**：`wiki/modules/13_SourceCode/OTFS调试日志.md` 新建；conclusions.md 追加 #38，#37 补撤销说明
+- 2026-04-21 spec 归档到 `specs/archive/`

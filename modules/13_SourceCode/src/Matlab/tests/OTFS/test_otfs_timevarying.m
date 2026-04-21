@@ -17,7 +17,9 @@ use_oracle = false;
 eq_type = 'lmmse';
 uamp_inner = 5;
 passband_mode = true;  % true=通带仿真, false=基带仿真
-pilot_mode = 'sequence';  % 'impulse'=A冲激, 'sequence'=B ZC, 'superimposed'=C叠加
+pilot_mode = 'impulse';   % 'impulse'=A冲激, 'sequence'=B ZC, 'superimposed'=C叠加
+                          % 2026-04-21 回滚：sequence 在 SNR=10dB 下 BER=28-32%（regression）
+                          % 详见 wiki/modules/13_SourceCode/OTFS调试日志.md
 
 fprintf('========================================\n');
 if passband_mode
@@ -35,6 +37,7 @@ addpath(fullfile(proj_root, '06_MultiCarrier', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '07_ChannelEstEq', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '08_Sync', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '09_Waveform', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '10_DopplerProc', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '13_SourceCode', 'src', 'Matlab', 'common'));
 
 %% ========== 参数 ========== %%
