@@ -16,6 +16,9 @@ slprj/
 *.log
 results/
 tmp/
+bench_results/
+diag_results/
+diag_results_large/
 
 # OS
 Thumbs.db
