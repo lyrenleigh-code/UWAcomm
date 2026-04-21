@@ -2,6 +2,25 @@
 
 ## 2026-04-21
 
+- **大 α pipeline 诊断 + α=3e-2 突破**（spec `2026-04-21-alpha-pipeline-large-alpha-debug.md`）
+  - 新 wiki：`wiki/modules/10_DopplerProc/大α-pipeline-不对称诊断.md`
+  - 诊断脚本：`modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_alpha_pipeline_large.m`
+  - 中断的 VSS spec：`specs/active/2026-04-21-hfm-velocity-spectrum-refinement.md`（保留 est_alpha_dual_hfm_vss 代码 + 单元测试作未来入口）
+  - **关键发现**：Oracle α=±3e-2 下 BER=0%（pipeline 完全正常）；根因是 estimator 2% 系统偏差 × CP 精修 wrap，迭代无法突破
+  - **修复（3 patch）**：TX 默认 tail pad + CP 精修阈值门禁 + 正向大 α 精扫
+  - **结果**：α=+3e-2 BER **50% → 5.4%**，α=-3e-2 3% → 0%，|α|≤1e-2 全 0% 维持
+  - **工作范围扩展 1e-2 → 3e-2**（15→45 m/s，鱼雷/高速 AUV 覆盖）
+
+- **OTFS 32% BER 根因定位**（spec `2026-04-21-otfs-disc-doppler-32pct-debug.md`）
+  - 新 wiki：`wiki/modules/13_SourceCode/OTFS调试日志.md`
+  - 诊断脚本：`modules/13_SourceCode/src/Matlab/tests/OTFS/diag_otfs_32pct.m`
+  - 诊断数据：`diag_results/otfs_32pct_diag.mat` + `.txt`
+  - **关键发现**：32% BER 根因是 `pilot_mode='sequence'` 在 SNR=10dB 下的 regression，
+    不是离散 Doppler 非均匀性问题（H4 Yang 2026 理论证伪）
+  - 结果（均值，SNR=10dB）：impulse **0-0.04%**，sequence **28-32%**，superimposed 0-0.4%
+  - 修复：`test_otfs_timevarying.m:20` 默认回滚 `impulse`；补 `10_DopplerProc` addpath
+  - conclusions.md 新增 #38，#37 补撤销说明
+
 - **摄入 6 篇 Doppler 论文**（/ingest 批量）
   - [[yang-2026-uwa-otfs-nonuniform-doppler]] — UWA OTFS 非均匀 Doppler 建模 + off-grid block-sparse 估计（IEEE JOE 2026，哈工程）— **OTFS 32% BER debug 的关键理论参考**，直接解释离散 Doppler 下径间 Δν 导致 on-grid 假设失败
   - [[zheng-2025-dd-turbo-sc-uwa]] — DD 域 MMSE Turbo 均衡 + 单载波低 PAPR（IEEE JOE 2025）— 潜在 `turbo_equalizer_scfde` 升级路径

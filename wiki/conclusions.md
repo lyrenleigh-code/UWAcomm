@@ -7,6 +7,17 @@ updated: 2026-04-19
 
 累积记录项目中得出的技术结论，作为后续决策依据。
 
+## α=3e-2 突破（2026-04-21，详见 [[modules/10_DopplerProc/大α-pipeline-不对称诊断]]）
+
+- **α=+3e-2 BER 50% vs α=-3e-2 3% 不对称根因**：estimator 对 +α 方向系统偏差 2%（残余 7e-4），残余超 CP 精修阈值 2.4e-4 → CP wrap 错方向
+- **Oracle 诊断证明 pipeline 无不对称**（α=±3e-2 Oracle BER 全 0%），不是 pipeline 物理极限
+- **Estimator 迭代 2/5/10/20 次结果恒定**（2% 系统偏差，非收敛速度问题）
+- **Pragmatic 修复 3 处**（不改架构）：
+  1. TX 帧默认 tail padding（防 α 压缩截断）
+  2. CP 精修阈值门禁（|α_lfm|>1.5e-2 或 |α_cp|>0.7×CP_thres 时跳过 CP 精修）
+  3. 正向大 α 精扫（α_lfm>1.5e-2 时 ±2e-3 范围选 LFM peak sum 最大的 α）
+- **结果**：α=+3e-2 BER **50% → 5.4%**，工作范围 1e-2 → **3e-2**（45 m/s 鱼雷/高速 AUV）
+
 ## 迭代 α refinement（2026-04-20，详见 [[modules/10_DopplerProc/α补偿pipeline诊断]]）
 
 - **α=2e-3 断崖 50% BER 根因**：CP 精修 `angle(R_cp)/(2π·fc·T_block)` 有 **±2.4e-4 无模糊阈值**
@@ -94,8 +105,18 @@ updated: 2026-04-19
 35. **LDPC LLR 输出符号统一 (2026-04-19)**：`ldpc_decode` 内部 BP 用 log(P(0)/P(1))，现输出前取反对齐输入约定"正值→bit 1"
 36. **Oracle 泄漏显式标注 (2026-04-19)**：`eq_bem_turbo_fde` / `rx_chain.rx_otfs` 加显眼 ORACLE 警告 + 变量重命名（h_time_block_oracle），供 baseline 对比保留但明确非真实接收链路
 
-37. **OTFS pilot_mode 分派 + 默认 sequence (2026-04-19)**：`modem_decode_otfs` 
+37. **OTFS pilot_mode 分派 + 默认 sequence (2026-04-19, 部分撤销 2026-04-21)**：`modem_decode_otfs` 
   原仅调 `ch_est_otfs_dd`（impulse 专用），导频去除已分派但信道估计未分派。
-  修复：按 `cfg.pilot_mode` 分派到 `ch_est_otfs_{dd,zc,superimposed}`。默认改为 
+  修复：按 `cfg.pilot_mode` 分派到 `ch_est_otfs_{dd,zc,superimposed}`。默认曾改为 
   **sequence (ZC)** 降 PAPR ~9dB（20dB→12dB），解决 UI 时域波形多脉冲问题。
-  trade-off：5dB BER 从 0% → 7.59%（低 SNR 略差），15dB 仍 0%
+  trade-off：5dB BER 从 0% → 7.59%（低 SNR 略差），15dB 仍 0%。
+  **2026-04-21 发现 10dB 下 sequence BER 28-32%**（#38），已回滚 default，保留参数化。
+
+38. **OTFS pilot_mode='sequence' 在 SNR=10dB 严重 regression (2026-04-21)**：
+  [[e2e-timevarying-baseline]] B 阶段 OTFS 独自 32% BER，专项诊断（27 run 矩阵）定位
+  根因是 `pilot_mode='sequence'` 的 `ch_est_otfs_zc` 在 moderate SNR 漏检 40-60% 路径
+  （impulse 的 3σ 阈值检测 5-7 径，sequence 的 LS+CAZAC 只 2-3 径）。
+  结果（均值）：static 0.04% / 28.06%，disc-5Hz 0% / 30.41%，hyb-K20 0.02% / 32.56%。
+  修复：`test_otfs_timevarying.m:20` 默认回滚 'impulse'。
+  衍生：原先拟用 [[yang-2026-uwa-otfs-nonuniform-doppler]] 的非均匀 Doppler 理论被证伪
+  （H4 否定），暂不引入 off-grid block-sparse OMP。详见 [[OTFS调试日志]]。
