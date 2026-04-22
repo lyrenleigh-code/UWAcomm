@@ -131,6 +131,7 @@
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
+| **`poly_resample` 去 Signal Toolbox 依赖** | 📌 parked（2026-04-22） | 手写 polyphase（h 按 phase 拆 p 个子滤波器，逐输出样本点积）+ 手写 Kaiser 窗（`besseli(0,·)`）。纯 base MATLAB，O(N) 峰值内存，速度 ≈ upfirdn 的 1/2-1/3。**目前不做**，等有"纯 base 需求"触发时再起 spec。|
 | **mlint LOW 215 条** | 待做 | 变量预分配 / 未使用赋值，风险大收益小，留重构时统一处理 |
 | **其他 05/06/07 的 HIGH/MEDIUM 修复** | 部分 | code review 报告中还有 SC-FDE FFT 归一化、LDPC 符号、OTFS O(M²) 等未修；评估必要性再做 |
 | **13 下 test 文件 500+ 行拆分** | 待做 | `test_otfs_timevarying.m` 788 行最重 |

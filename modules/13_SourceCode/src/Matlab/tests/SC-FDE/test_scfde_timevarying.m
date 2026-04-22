@@ -304,11 +304,12 @@ for fi = 1:size(fading_cfgs,1)
             end
 
             % Stage2 refinement：pass1 后补偿，再跑 LFM-only refinement（仅在 |α_p2| > 噪底门限时接受）
-            if abs(alpha_cas_1) > 1e-10
+            % Guard 对齐 est_alpha_cascade.m:33：|α|>1e-3 才做通带 resample，tiny α 产 huge p/q 会触发 OOM
+            if abs(alpha_cas_1) > 1e-3
                 [p_num_1, q_den_1] = rat(1 + alpha_cas_1, 1e-7);
                 rx_pb_stage1 = poly_resample(rx_pb, p_num_1, q_den_1);
             else
-                rx_pb_stage1 = rx_pb;
+                rx_pb_stage1 = rx_pb;   % tiny α_cas_1 时通带不 resample，LFM 精估看完整残余
             end
             lpf_bw_cas = min(chirp_rate_lfm * N_preamble / fs / 2 + 500, fs/2 - 100);
             [bb_stage1, ~] = downconvert(rx_pb_stage1, fs, fc, lpf_bw_cas);
@@ -337,7 +338,9 @@ for fi = 1:size(fading_cfgs,1)
             fprintf('  [DEBUG cascade] α1=%+.4e α_p2=%+.4e α_total=%+.4e (dop=%+.4e err=%+.4e)\n', ...
                     alpha_cas_1, alpha_p2, alpha_cascade, dop_rate, alpha_cascade - dop_rate);
 
-            if abs(alpha_cascade) > 1e-10
+            % Guard 对齐 est_alpha_cascade.m:33：|α|>1e-3 才做通带 resample
+            % tiny α_cascade（<1e-3）时残余交下游基带 spline/LFM 路径
+            if abs(alpha_cascade) > 1e-3
                 [p_num_c, q_den_c] = rat(1 + alpha_cascade, 1e-7);
                 rx_pb = poly_resample(rx_pb, p_num_c, q_den_c);
             end
