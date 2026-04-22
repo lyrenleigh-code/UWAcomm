@@ -2,6 +2,16 @@
 
 ## 2026-04-22
 
+- **gen_doppler_channel V1.5 架构修复 + poly_resample.m 新增**
+  - spec: `specs/archive/2026-04-22-matching-pair-doppler-v1_5.md`
+  - 根因：V1.1-V1.4 用 Option 2 顺序（Doppler 先、多径后）→ 接收端 resample 补偿后多径延迟被缩放为 (1+α)·τ_p，BEM 与 nominal sym_delays 失配 → 非单调 BER 跳变
+  - 修复：V1.5 改 Option 1（多径先、Doppler 后），Doppler 统一作用在总信号上，与老 gen_uwa_channel 约定一致
+  - 新工具：`poly_resample.m` 60 行 Kaiser polyphase FIR，与 MATLAB resample 数值等价（NMSE -302dB 机器精度），通带仿真+RX 形成严格自逆匹配对
+  - 结果：oracle_passband 全 α（±5e-4 到 ±3e-2，覆盖 50 节）**BER = 0**，pipeline 自然运行
+  - 新开关：`bench_use_real_doppler` / `bench_oracle_passband_resample` / `bench_alpha_override`
+  - diag 脚本集（8 个）记录调试过程
+  - 回流：`wiki/conclusions.md` 新条目
+
 - **`comp_resample_spline` V7.1 α<0 本征不对称修复**
   - spec: `specs/active/2026-04-22-resample-negative-alpha-asymmetry.md`
   - 诊断脚本：`modules/10_DopplerProc/test_resample_doppler_error.m`（单元表征）

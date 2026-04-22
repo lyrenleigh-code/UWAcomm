@@ -7,6 +7,21 @@ updated: 2026-04-22
 
 累积记录项目中得出的技术结论，作为后续决策依据。
 
+## gen_doppler_channel 仿真-补偿架构修复（2026-04-22，V1.5，详见 [[specs/archive/2026-04-22-matching-pair-doppler-v1_5]]）
+
+- **根因**：V1.1–V1.4 顺序为"Doppler 先、多径后"（Option 2），让多径延迟作用在
+  已 Doppler 的信号上，接收端通带 resample 补偿后延迟被缩放为 (1+α)·τ_p，BEM
+  用 nominal `sym_delays` 位置失配 → 非单调 BER 跳变（+1.5e-2=10%，+1.7e-2=0%，+2e-2=20%）
+- **物理直觉**：每径共享 α 时，Doppler 应该等价于"对整个多径信号统一压缩/扩展"。
+  Option 1 顺序（多径先、Doppler 后）才匹配这个物理模型，也匹配 `gen_uwa_channel`
+  老仿真的 Option 1 约定（接收端 pipeline 就是按 Option 1 设计的）
+- **新工具 `poly_resample.m`**：60 行 Kaiser 加窗 sinc polyphase FIR，与 MATLAB
+  `resample` 数值等价（NMSE -302 dB 机器精度），通带仿真 + 接收端形成严格自逆匹配对
+- **结果**：oracle_passband 全 α 点（±5e-4 到 ±3e-2，覆盖 50 节）**BER = 0**，
+  无需 force_zero band-aid，pipeline 自然运行
+- **两种顺序的物理场景**：Option 1 = RX 向 TX 移动 + 多径散射体静态（常见水声工况）；
+  Option 2 = TX 向 RX 移动 + 散射体静态（不物理常见）
+
 ## `comp_resample_spline` α<0 本征不对称修复（2026-04-22，V7.1，详见 [[modules/10_DopplerProc/resample-negative-alpha-fix]]）
 
 - **根因**：V7.0 当 α<0 时 `pos = (1:N)/(1-|α|) > N`，`pos_clamped = min(pos, N)` 导致

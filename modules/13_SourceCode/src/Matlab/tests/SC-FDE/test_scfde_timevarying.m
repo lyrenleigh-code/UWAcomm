@@ -205,12 +205,33 @@ for fi = 1:size(fading_cfgs,1)
     end
 
     %% ===== 信道（固定，不随SNR变）===== %%
-    ch_params = struct('fs',fs,'delay_profile','custom',...
-        'delays_s',sym_delays/sym_rate,'gains',gains_raw,...
-        'num_paths',length(sym_delays),'doppler_rate',dop_rate,...
-        'fading_type',ftype,'fading_fd_hz',fd_hz,...
-        'snr_db',Inf,'seed',200+fi*100);
-    [rx_bb_frame,ch_info] = gen_uwa_channel(frame_bb, ch_params);
+    % 【诊断开关】bench_use_real_doppler：切换到真实 Doppler 仿真
+    %   gen_uwa_channel = 假 Doppler（基带时间压缩，无 fc·α 相位项）
+    %   gen_doppler_channel V1.1 = 真实 Doppler（含 exp(j·2π·fc·∫α dτ) CFO 项）
+    use_real_doppler = exist('bench_use_real_doppler','var') && bench_use_real_doppler;
+    if use_real_doppler
+        paths_real = struct('delays', sym_delays/sym_rate, 'gains', gains_raw);
+        tv_cfg_real = struct('enable', false);   % 常 α，不时变
+        [rx_bb_frame, ci_real] = gen_doppler_channel(frame_bb, fs, dop_rate, ...
+                                                      paths_real, Inf, tv_cfg_real, fc);
+        % 构造下游期望的 ch_info 字段（h_time 留空，diag 模式才用到）
+        ch_info = struct();
+        ch_info.h_time     = [];
+        ch_info.delays_samp= round(sym_delays);
+        ch_info.delays_s   = sym_delays / sym_rate;
+        ch_info.gains_init = gains_raw;
+        ch_info.doppler_rate = dop_rate;
+        ch_info.alpha_true = ci_real.alpha_true;
+        ch_info.fs         = fs;
+        ch_info.num_paths  = length(sym_delays);
+    else
+        ch_params = struct('fs',fs,'delay_profile','custom',...
+            'delays_s',sym_delays/sym_rate,'gains',gains_raw,...
+            'num_paths',length(sym_delays),'doppler_rate',dop_rate,...
+            'fading_type',ftype,'fading_fd_hz',fd_hz,...
+            'snr_db',Inf,'seed',200+fi*100);
+        [rx_bb_frame,ch_info] = gen_uwa_channel(frame_bb, ch_params);
+    end
     ch_info_save{fi} = ch_info;  % 保存用于CIR可视化
     [rx_pb_clean,~] = upconvert(rx_bb_frame, fs, fc);
     sig_pwr = mean(rx_pb_clean.^2);
@@ -234,12 +255,33 @@ for fi = 1:size(fading_cfgs,1)
         rng(300+fi*1000+si*100);
         rx_pb = rx_pb_clean + sqrt(noise_var)*randn(size(rx_pb_clean));
 
+        % 【诊断开关】bench_oracle_passband_resample：在通带先用 oracle α 做 resample
+        % 后续 estimator 仍跑（生成 alpha_diag 等结构），但 alpha_lfm/alpha_est 会被覆写为 0
+        % 配合 benchmark_e2e_baseline 'D' 对比"通带 oracle" vs 基带 "bench_oracle_alpha" 分支
+        is_passband_oracle = exist('bench_oracle_passband_resample','var') && bench_oracle_passband_resample;
+        if is_passband_oracle
+            % 通带 oracle resample：poly_resample（自实现 polyphase FIR，与 gen_doppler_channel V1.4
+            % 的 constant α 分支形成严格匹配对 → 自逆对，数值精度跟 MATLAB resample 等价）
+            [p_num, q_den] = rat(1 + dop_rate, 1e-10);
+            rx_pb = poly_resample(rx_pb, p_num, q_den);
+        end
+
         % 1. 下变频（有噪声信号）
         % 【H2 toggle】skip LPF: 扩大 cutoff 到 Nyquist 边缘（近似无 LPF）
         if tog.skip_downconvert_lpf
             [bb_raw,~] = downconvert(rx_pb, fs, fc, fs/2 - 100);
         else
             [bb_raw,~] = downconvert(rx_pb, fs, fc, bw_lfm);
+        end
+
+        % 【诊断开关】bench_oracle_passband_resample：通带 resample 后基带 CFO 补偿
+        % 物理：
+        %   假 Doppler（gen_uwa_channel）：rx_pb 载波在 fc，通带 resample 引入 -fc·α/(1+α) CFO，需补偿
+        %   真 Doppler（gen_doppler_channel）：rx_pb 载波在 fc(1+α)，通带 resample 物理上拉回 fc，无残余 CFO
+        % 用 use_real_doppler 标志选择是否补偿
+        if is_passband_oracle && ~use_real_doppler
+            cfo_oracle = -fc * dop_rate / (1 + dop_rate);
+            bb_raw = comp_cfo_rotate(bb_raw, cfo_oracle, fs);
         end
 
         % 【N2】 bb_raw（下变频后，含 α 效应）
@@ -274,6 +316,8 @@ for fi = 1:size(fading_cfgs,1)
                                                             fs, fc, k_chirp, cfg_alpha);
         % 符号约定对齐：gen_uwa_channel 的 doppler_rate 与 est_alpha_dual_chirp 的 α 取反
         alpha_lfm = -alpha_lfm_raw;
+        % 【通带 oracle 模式】V1.5 下 gen_doppler_channel 先多径后 Doppler，
+        % poly_resample 匹配对完美恢复，estimator 输出应自然 ~0，让 pipeline 自然跑
 
         % 【2026-04-20】迭代 α refinement（突破 CP 精修 ±2.4e-4 相位模糊）
         % 原理：est_alpha_dual_chirp 基于 peak 位置（无相位模糊），在补偿后的 bb 上重估残余
@@ -360,10 +404,16 @@ for fi = 1:size(fading_cfgs,1)
         else
             alpha_est = alpha_lfm + alpha_cp;  % 正常小 α 路径
         end
-        % 【诊断开关】bench_oracle_alpha：用 α 真值做主补偿
+        % 【诊断开关】bench_oracle_alpha：用 α 真值做主补偿（基带 oracle）
         if exist('bench_oracle_alpha','var') && bench_oracle_alpha
             alpha_lfm = dop_rate;
             alpha_est = alpha_lfm + alpha_cp;
+        end
+        % 【通带 oracle 模式】V1.5 让 pipeline 自然运行
+        % 【诊断开关】bench_alpha_override：直接指定最终 alpha_est（灵敏度扫描用）
+        % 优先级最高，覆盖所有前序计算；为空/不存在时不生效
+        if exist('bench_alpha_override','var') && ~isempty(bench_alpha_override)
+            alpha_est = bench_alpha_override;
         end
         % 【H7 toggle】skip_alpha_cp=true 忽略 CP 精修
         if tog.skip_alpha_cp

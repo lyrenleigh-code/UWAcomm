@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
 > 最后更新：2026-04-22
-> 页面总数：51（新增 `resample-negative-alpha-fix` V7.1 修复报告）
+> 页面总数：51（gen_doppler_channel V1.5 + poly_resample 新增；详见 conclusions + log）
 
 ## Architecture（架构页）
 
