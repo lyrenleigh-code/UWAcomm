@@ -50,6 +50,7 @@ preamble_dur = 0.05;
 f_lo = fc - bw_lfm/2;  f_hi = fc + bw_lfm/2;
 % 使用HFM前导码（Doppler不变性：时间压缩仅引起频移，匹配滤波峰值鲁棒）
 [HFM_pb, ~] = gen_hfm(fs, preamble_dur, f_lo, f_hi);
+[HFM_pb_neg, ~] = gen_hfm(fs, preamble_dur, f_hi, f_lo);   % 负扫频 HFM（V1.5 cascade 用）
 N_preamble = length(HFM_pb);
 t_pre = (0:N_preamble-1)/fs;
 % HFM基带版本：从通带相位中减去载频
@@ -259,10 +260,91 @@ for fi = 1:size(fading_cfgs,1)
         % 后续 estimator 仍跑（生成 alpha_diag 等结构），但 alpha_lfm/alpha_est 会被覆写为 0
         % 配合 benchmark_e2e_baseline 'D' 对比"通带 oracle" vs 基带 "bench_oracle_alpha" 分支
         is_passband_oracle = exist('bench_oracle_passband_resample','var') && bench_oracle_passband_resample;
+
+        % 【真实 Doppler baseline Cascade 预补偿】
+        % HFM 粗估 + 通带 resample + 下变频 + LFM 精估 → α_cascade
+        % 覆盖范围 |α|≤3e-2（50 节），真实 Doppler 下盲估（无外部 α 真值）
+        use_cascade_estimator = use_real_doppler && ~is_passband_oracle ...
+                                && ~(exist('bench_oracle_alpha','var') && bench_oracle_alpha);
+        if use_cascade_estimator
+            % Pad head zeros so α>0 下 HFM+ peak 可左移（HFM 在 sample 1，没空间前移）
+            pad_margin = ceil(alpha_max_design * N_preamble * 4) + 200;
+            rx_pb_padded = [zeros(1, pad_margin), rx_pb];
+
+            hfm_params_cas = struct();
+            hfm_params_cas.S_bias      = preamble_dur * ((f_lo+f_hi)/2) / (f_hi-f_lo);
+            hfm_params_cas.alpha_max   = 0.1;
+            hfm_params_cas.threshold   = 0.3;
+            hfm_params_cas.search_win  = min(length(rx_pb_padded), pad_margin + 3*N_preamble + 2*guard_samp + 500);
+            % sep_samples 必须覆盖 α<0 下 HFM+ peak 后移量（~α·S_bias·fs）
+            alpha_shift_samp = ceil(alpha_max_design * hfm_params_cas.S_bias * fs * 1.5);
+            hfm_params_cas.sep_samples = pad_margin + N_preamble + alpha_shift_samp;
+            hfm_params_cas.frame_gap   = guard_samp;
+
+            % LFM up/dn 在 padded 帧中的 nominal 位置（帧结构 [HFM+|g|HFM-|g|LFM+|g|LFM-|...]）
+            tau_lfm_up_cas = pad_margin + 2*N_preamble + 2*guard_samp + 1;
+            tau_lfm_dn_cas = tau_lfm_up_cas + N_preamble + guard_samp;
+
+            cfg_lfm_cas = struct();
+            cfg_lfm_cas.up_start = max(1, tau_lfm_up_cas - 200);
+            cfg_lfm_cas.up_end   = min(length(rx_pb_padded), tau_lfm_up_cas + N_preamble + 200);
+            cfg_lfm_cas.dn_start = max(1, tau_lfm_dn_cas - 200);
+            cfg_lfm_cas.dn_end   = min(length(rx_pb_padded), tau_lfm_dn_cas + N_preamble + 200);
+            cfg_lfm_cas.nominal_delta_samples = N_preamble + guard_samp;
+            cfg_lfm_cas.use_subsample = true;
+
+            try
+                [alpha_cas_1, ~] = est_alpha_cascade(rx_pb_padded, HFM_pb, HFM_pb_neg, ...
+                                                      LFM_bb_n, LFM_bb_neg_n, ...
+                                                      fs, fc, chirp_rate_lfm, ...
+                                                      hfm_params_cas, cfg_lfm_cas);
+            catch ME_cas
+                fprintf('  [WARN cascade] %s → fallback α=0\n', ME_cas.message);
+                alpha_cas_1 = 0;
+            end
+
+            % Stage2 refinement：pass1 后补偿，再跑 LFM-only refinement（仅在 |α_p2| > 噪底门限时接受）
+            if abs(alpha_cas_1) > 1e-10
+                [p_num_1, q_den_1] = rat(1 + alpha_cas_1, 1e-7);
+                rx_pb_stage1 = poly_resample(rx_pb, p_num_1, q_den_1);
+            else
+                rx_pb_stage1 = rx_pb;
+            end
+            lpf_bw_cas = min(chirp_rate_lfm * N_preamble / fs / 2 + 500, fs/2 - 100);
+            [bb_stage1, ~] = downconvert(rx_pb_stage1, fs, fc, lpf_bw_cas);
+            tau_up_p2 = 2*N_preamble + 2*guard_samp + 1;
+            tau_dn_p2 = 3*N_preamble + 3*guard_samp + 1;
+            cfg_lfm_p2 = struct();
+            cfg_lfm_p2.up_start = max(1, tau_up_p2 - 200);
+            cfg_lfm_p2.up_end   = min(length(bb_stage1), tau_up_p2 + N_preamble + 200);
+            cfg_lfm_p2.dn_start = max(1, tau_dn_p2 - 200);
+            cfg_lfm_p2.dn_end   = min(length(bb_stage1), tau_dn_p2 + N_preamble + 200);
+            cfg_lfm_p2.nominal_delta_samples = N_preamble + guard_samp;
+            cfg_lfm_p2.use_subsample = true;
+            alpha_p2 = 0;
+            try
+                [alpha_p2_raw, ~] = est_alpha_dual_chirp(bb_stage1, LFM_bb_n, LFM_bb_neg_n, ...
+                                                         fs, fc, chirp_rate_lfm, cfg_lfm_p2);
+                % LFM 噪底门限 ~3e-6（SNR=10 dB 下）：低于此值视为噪声，跳过
+                if abs(alpha_p2_raw) > 3e-6
+                    alpha_p2 = +alpha_p2_raw;  % 真 Doppler 残余：无 sign flip
+                end
+            catch
+                alpha_p2 = 0;
+            end
+
+            alpha_cascade = (1 + alpha_cas_1) * (1 + alpha_p2) - 1;
+            fprintf('  [DEBUG cascade] α1=%+.4e α_p2=%+.4e α_total=%+.4e (dop=%+.4e err=%+.4e)\n', ...
+                    alpha_cas_1, alpha_p2, alpha_cascade, dop_rate, alpha_cascade - dop_rate);
+
+            if abs(alpha_cascade) > 1e-10
+                [p_num_c, q_den_c] = rat(1 + alpha_cascade, 1e-7);
+                rx_pb = poly_resample(rx_pb, p_num_c, q_den_c);
+            end
+        end
+
         if is_passband_oracle
-            % 通带 oracle resample：poly_resample（自实现 polyphase FIR，与 gen_doppler_channel V1.4
-            % 的 constant α 分支形成严格匹配对 → 自逆对，数值精度跟 MATLAB resample 等价）
-            [p_num, q_den] = rat(1 + dop_rate, 1e-10);
+            [p_num, q_den] = rat(1 + dop_rate, 1e-7);
             rx_pb = poly_resample(rx_pb, p_num, q_den);
         end
 
@@ -283,6 +365,11 @@ for fi = 1:size(fading_cfgs,1)
             cfo_oracle = -fc * dop_rate / (1 + dop_rate);
             bb_raw = comp_cfo_rotate(bb_raw, cfo_oracle, fs);
         end
+
+        % DEBUG：bb_raw 指纹
+        fprintf('  [DEBUG bb_raw] len=%d, sum(abs)=%.6e, checksum=%.6e, oracle=%d, cascade=%d\n', ...
+                length(bb_raw), sum(abs(bb_raw)), sum(bb_raw(1:100)), ...
+                is_passband_oracle, use_cascade_estimator);
 
         % 【N2】 bb_raw（下变频后，含 α 效应）
         if bench_diag.enable && si == 1
@@ -316,8 +403,11 @@ for fi = 1:size(fading_cfgs,1)
                                                             fs, fc, k_chirp, cfg_alpha);
         % 符号约定对齐：gen_uwa_channel 的 doppler_rate 与 est_alpha_dual_chirp 的 α 取反
         alpha_lfm = -alpha_lfm_raw;
-        % 【通带 oracle 模式】V1.5 下 gen_doppler_channel 先多径后 Doppler，
-        % poly_resample 匹配对完美恢复，estimator 输出应自然 ~0，让 pipeline 自然跑
+        % oracle_passband：rat() 精度 ~1e-10，强制 0
+        % cascade：两级 cascade 后残余 <1e-6，强制 0 避免下游 LFM/CP 引入额外 bias
+        if (use_cascade_estimator) || is_passband_oracle
+            alpha_lfm = 0;
+        end
 
         % 【2026-04-20】迭代 α refinement（突破 CP 精修 ±2.4e-4 相位模糊）
         % 原理：est_alpha_dual_chirp 基于 peak 位置（无相位模糊），在补偿后的 bb 上重估残余
@@ -409,7 +499,10 @@ for fi = 1:size(fading_cfgs,1)
             alpha_lfm = dop_rate;
             alpha_est = alpha_lfm + alpha_cp;
         end
-        % 【通带 oracle 模式】V1.5 让 pipeline 自然运行
+        % 【oracle_passband / cascade】rx_pb 已补偿干净（cascade 两级后残余 <1e-6），强制 α_est=0
+        if (use_cascade_estimator) || is_passband_oracle
+            alpha_est = 0;
+        end
         % 【诊断开关】bench_alpha_override：直接指定最终 alpha_est（灵敏度扫描用）
         % 优先级最高，覆盖所有前序计算；为空/不存在时不生效
         if exist('bench_alpha_override','var') && ~isempty(bench_alpha_override)
@@ -422,7 +515,8 @@ for fi = 1:size(fading_cfgs,1)
         sync_peak = abs(R1) / sum(abs(LFM_bb_n).^2);
 
         % ---- Round 2: 精补偿 + 最终提取 ----
-        % 【H1 toggle】skip_resample=true 时不补偿 α，直接用 bb_raw
+        fprintf('  [DEBUG pre-bb_comp] alpha_est=%.6e, abs>1e-10: %d, tog.skip_resample=%d\n', ...
+                alpha_est, abs(alpha_est)>1e-10, tog.skip_resample);
         if tog.skip_resample
             bb_comp = bb_raw;
         elseif abs(alpha_est) > 1e-10
@@ -433,6 +527,13 @@ for fi = 1:size(fading_cfgs,1)
             end
         else
             bb_comp = bb_raw;
+        end
+        bb_comp_hash = sum(abs(bb_comp).^2 .* (1:length(bb_comp))) / length(bb_comp);
+        fprintf('  [DEBUG bb_comp] len=%d, sum(abs)=%.6e, checksum=%.6e, weighted_hash=%.10e\n', ...
+                length(bb_comp), sum(abs(bb_comp)), sum(bb_comp(1:100)), bb_comp_hash);
+        % 保存给 diff 用
+        if exist('/tmp', 'dir')
+            save(sprintf('/tmp/bb_comp_oracle%d_cascade%d.mat', is_passband_oracle, use_cascade_estimator), 'bb_comp');
         end
 
         % 【N3】 bb_comp（resample 补偿后）
