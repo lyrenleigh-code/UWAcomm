@@ -1,5 +1,16 @@
 # Wiki 操作日志
 
+## 2026-04-23
+
+- **SC-FDE cascade 盲估 OOM 修复（Patch D+E）**
+  - spec: `specs/active/2026-04-22-scfde-cascade-resample-oom-fix.md`
+  - plan: `plans/scfde-cascade-resample-oom-fix.md`
+  - 根因：cascade 集成后 `est_alpha_cascade` 内部 + test runner 共 3 处 `rat(1+α, 1e-7/1e-6)`；噪声 α=3e-2 估值非 100 整除时连分式产 p≈10⁴，`poly_resample` 显式 `zeros(1, N·p)` 单次 ~4 GB → 5 点扫描 97% 内存
+  - 修复：3 处统一 `rat(·, 1e-5)`，p 从 10⁴ → 10²，单次峰值 40 MB
+  - 试错链已记录在 plan：Phase A guard 1e-3 副作用（α=5e-4 → 50% BER）+ Phase B 复用 stage1 双 bug（α_p2 重复计数 + 载波相位残余）
+  - 验证：5 点 BER 与 baseline 完全一致（-1e-2 13.7%、其余 4 点 0%），内存 97% → <30%
+  - parked：`poly_resample` 去 Signal Toolbox 依赖（手写 polyphase + Kaiser）→ todo 🟢 区
+
 ## 2026-04-22
 
 - **gen_doppler_channel V1.5 架构修复 + poly_resample.m 新增**

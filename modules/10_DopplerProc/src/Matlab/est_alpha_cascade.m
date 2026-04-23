@@ -30,8 +30,10 @@ function [alpha, diag_out] = est_alpha_cascade(rx_pb, hfm_up_pb, hfm_dn_pb, lfm_
 
 %% Stage 2：通带 resample 补偿
 % |α|>1e-3 才做通带 resample，tiny α 留给 LFM 阶段直接估（避免 rat() 对 tiny α 出 huge p/q）
+% rat 容差 1e-5（2026-04-22 Patch D）：噪声 α 下 1e-6 产 p≈10³-10⁴，poly_resample 单次可达 GB 量级；
+% 1e-5 降到 p≈10²（~40 MB），0.5 样本残余由 LFM 精估 Stage 4 吃掉
 if abs(alpha_hfm) > 1e-3
-    [p_num, q_den] = rat(1 + alpha_hfm, 1e-6);
+    [p_num, q_den] = rat(1 + alpha_hfm, 1e-5);
     rx_pb_comp = poly_resample(rx_pb, p_num, q_den);
 else
     rx_pb_comp = rx_pb;

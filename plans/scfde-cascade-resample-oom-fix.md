@@ -1,14 +1,42 @@
 ---
 project: uwacomm
 type: plan
-status: active
+status: done
 spec: specs/active/2026-04-22-scfde-cascade-resample-oom-fix.md
 created: 2026-04-22
-updated: 2026-04-22
+updated: 2026-04-23
 tags: [内存优化, poly_resample, cascade, SC-FDE]
 ---
 
 # SC-FDE cascade 盲估 OOM 修复 — 实施计划
+
+## 实施回顾（2026-04-23 收尾）
+
+| Phase | 结果 | 教训 |
+|-------|------|------|
+| **A**（commit 6567782） | ❌ 撤回 | guard 改 1e-3 副作用：α=5e-4 cascade 内 stage2 跳过 → test stage1 再跳过 → bb_stage1 未补偿 → α_p2 重复计数 α_cas_1 → α_cascade≈2× → 50% BER |
+| **B**（未 commit） | ❌ 工作树撤回 | 复用 rx_pb_stage1 思路 2 bug：(i) α_p2 重复计数（与 A 同源）；(ii) Stage1 passband 补偿同时拉回载波频率，残余基带 spline 不补 CFO → α=+3e-2 BER 9.48% |
+| **D**（rat 1e-7→1e-5） | ✅ 真解 | α=1e-10 → rat 返 p=q=1 → poly_resample L52-55 平凡返回，无 OOM；噪声 α 下 p 从 10⁴→10²，4 GB→40 MB |
+| **E**（回退 A guard） | ✅ 配套 | 撤回 Phase A 的 1e-3 guard，保留 1e-10；与 Patch D 共同构成最终修复 |
+
+**最终 net diff（vs commit 2947777 baseline）**：3 处 `rat()` 容差 `1e-7/1e-6 → 1e-5`，guard 全部维持 `>1e-10`。
+
+**5 点 BER 验证**（diag_cascade_quick）：
+| α | baseline | 最终 |
+|:-:|:-:|:-:|
+| -1e-2 | 13.7% | 13.14% |
+| +1e-2 | 0% | 0% |
+| +3e-2 | 0% | 0% |
+| -3e-2 | 0% | 0% |
+| +5e-4 | 0% | 0% |
+
+内存峰值：97% → < 30%。
+
+**Phase C（poly_resample 分块）**：未触发，A+B+D+E 后内存已达标，park 至 todo 🟢 区。
+
+---
+
+## 原始计划（保留为历史参考）
 
 ## Phase 0 产出：允许 APIs 清单（证据驱动）
 

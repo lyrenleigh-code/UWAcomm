@@ -162,6 +162,7 @@
 | **摄入 6 篇 Doppler 论文** | 2026-04-21 | yang-2026 / zheng-2025 / wei-2020 / muzzammil-2019 / sun-2020 / lalevee-2025；wiki/source-summaries/ 新建 |
 | **DSSS 符号级 Doppler 跟踪（Sun-2020）** | 2026-04-22 | spec `2026-04-22-dsss-symbol-doppler-tracking.md`；est_alpha_dsss_symbol.m + comp_resample_piecewise.m；D α=+3e-2 BER **51% → 2.2%** (25× 改善)；Symbol mean > Symbol per-sym（静态 α），A2/D |α|≤3e-3 维持 0% |
 | **α=3e-2 突破（SC-FDE）** | 2026-04-21 | spec `2026-04-21-alpha-pipeline-large-alpha-debug.md`；TX tail pad + CP 阈值门禁 + 正向大 α 精扫 3 patch；α=+3e-2 BER **50% → 5.4%**，工作范围 1e-2 → **3e-2（45 m/s 鱼雷覆盖）**；VSS spec 中断保留代码 |
+| **SC-FDE cascade 盲估 OOM 修复（Patch D+E）** | 2026-04-23 | spec `2026-04-22-scfde-cascade-resample-oom-fix.md`；3 处 `rat()` 容差 `1e-7/1e-6 → 1e-5`，poly_resample 单次峰值 4 GB → 40 MB；试错链 Phase A guard 1e-3 副作用（α=5e-4 50% BER）+ Phase B 复用 stage1 双 bug 已记录在 plan；最终 5 点 BER 与 baseline 完全一致，内存 97% → <30% |
 
 ---
 
