@@ -2,6 +2,31 @@
 
 ## 2026-04-24
 
+- **CFO postcomp 跨体制横向审计完成**
+  - Spec: `specs/active/2026-04-24-cfo-postcomp-cross-scheme-audit.md`（归档中）
+  - Grep 覆盖：6 体制 runner + common + 14_Streaming
+  - 命中同 bug（4 runner）：SC-TDE timevarying/discrete_doppler、DSSS timevarying/discrete_doppler
+  - 全部 V1.2/V5.4 fix（默认 skip + `diag_enable_legacy_cfo` 反义 toggle）
+  - 无 post-CFO：SC-FDE / FH-MFSK / OTFS / common / 14_Streaming
+  - OFDM 不同类：空子载波 ML CFO 估计+补偿 → α 反向累加（合法数据驱动）
+  - 回流：`wiki/conclusions.md` #40 审计结论条目
+
+- **DSSS D10 验证：α=+1e-2 100% 灾难单一根因锁定**
+  - 脚本: `tests/DSSS/diag_D10_dsss_disable_cfo.m`（2 模式 × 3 α × 5 seed = 30 trial）
+  - legacy_on（apply post-CFO，历史 V1.1）：α=+1e-2 43.28±4.42%
+  - legacy_off（skip post-CFO，V1.2 新默认）：α=+1e-2 **0.00%**（5 seed 全清零）
+  - α_est 精度：+9.999e-3 vs true +1e-2，<0.01% 误差（α 估计链完美）
+  - 印证 2026-04-23 Phase c（15 seed median 46.2% ≈ legacy_on mean 43.28%）
+  - 回流：新建 `wiki/modules/13_SourceCode/DSSS调试日志.md` V1.2 章节
+
+- **DSSS 4 runner V1.1→V1.2**（test_dsss_timevarying + test_dsss_discrete_doppler）
+  - post-CFO 改默认 skip + legacy toggle
+  - 补 `row.alpha_est` CSV 字段
+  - Sun-2020 spec（`2026-04-22-dsss-symbol-doppler-tracking`）重定位：保留作时变 α 方向，与恒定 α 解耦
+
+- **SC-TDE discrete_doppler V1.1→V1.2**
+  - 同步 timevarying V5.4 fix（同 bug 孪生脚本，audit 命中）
+
 - **SC-TDE post-CFO 伪补偿 fix + plan C 证伪（V5.4）**
   - Spec: `specs/active/2026-04-24-sctde-remove-post-cfo-compensation.md`（归档中）
   - Parent RCA spec: `specs/archive/2026-04-23-sctde-alpha-1e2-disaster-root-cause.md`（归档中）

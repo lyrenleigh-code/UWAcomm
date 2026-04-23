@@ -3,7 +3,11 @@
 %     帧: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|train_chips|data_chips]
 % 信道: apply_channel(离散Doppler/Rician混合/Jakes) — 等效基带
 % RX: 下变频->LFM粗估alpha->精补偿->LFM定时->RRC匹配->训练估信道->Rake(MRC)->译码
-% 版本：V1.1.0 — 加 benchmark_mode 注入（spec 2026-04-19-e2e-timevarying-baseline）
+% 版本：V1.2.0 — 删 post-CFO 伪补偿（同步 test_dsss_timevarying V1.2）
+%   V1.1: 加 benchmark_mode 注入（spec 2026-04-19-e2e-timevarying-baseline）
+%   V1.2: post-CFO 改默认 skip + diag_enable_legacy_cfo 反义 toggle
+%         audit: specs/active/2026-04-24-cfo-postcomp-cross-scheme-audit
+%         D10 验证（DSSS timevarying）：α=+1e-2 legacy_on 43.28% → legacy_off 0.00%
 
 %% ========== Benchmark mode 注入（2026-04-19） ========== %%
 if ~exist('benchmark_mode','var') || isempty(benchmark_mode)
@@ -261,11 +265,17 @@ for fi = 1:N_fading
         if length(rx_chips)>N_total_chips, rx_chips=rx_chips(1:N_total_chips);
         elseif length(rx_chips)<N_total_chips, rx_chips=[rx_chips,zeros(1,N_total_chips-length(rx_chips))]; end
 
-        % 残余CFO补偿
-        if abs(alpha_est) > 1e-10
+        % === 历史 post-CFO 补偿已默认 skip（audit 命中，同 test_dsss_timevarying V1.2）===
+        % D10 DSSS 验证 legacy_off α=+1e-2 mean BER 43.28% → 0.00%，单一根因确认
+        % 反义 toggle 保留供历史对照：
+        if abs(alpha_est) > 1e-10 && ...
+           exist('diag_enable_legacy_cfo','var') && diag_enable_legacy_cfo
             cfo_res = alpha_est * fc;
             t_chip = (0:length(rx_chips)-1) / chip_rate;
             rx_chips = rx_chips .* exp(-1j*2*pi*cfo_res*t_chip);
+            if si == 1 && fi == 1
+                fprintf('  [LEGACY-CFO-DSSS] 启用历史 post-CFO 补偿：α·fc=%+.1f Hz applied\n', cfo_res);
+            end
         end
 
         % 4. 训练段信道估计（Rake finger增益）

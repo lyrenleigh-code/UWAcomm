@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
 > 最后更新：2026-04-24
-> 页面总数：52（新增 SC-TDE fd=1Hz 非单调 investigation spec；本日 V5.4 post-CFO 删除 fix + plan C 证伪，详见 conclusions #39 + log）
+> 页面总数：53（新增 DSSS 调试日志；本日 CFO postcomp 跨体制 audit 完成 + DSSS V1.2 单一根因锁定，详见 conclusions #39/#40 + log）
 
 ## Architecture（架构页）
 
@@ -25,7 +25,7 @@
 - [11_阵列接收预处理](modules/11_ArrayProc/11_阵列接收预处理.md) + [函数索引](modules/11_ArrayProc/函数索引.md)
 - [12_迭代调度器](modules/12_IterativeProc/12_迭代调度器.md) + [函数索引](modules/12_IterativeProc/函数索引.md)
 - [13 函数索引](modules/13_SourceCode/函数索引.md) + [框架v5](modules/13_SourceCode/水声通信算法模块化框架v5.md)
-- [SC-TDE调试日志](modules/13_SourceCode/SC-TDE调试日志.md) + [SC-FDE调试日志](modules/13_SourceCode/SC-FDE调试日志.md) + [OFDM调试日志](modules/13_SourceCode/OFDM调试日志.md) + [OTFS调试日志](modules/13_SourceCode/OTFS调试日志.md)
+- [SC-TDE调试日志](modules/13_SourceCode/SC-TDE调试日志.md) + [SC-FDE调试日志](modules/13_SourceCode/SC-FDE调试日志.md) + [OFDM调试日志](modules/13_SourceCode/OFDM调试日志.md) + [OTFS调试日志](modules/13_SourceCode/OTFS调试日志.md) + [DSSS调试日志](modules/13_SourceCode/DSSS调试日志.md)
 - [端到端帧组装调试笔记](modules/13_SourceCode/端到端帧组装调试笔记.md) + [离散Doppler全体制对比](modules/13_SourceCode/离散Doppler全体制对比.md)
 - [14_流式仿真框架](modules/14_Streaming/14_流式仿真框架.md) + [流式调试日志](debug-logs/14_Streaming/流式调试日志.md)
 

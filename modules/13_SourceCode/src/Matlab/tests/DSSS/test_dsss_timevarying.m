@@ -3,7 +3,12 @@
 %     帧: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|train_chips|data_chips]
 % 信道: 等效基带帧→gen_uwa_channel(5径+Jakes+多普勒)→上变频→+实噪声
 % RX: 下变频→LFM粗估α→精补偿→LFM定时→RRC匹配→训练估信道→Rake(MRC)→译码
-% 版本：V1.1.0 — 加 benchmark_mode 注入（spec 2026-04-19-e2e-timevarying-baseline）
+% 版本：V1.2.0 — 删 post-CFO 伪补偿（同 SC-TDE V5.4 audit 命中）
+%   V1.1: 加 benchmark_mode 注入（spec 2026-04-19-e2e-timevarying-baseline）
+%   V1.2: post-CFO `rx_chips .* exp(-j·2π·α·fc·t_chip)` 改默认 skip + diag_enable_legacy_cfo 反义
+%         RCA: specs/archive/2026-04-23-sctde-alpha-1e2-disaster-root-cause（SC-TDE 同 bug）
+%         audit: specs/active/2026-04-24-cfo-postcomp-cross-scheme-audit
+%         D10 验证脚本: tests/DSSS/diag_D10_dsss_disable_cfo.m
 
 %% ========== Benchmark mode 注入（2026-04-19） ========== %%
 if ~exist('benchmark_mode','var') || isempty(benchmark_mode)
@@ -340,11 +345,19 @@ for fi = 1:size(fading_cfgs,1)
         if length(rx_chips)>N_total_chips, rx_chips=rx_chips(1:N_total_chips);
         elseif length(rx_chips)<N_total_chips, rx_chips=[rx_chips,zeros(1,N_total_chips-length(rx_chips))]; end
 
-        % 残余CFO补偿
-        if abs(alpha_est) > 1e-10
+        % === 历史 post-CFO 补偿已默认 skip（audit 命中，类比 SC-TDE V5.4）===
+        % RCA: specs/archive/2026-04-23-sctde-alpha-1e2-disaster-root-cause
+        % audit: specs/active/2026-04-24-cfo-postcomp-cross-scheme-audit（本脚本命中）
+        % 根因：gen_uwa_channel 基带模型下 α·fc 凭空注入破坏 chip 级对齐。
+        % 反义 toggle 保留供 D10 验证/对照：
+        if abs(alpha_est) > 1e-10 && ...
+           exist('diag_enable_legacy_cfo','var') && diag_enable_legacy_cfo
             cfo_res = alpha_est * fc;
             t_chip = (0:length(rx_chips)-1) / chip_rate;
             rx_chips = rx_chips .* exp(-1j*2*pi*cfo_res*t_chip);
+            if si == 1 && fi == 1
+                fprintf('  [LEGACY-CFO-DSSS] 启用历史 post-CFO 补偿：α·fc=%+.1f Hz applied to rx_chips\n', cfo_res);
+            end
         end
 
         % 6. 训练段信道估计（Rake finger增益）
@@ -412,6 +425,7 @@ if benchmark_mode
             row.frame_detected   = 1;
             row.turbo_final_iter = NaN;  % DSSS 无 turbo
             row.runtime_s        = NaN;
+            row.alpha_est        = alpha_est_matrix(fi_b, 1);  % 2026-04-24 audit D10 用
             bench_append_csv(bench_csv_path, row);
         end
     end

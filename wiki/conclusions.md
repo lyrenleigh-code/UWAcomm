@@ -363,6 +363,19 @@ L484-487 + L590-596 用 `all_cp_data(1:10)` 做相关挑 sps 相位（oracle 泄
   衍生：原先拟用 [[yang-2026-uwa-otfs-nonuniform-doppler]] 的非均匀 Doppler 理论被证伪
   （H4 否定），暂不引入 off-grid block-sparse OMP。详见 [[OTFS调试日志]]。
 
+40. **CFO postcomp 跨体制横向审计结论 (2026-04-24)**：
+  Audit spec `2026-04-24-cfo-postcomp-cross-scheme-audit` grep 6 体制 runner + common + 14_Streaming：
+  - **命中同 bug（4 runner）**：SC-TDE timevarying/discrete_doppler、DSSS timevarying/discrete_doppler — 全部 V1.2/V5.4 默认 skip + `diag_enable_legacy_cfo` 反义 toggle
+  - **无 post-CFO**：SC-FDE、FH-MFSK、OTFS、common/、14_Streaming/
+  - **不同类（合法操作）**：OFDM 空子载波 ML CFO 估计+补偿→α 反向累加（数据驱动，非凭空 α·fc 假设）
+  **DSSS D10 验证（`diag_D10_dsss_disable_cfo.m`，30 trial）**：
+  - α=+1e-2 legacy_on **43.28±4.42%** → legacy_off **0.00%**（5 seed 全清零）
+  - α_est 精度 <0.01%（+9.999e-3 vs true +1e-2）
+  - **DSSS α=+1e-2 100% 灾难是单一根因**（不是与 Sun-2020 叠加），V1.2 fix 完全关闭灾难
+  **印证 2026-04-23 Phase c**：DSSS α=+1e-2 SNR=10 Phase c 15/15 median 46.2%，本次 legacy_on 5 seed mean 43.28% 吻合（seed 抖动 <3%）。
+  **Sun-2020 spec 重定位**：`2026-04-22-dsss-symbol-doppler-tracking` 保留作时变 α（加速度场景 α=+3e-2 51%→2.2%）方向，与恒定 α 解耦，不再视为 α=+1e-2 必需。
+  详见 [[SC-TDE调试日志]] V5.4 + [[DSSS调试日志]] V1.2。
+
 39. **基带 Doppler 信道模型下 post-CFO 补偿是伪操作 (2026-04-24)**：
   `gen_uwa_channel` 工作在基带（`s_bb((1+α)t)` 纯时间伸缩 + 多径），**无 fc·α 载波频偏**。
   `comp_resample_spline` 补偿时间伸缩后 `bb_comp` 完全无 CFO。

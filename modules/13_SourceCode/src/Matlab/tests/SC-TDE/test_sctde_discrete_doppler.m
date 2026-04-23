@@ -3,10 +3,13 @@
 %     帧组装: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]
 % 信道: apply_channel(离散Doppler/Rician混合/Jakes) — 等效基带
 % RX: 09下变频 → ①LFM相位粗估多普勒 → ②粗补偿+训练精估 → ③LFM精确定时 →
-%     提取数据 → 09 RRC匹配 → 残余CFO补偿(alpha_est*fc) →
-%     12 Turbo均衡(GAMP+DFE或BEM+ISI消除) → 译码
-% 版本：V1.1.0 — 加 benchmark_mode 注入（spec 2026-04-19-e2e-timevarying-baseline）
+%     提取数据 → 09 RRC匹配 → 12 Turbo均衡(GAMP+DFE或BEM+ISI消除) → 译码
+% 版本：V1.2.0 — 删 post-CFO 伪补偿（同步 test_sctde_timevarying V5.4）
 % 基于V5.1.0 SC-TDE时变测试，仅替换信道施加为apply_channel
+%   V1.1: 加 benchmark_mode 注入（spec 2026-04-19-e2e-timevarying-baseline）
+%   V1.2: 删 post-CFO `rx_sym_recv .* exp(-j·2π·α·fc·t)` 伪补偿
+%         RCA + fix: specs/archive/2026-04-{23,24}-sctde-*（同 timevarying V5.4）
+%         验证等价：timevarying V1 α 扫描 PASS + V2 α=0 gate PASS
 
 %% ========== Benchmark mode 注入（2026-04-19） ========== %%
 if ~exist('benchmark_mode','var') || isempty(benchmark_mode)
@@ -351,11 +354,21 @@ for fi = 1:size(fading_cfgs,1)
         nv_eq = max(noise_var, 1e-10);
         P_paths = length(sym_delays);
 
-        % 残余CFO补偿（用估计alpha，不用oracle dop_rate）
-        if abs(alpha_est) > 1e-10
+        % === 历史 post-CFO 补偿已删除（同 test_sctde_timevarying V5.4）===
+        % RCA: specs/archive/2026-04-23-sctde-alpha-1e2-disaster-root-cause
+        % fix: specs/archive/2026-04-24-sctde-remove-post-cfo-compensation
+        % audit: specs/active/2026-04-24-cfo-postcomp-cross-scheme-audit（本脚本命中）
+        % 根因：基带 Doppler 模型下 post-CFO 是伪操作，α·fc 凭空注入破坏对齐。
+        % timevarying V5.4 验证：α=+1e-2 50.36%→0.29%，α=0 1.84%→0.04%。
+        % 反义 toggle 保留供历史对照：
+        if abs(alpha_est) > 1e-10 && ...
+           exist('diag_enable_legacy_cfo','var') && diag_enable_legacy_cfo
             cfo_res_hz = alpha_est * fc;
             t_sym_vec = (0:length(rx_sym_recv)-1) / sym_rate;
             rx_sym_recv = rx_sym_recv .* exp(-1j*2*pi*cfo_res_hz*t_sym_vec);
+            if si == 1 && fi == 1
+                fprintf('  [LEGACY-CFO] 启用历史 post-CFO 补偿：α·fc=%+.1f Hz\n', cfo_res_hz);
+            end
         end
 
         if strcmpi(ftype, 'static')
