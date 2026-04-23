@@ -138,7 +138,7 @@ tog = struct('skip_resample', false, 'skip_downconvert_lpf', false, ...
              'force_best_off', false, 'oracle_h', false, ...
              'force_lfm_pos', false, 'pad_tx_tail', false, ...
              'skip_alpha_cp', false, 'force_bem_q', [], ...
-             'use_omp_static', false);   % Phase A 2026-04-23: 默认 V1.4 GAMP；true 走 OMP（实验：OMP 在 SNR=10 边界更糟）
+             'use_omp_static', false);   % 默认 V1.4 GAMP；true 走 OMP 实验
 tog_fields = fieldnames(tog);
 for tog_k = 1:numel(tog_fields)
     if isfield(bench_toggles, tog_fields{tog_k})
@@ -481,9 +481,12 @@ for fi = 1:size(fading_cfgs,1)
         if e1 > length(bb_comp1), rd1=[bb_comp1(d1:end),zeros(1,e1-length(bb_comp1))];
         else, rd1=bb_comp1(d1:e1); end
         [rf1,~] = match_filter(rd1, sps, 'rrc', rolloff, span);
-        % Phase B 2026-04-23 撤回：功率最大化在色散信道下选错相位（custom6 6径
-        % ISI 让错误相位反而捕获更多能量泄漏 → BER 退化）。oracle 清理需另起 spec
-        % 用 LFM 模板/training preamble 做相关，而非纯功率
+        % ⚠ Oracle 泄漏：用 TX 数据 all_cp_data(1:10) 做 sps 相位参考
+        % 试错记录（2026-04-23 撤回）：
+        %   - sum(|st|^2) 功率最大化 → 6 径 ISI 让错相位捕获更多能量泄漏 → -1e-2 13%→48% ❌
+        %   - abs(sum(st^4)) QPSK NDA → 噪声/ISI 4 次放大 → 灾难率翻倍 ❌
+        % 真去 oracle 需架构改动（加 training preamble 到帧结构 / Gardner TED+量化 /
+        % LFM 模板尾部相关）→ 独立 spec 待开
         b1=0; bp1=0;
         for off=0:sps-1
             st=rf1(off+1:sps:end);
@@ -591,7 +594,7 @@ for fi = 1:size(fading_cfgs,1)
         end
 
         [rx_filt,~] = match_filter(rx_data_bb, sps, 'rrc', rolloff, span);
-        % Phase B 撤回：见 L484-491 注释
+        % ⚠ Oracle 泄漏：见 L484-491 注释
         best_off=0; best_pwr=0;
         for off=0:sps-1
             st=rx_filt(off+1:sps:end);

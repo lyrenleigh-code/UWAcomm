@@ -2,6 +2,14 @@
 
 ## 2026-04-23
 
+- **第 3 次 sps 去 oracle 失败：QPSK 4 次方 NDA timing（spec `2026-04-23-scfde-sps-deoracle-fourth-power`）**
+  - 设计：QPSK (±1±j)^4 = -4 统一 phasor，正确定时 sum 大、错定时 phasor 分散加和取消
+  - 实测：cascade_quick 看似 OK（-1e-2 14%），但 Monte Carlo 灾难率 0%/6.7% → **10%/20%** 退化
+  - 根因：噪声 4 次放大 + ISI 确定性混合不是 Gaussian → `y^4` phasor 分散反而抑制正确定时
+  - **三次失败教训**：所有纯 NDA blind timing（功率/4 次方）在 6 径 ISI + SNR=10 失效
+  - **结论**：去 oracle 必须给 RX 等价 ground truth → 架构改动（加 training preamble / LFM 模板尾部相关 / Gardner TED+量化），独立 spec 待开
+  - 注释 ⚠ 标在源码 L484/L596，便于未来追溯
+
 - **OMP 替换 + sps 去 oracle 双失败实验（spec `2026-04-23-scfde-omp-replace-gamp-and-oracle-clean`）**
   - Phase A 试用 `ch_est_omp(K=6)` 替代 GAMP V1.4：+1e-2 灾难率 6.7%→10% ↗（反向）
     - 根因：OMP K=6 强制选 6 column，残差驱动可能选错 support
