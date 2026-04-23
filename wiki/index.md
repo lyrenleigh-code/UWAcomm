@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
 > 最后更新：2026-04-23
-> 页面总数：51（cascade OOM Patch D+E + Phase I+J 揭示 SC-FDE ~10% deterministic 灾难触发率；详见 conclusions + log）
+> 页面总数：51（cascade OOM + Phase I+J 灾难发现 + L2' 锁定 BEM ill-conditioned 真根因；详见 conclusions + log）
 
 ## Architecture（架构页）
 

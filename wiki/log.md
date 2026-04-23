@@ -2,6 +2,15 @@
 
 ## 2026-04-23
 
+- **L2' Step 1 真根因锁定：BEM 信道估计 ill-conditioned 数值发散**
+  - 诊断: `modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_disaster_layer_isolation.m`
+  - 4 trial Oracle H_est 表对比：健康 case |gain|≈1，灾难 case |gain|=10¹~10²⁶
+  - 真根因：BEM 求解 `inv(H'H)·H'y` 在某些 (TX bits, noise) 下观测矩阵接近奇异 → 求逆放大噪声 → h_est 幅度发散
+  - 5 候选层最终判定：A（信道估计幅度爆）真根因；B/E 派生症状；C/D 排除
+  - runner 改造：`bench_diag.enable=true` 时 fall through 到 sync/H_est/Doppler 诊断段（仍跳 figure）
+  - 待 L5: BEM Tikhonov 正则化（最低风险方案）
+  - 回流: `wiki/conclusions.md` 修订 — 5 候选层 → 真根因 + 修复方案
+
 - **Phase J Monte Carlo 真实灾难率 ~10%（重大修订）**
   - 诊断: `modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_seed_monte_carlo.m`
   - 矩阵: 30 seed × 2 α × SNR=10 dB = 60 trial

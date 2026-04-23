@@ -825,7 +825,10 @@ if benchmark_mode
     end
     fprintf('[BENCHMARK] CSV 写入: %s (%d 行)\n', bench_csv_path, ...
             size(fading_cfgs,1) * length(snr_list));
-    return;   % benchmark 模式跳过可视化
+    if ~bench_diag.enable
+        return;   % benchmark 模式默认跳过可视化 + 诊断段
+    end
+    % bench_diag.enable=true 时 fall through 到 sync/H_est/Doppler 诊断段
 end
 
 %% ========== 同步信息 ========== %%
@@ -871,6 +874,9 @@ for fi=1:size(fading_cfgs,1)
 end
 
 %% ========== 可视化 ========== %%
+if benchmark_mode
+    return;   % bench_diag.enable=true 拿到诊断段后跳 figure
+end
 figure('Position',[100 400 700 450]);
 all_markers = {'o-','s-','d-','^-','v-'};
 all_colors = lines(size(fading_cfgs,1));

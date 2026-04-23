@@ -102,7 +102,7 @@
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
-| **L2' SC-FDE ~10% deterministic 灾难根因深挖** | 待做（2026-04-23） | Phase J Monte Carlo 确认 10% 触发率（30 seed × 2 α），cascade 无辜；5 候选层（Channel est 极性 / BCJR 错收敛 / Frame timing / CFO 边界 / Soft demap LLR）；最便宜首步：oracle bit 测试隔离 BCJR/demap；2-3h |
+| **L5 BEM Tikhonov 正则化（修 ~10% 灾难根因）** | 待做（2026-04-23） | L2' Step 1 锁定真根因 = `ch_est_bem.m` 求解 `inv(H'H)·H'y` ill-conditioned，灾难 case h_est 幅度爆 18-10²⁶×；标准修复：`inv(H'H + λI)·H'y`，λ=噪声方差；预期消除 10% 灾难触发率；30 min 工时 |
 | **rx_chain.rx_otfs 真重写（main_sim_single 改造）** | 骨架占位 | rx_otfs_real 已加入 switch 路径但未实现；需 main_sim_single 开启真实 passband + 信道 + rx_otfs_real 填充。独立 spec 待创建 |
 | ~~**OTFS 离散 Doppler 32% BER 专项 debug**~~ | ✅ 2026-04-21 | 根因 = `pilot_mode='sequence'` regression（非 Doppler 问题）。回滚 default → impulse，3 信道 × 3 trial BER 0-0.04%。详见 `wiki/modules/13_SourceCode/OTFS调试日志.md` |
 | ~~**α 补偿推广到其他 4 体制**~~ | 🟡 部分完成（2026-04-21） | OFDM/DSSS/FH-MFSK 推广成功（A2 全 0%，D |α|≤1e-2 大部分工作）；SC-TDE 失败（下游 α 敏感，独立 spec 待开） |

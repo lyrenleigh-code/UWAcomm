@@ -50,17 +50,43 @@ SNR=15/20 救活、**SNR=25 又崩** → **违反 BER vs SNR 单调律** → det
 - **±α 灾难率几乎相同**（3/3）→ 不是 ±α 不对称
 - **真实灾难率 ~10%**（不是 SNR 受限单点）
 
-### 五个候选根因层（待 L2' 深挖）
+### 真根因（L2' Step 1 锁定，2026-04-23）：BEM 信道估计 **ill-conditioned 数值发散**
 
-| # | 机制 | 验证方法 |
+**证据**（`diag_disaster_layer_isolation.m` 4 trial Oracle H_est 表）：
+
+| Trial | α | seed | BER | path1 |gain| | path6 |gain| | 状态 |
+|---|---|:-:|:-:|---|---|---|
+| 1 | -1e-2 | 1 | 0% | 1.006 | 0.150 | 健康（与静态参考 0.765/0.092 同档）|
+| 2 | -1e-2 | 15 | 47.5% | **13.7** | **74.4** | 幅度爆 18-808× |
+| 3 | +1e-2 | 1 | 0% | 1.009 | 0.131 | 健康 |
+| 4 | +1e-2 | 23 | 49.2% | **7.9×10²⁵** | **3.1×10²⁶** | 数值溢出（接近 NaN）|
+
+**机制**：BEM (Basis Expansion Model) 求解 `inv(H'H) · H'y` 在某些 (TX bits, RX noise)
+组合下观测矩阵 H 接近奇异 → 求逆放大噪声 → h_est 幅度发散 → MMSE 均衡用错信道 → 解码全错。
+
+经典 ill-conditioned LS 问题，BEM 估计器算法弱点。
+
+### 5 候选层最终判定
+
+| 候选 | 状态 | 说明 |
+|---|---|---|
+| **A. Channel est 极性翻转** | 🟡 部分（不是相位翻是**幅度爆**）| 真根因，但具体形式不是相位翻转 |
+| B. BCJR 错误固定点 | ❌ 派生症状 | BCJR 收到错信道 → 必然反向 |
+| C. Frame timing 偏移 | ❌ 排除 | lfm_pos=9817 健康/灾难 case 全相同 |
+| D. CFO 边界翻转 | ❌ 排除 | cascade α err 1e-6（α 估对了）|
+| E. Soft demap LLR 反号 | ❌ 派生症状 | demap 收到错信号 → 必然反向 |
+
+**实际只有一个根因：BEM 估计 ill-conditioned**。其他都是它的下游表现。
+
+### 修复方向（待 L5 实施）
+
+| # | 方法 | 风险 |
 |---|------|------|
-| A | Channel est 极性翻转（训练相关峰相位错） | 看 h_est 与 oracle 极性 |
-| B | BCJR 错误固定点收敛 | 看 Turbo iter LLR 历史 |
-| C | Frame timing 偏 1 样本 | 看 lfm_pos 与 oracle 切片对比 |
-| D | CFO 边界相位翻转（残余 CFO 估计 ±π 翻面）| 看 CFO 估值跨 seed 分布 |
-| E | Soft demapper LLR 反号 | 加 oracle bit 跳过 demap 看 BER |
+| 1 | **Tikhonov 正则化** `inv(H'H + λI) H'y`，λ=噪声方差或经验值 | 低（标准做法）|
+| 2 | **SVD 截断** 去掉小奇异值（条件数大于阈值）| 中（多了截断阈值参数）|
+| 3 | **运行时检测 + fallback** 监测 `\|h_est\| > 阈值` 回退到上一 block | 低（不改算法）|
 
-最便宜的隔离：oracle bit 测试（跳过 BCJR 和 demap），看是否 0%（→ A/C/D 之一），还是仍灾难（→ E）。
+**建议 1（Tikhonov）** — 最低风险、最常用、不改架构。
 
 ### 工程影响
 
