@@ -163,6 +163,7 @@
 | **DSSS 符号级 Doppler 跟踪（Sun-2020）** | 2026-04-22 | spec `2026-04-22-dsss-symbol-doppler-tracking.md`；est_alpha_dsss_symbol.m + comp_resample_piecewise.m；D α=+3e-2 BER **51% → 2.2%** (25× 改善)；Symbol mean > Symbol per-sym（静态 α），A2/D |α|≤3e-3 维持 0% |
 | **α=3e-2 突破（SC-FDE）** | 2026-04-21 | spec `2026-04-21-alpha-pipeline-large-alpha-debug.md`；TX tail pad + CP 阈值门禁 + 正向大 α 精扫 3 patch；α=+3e-2 BER **50% → 5.4%**，工作范围 1e-2 → **3e-2（45 m/s 鱼雷覆盖）**；VSS spec 中断保留代码 |
 | **SC-FDE cascade 盲估 OOM 修复（Patch D+E）** | 2026-04-23 | spec `2026-04-22-scfde-cascade-resample-oom-fix.md`；3 处 `rat()` 容差 `1e-7/1e-6 → 1e-5`，poly_resample 单次峰值 4 GB → 40 MB；试错链 Phase A guard 1e-3 副作用（α=5e-4 50% BER）+ Phase B 复用 stage1 双 bug 已记录在 plan；最终 5 点 BER 与 baseline 完全一致，内存 97% → <30% |
+| **SC-FDE α=-1e-2 单点 SNR 受限确认** | 2026-04-23 | 诊断 `diag_neg_1e2_root_cause.m`：2 α × 3 SNR × 5 seed；α=-1e-2 SNR=10 13.14% → SNR=15 0% 断崖恢复；物理根因 estimator ±α 系统偏差不对称（+1e-2 偏 5e-6 在底，-1e-2 偏 2e-5 超底）；接受 limitation（SNR≥15 全 α 工作）；附带发现 `bench_seed` 不生效（5 seed std=0）→ 归 E2E C 阶段 |
 
 ---
 

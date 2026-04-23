@@ -1,11 +1,29 @@
 ---
 tags: [结论, 技术决策]
-updated: 2026-04-22
+updated: 2026-04-23
 ---
 
 # 关键技术结论
 
 累积记录项目中得出的技术结论，作为后续决策依据。
+
+## SC-FDE cascade α=-1e-2 单点 SNR 受限（2026-04-23，详见 [[specs/archive/2026-04-22-scfde-cascade-resample-oom-fix]]）
+
+诊断脚本 `tests/SC-FDE/diag_neg_1e2_root_cause.m`：2 α × 3 SNR × 5 seed = 30 trial。
+
+| α | SNR=10 dB | SNR=15 dB | SNR=20 dB |
+|:---:|:---:|:---:|:---:|
+| **-1e-2** | **13.14%** | **0%** | **0%** |
+| +1e-2 | 0% | 0% | 0% |
+
+- **物理根因**：`est_alpha_dual_chirp` 在 SNR=10 dB 下噪底 ~5e-6
+  - α=+1e-2 estimator 系统偏差 -5e-6（在底）→ α_p2 < 3e-6 门限被吞 → 已是噪底极限，OK
+  - α=-1e-2 estimator 系统偏差 -2e-5（**4× 超底**）→ α_p2_raw 同样估不出（噪声主导）→ stage1 残余无法精修 → ~1 样本时钟漂移超 SC-FDE 容忍
+  - SNR=15 dB 噪底降到 ~1e-6，2e-5 残余可被精修 → BER=0
+- **Estimator ±α 不对称**（4× 偏差差异）是上层根因，但 2026-04-22 暂不深挖
+- **接受 limitation**：SNR=10 dB 是 cascade 物理边界，**SNR≥15 dB 全 α∈[±5e-4, ±3e-2] 工作**
+- **附带 issue**：`bench_seed` 未传到信道生成（5 seed BER std=0），属 todo `E2E benchmark C 阶段` 范畴
+- **可选方案 B**（未做）：LFM 噪底自适应门限（基于训练残差估 SNR）让 SNR=10 边界场景也通；2-3h 工时，BER 改善 1 个点，性价比低
 
 ## gen_doppler_channel 仿真-补偿架构修复（2026-04-22，V1.5，详见 [[specs/archive/2026-04-22-matching-pair-doppler-v1_5]]）
 

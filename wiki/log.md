@@ -2,6 +2,15 @@
 
 ## 2026-04-23
 
+- **SC-FDE α=-1e-2 单点 SNR 受限确认（H1 ✓）**
+  - 诊断: `modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_neg_1e2_root_cause.m`
+  - 矩阵: 2 α × 3 SNR × 5 seed = 30 trial
+  - 关键结果: α=-1e-2 SNR=10 BER=13.14% → SNR=15 BER=0%（断崖恢复）
+  - 物理: estimator 在 SNR=10 噪底 ~5e-6；-1e-2 系统偏差 2e-5 超底 → α_p2 估不出 → 残余无法精修
+  - 决策: 接受 limitation（SNR≥15 全 α 工作）；不做边界修复（性价比低）
+  - 附带 issue: `bench_seed` 未传到信道生成（5 seed std=0）→ 归 `E2E benchmark C 阶段`
+  - 回流: `wiki/conclusions.md` 新条目（SNR 受限边界 + 物理表）
+
 - **SC-FDE cascade 盲估 OOM 修复（Patch D+E）**
   - spec: `specs/active/2026-04-22-scfde-cascade-resample-oom-fix.md`
   - plan: `plans/scfde-cascade-resample-oom-fix.md`
