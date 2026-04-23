@@ -1,5 +1,20 @@
 # Wiki 操作日志
 
+## 2026-04-24
+
+- **SC-TDE post-CFO 伪补偿 fix + plan C 证伪（V5.4）**
+  - Spec: `specs/active/2026-04-24-sctde-remove-post-cfo-compensation.md`（归档中）
+  - Parent RCA spec: `specs/archive/2026-04-23-sctde-alpha-1e2-disaster-root-cause.md`（归档中）
+  - 改动: `test_sctde_timevarying.m` 删 D6/D7 pre-CFO + post-CFO 改默认 skip + `diag_enable_legacy_cfo` 反义 toggle + `row.alpha_est` CSV 字段
+  - 新建: `verify_alpha_sweep.m`（V1 α 扫描 8α×5seed + V2 α=0 SNR gate 3SNR×5seed）
+  - V1 核心验证: α=+1e-3 50.66%→0%，α=+1e-2 50.36%→0.29%（主灾难关闭）
+  - V2: α=0 SNR=10 1.84%→0.04%（副带红利）
+  - V3 plan A: fd=1Hz {21.70, 17.39, 27.96, 0.00}，SNR=20 Turbo 救回
+  - V3 plan C（时变 apply post-CFO 实验）**证伪**: fd=1Hz SNR=20 从 0% 崩到 37%，全盘更差 → 回滚到全 skip
+  - 历史 V5.2 "fd=1Hz 0.76%" 不可复现（代码演化累积差异）
+  - 衍生: 开新 spec `specs/active/2026-04-24-sctde-fd1hz-nonmonotonic-investigation.md`（5 H + 3 阶段调研）
+  - 回流: `wiki/modules/13_SourceCode/SC-TDE调试日志.md` 追加 V5.4 章节；`wiki/conclusions.md` 加第 39 条（基带 Doppler 模型下 post-CFO 伪操作）
+
 ## 2026-04-23
 
 - **SC-TDE α=+1e-2 100% 灾难根因锁定（post-CFO 伪补偿）**

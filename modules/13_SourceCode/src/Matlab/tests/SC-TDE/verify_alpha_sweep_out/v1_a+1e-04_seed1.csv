@@ -1,0 +1,2 @@
+timestamp,matlab_ver,stage,scheme,profile,fd_hz,doppler_rate,snr_db,seed,ber_coded,ber_uncoded,nmse_db,sync_tau_err,frame_detected,turbo_final_iter,runtime_s,alpha_est
+2026-04-23T21:00:49,25.2.0.315,verify_v1,SC-TDE,custom6,0,0.0001,10,1,0,NaN,NaN,NaN,1,10,NaN,0.000119013

@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
-> 最后更新：2026-04-23
-> 页面总数：51（今日 E2E C + sign convention + 5 体制灾难率量化 + GAMP V1.4 修复链；详见 conclusions + log）
+> 最后更新：2026-04-24
+> 页面总数：52（新增 SC-TDE fd=1Hz 非单调 investigation spec；本日 V5.4 post-CFO 删除 fix + plan C 证伪，详见 conclusions #39 + log）
 
 ## Architecture（架构页）
 

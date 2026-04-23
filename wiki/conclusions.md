@@ -1,6 +1,6 @@
 ---
 tags: [结论, 技术决策]
-updated: 2026-04-23
+updated: 2026-04-24
 ---
 
 # 关键技术结论
@@ -362,3 +362,17 @@ L484-487 + L590-596 用 `all_cp_data(1:10)` 做相关挑 sps 相位（oracle 泄
   修复：`test_otfs_timevarying.m:20` 默认回滚 'impulse'。
   衍生：原先拟用 [[yang-2026-uwa-otfs-nonuniform-doppler]] 的非均匀 Doppler 理论被证伪
   （H4 否定），暂不引入 off-grid block-sparse OMP。详见 [[OTFS调试日志]]。
+
+39. **基带 Doppler 信道模型下 post-CFO 补偿是伪操作 (2026-04-24)**：
+  `gen_uwa_channel` 工作在基带（`s_bb((1+α)t)` 纯时间伸缩 + 多径），**无 fc·α 载波频偏**。
+  `comp_resample_spline` 补偿时间伸缩后 `bb_comp` 完全无 CFO。
+  `rx_sym_recv .* exp(-j·2π·α·fc·t)` 这类"残余 CFO 补偿"凭空注入 α·fc 频偏破坏对齐。
+  验证（SC-TDE，D10）：skip 后 α=+1e-3 50.66%→0%，α=+1e-2 50.36%→0.29%，α=0 1.84%→0.04%。
+  **副发现（plan C 证伪）**：post-CFO 对时变 Jakes 分支（fd>0）**也是破坏性的** —
+  apply 反而把 fd=1Hz SNR=20 从 0% 打崩到 37%，不是只对 static 有害。
+  因此结论是**全 skip**（`diag_enable_legacy_cfo=true` 反义 toggle 保留供历史回溯）。
+  未来若切 passband Doppler 信道（`gen_uwa_channel` 输出含真 CFO），需重新评估。
+  类比：[[SC-FDE调试日志]] Phase J 观察 ~10% 灾难率，SC-FDE 用 FDE 吸收部分相位旋转灾难率低；
+  SC-TDE 时域 DFE 无此免疫，所以同 bug 下 15/15 全灾难。
+  横向审计待办：spec `2026-04-24-cfo-postcomp-cross-scheme-audit.md`（DSSS 热/OFDM 温/FH-MFSK,OTFS 冷）。
+  详见 [[SC-TDE调试日志]] V5.3（RCA）+ V5.4（fix + plan C 证伪）。

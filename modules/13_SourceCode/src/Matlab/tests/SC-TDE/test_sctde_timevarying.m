@@ -3,15 +3,21 @@
 %     帧组装: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]
 % 信道: 等效基带帧 → gen_uwa_channel(多径+Jakes+多普勒) → 09上变频 → +实噪声
 % RX: 09下变频 → ①LFM相位粗估多普勒 → ②粗补偿+训练精估 → ③LFM精确定时 →
-%     提取数据 → 09 RRC匹配 → 残余CFO补偿(alpha_est*fc) →
+%     提取数据 → 09 RRC匹配 →
 %     12 Turbo均衡(GAMP+DFE或BEM+ISI消除) → 译码
-% 版本：V5.2.0 — 时变跳过训练精估 + nv_post 实测噪声兜底 nv_eq
+% 版本：V5.4.0 — 删 post-CFO 伪补偿（基带 Doppler 模型下是伪操作，α=+1e-3 起 BER 破 50%）
 % 变更：V5.1→V5.2 对齐 OFDM V4.3 策略（修复fd=1Hz高SNR反弹）
 %   1. 时变信道：alpha_est = alpha_lfm（跳过训练精估，训练相位差被Jakes污染）
 %   2. BEM估计后：从训练段实测 nv_post_meas，nv_eq = max(nv_eq, nv_post_meas)
 %   静态路径: GAMP+turbo_equalizer_sctde（不变）
 %   时变路径: BEM(DCT)+散布导频+ISI消除+MMSE Turbo（nv_eq 兜底后进 Turbo）
 %   V5.3: 加 benchmark_mode 注入开关（spec 2026-04-19-e2e-timevarying-baseline）
+%   V5.4: 删 post-CFO 伪补偿（含 D6/D7 pre-CFO 插桩），保留 diag_enable_legacy_cfo 反义回溯
+%         RCA: specs/archive/2026-04-23-sctde-alpha-1e2-disaster-root-cause
+%         fix: specs/archive/2026-04-24-sctde-remove-post-cfo-compensation
+%         static 受益：α=+1e-3 50.66%→0%，α=+1e-2 50.36%→0.29%，α=0 1.84%→0.04%
+%         时变实测（V3 plan C 证伪）：apply post-CFO 在 fd=1Hz 下反而破坏，全 skip 更优
+%         fd=1Hz 非单调 BER vs SNR → specs/active/2026-04-24-sctde-fd1hz-nonmonotonic-investigation
 
 %% ========== Benchmark mode 注入（2026-04-19） ========== %%
 if ~exist('benchmark_mode','var') || isempty(benchmark_mode)
@@ -391,18 +397,6 @@ for fi = 1:size(fading_cfgs,1)
             bb_comp = bb_raw;
         end
 
-        % === diag D6: sps 搜索前 pre-CFO 频偏补偿（验证 fc·α 残余频偏假设） === %
-        % 依据：bb_raw = s_bb((1+α)t)·exp(j·2π·fc·α·t)，comp_resample 只处理时间伸缩，
-        % fc·α=120 Hz 频偏保留在 bb_comp 中，sps 相位搜索在此频偏下无法对齐。
-        if exist('diag_precomp_cfo','var') && diag_precomp_cfo && abs(alpha_est) > 1e-10
-            cfo_hz_pre = alpha_est * fc;
-            t_bb_pre = (0:length(bb_comp)-1) / fs;
-            bb_comp = bb_comp .* exp(-1j * 2*pi * cfo_hz_pre * t_bb_pre);
-            if si == 1 && fi == 1
-                fprintf('  [DIAG-D6] pre-CFO compensation: %+.1f Hz applied to bb_comp (before sps search)\n', cfo_hz_pre);
-            end
-        end
-
         % 【P5 2026-04-21】LFM2 定时改用 down-chirp 模板
         mf_lfm_neg = conj(fliplr(LFM_bb_neg_n));
         corr_lfm_comp = abs(filter(mf_lfm_neg, 1, bb_comp(1:min(lfm2_search_len,length(bb_comp)))));
@@ -423,19 +417,6 @@ for fi = 1:size(fading_cfgs,1)
             rx_data_bb = [bb_comp(ds:end), zeros(1, de-length(bb_comp))];
         else
             rx_data_bb = bb_comp(ds:de);
-        end
-
-        % === diag D7: 数据段级 pre-CFO 频偏补偿（保留 LFM 定时完整性）=== %
-        % 对比 D6（bb_comp 级 pre-CFO 会偏移 LFM 匹配滤波峰 36 samples）。
-        % 时间轴：从帧原点 (ds-1)/fs 起算，与 bb_comp 时间基准一致。
-        if exist('diag_precomp_cfo_data','var') && diag_precomp_cfo_data && abs(alpha_est) > 1e-10
-            cfo_hz_pre = alpha_est * fc;
-            t_data_abs = ((ds-1) + (0:length(rx_data_bb)-1)) / fs;
-            rx_data_bb = rx_data_bb .* exp(-1j * 2*pi * cfo_hz_pre * t_data_abs);
-            if si == 1 && fi == 1
-                fprintf('  [DIAG-D7] pre-CFO on rx_data_bb: %+.1f Hz (t0=%.4fs, LFM 定时完整)\n', ...
-                    cfo_hz_pre, (ds-1)/fs);
-            end
         end
 
         % RRC匹配+下采样+训练对齐
@@ -495,19 +476,27 @@ for fi = 1:size(fading_cfgs,1)
         nv_eq = max(noise_var, 1e-10);
         P_paths = length(sym_delays);
 
-        % 残余CFO补偿（用估计alpha，不用oracle dop_rate）
-        % === diag D6/D7: pre-CFO 开启时跳过此处符号级 CFO（避免双重补偿） === %
-        % === diag D10: gen_uwa_channel 是基带模型不产生 fc·α 频偏，此补偿可能是伪操作 === %
-        h_precomp_done = (exist('diag_precomp_cfo','var')      && diag_precomp_cfo) || ...
-                         (exist('diag_precomp_cfo_data','var') && diag_precomp_cfo_data);
-        h_disable_cfo  = exist('diag_disable_cfo_postcomp','var') && diag_disable_cfo_postcomp;
-        if abs(alpha_est) > 1e-10 && ~h_precomp_done && ~h_disable_cfo
+        % === 历史 post-CFO 补偿已删除（RCA: specs/archive/2026-04-23-sctde-alpha-1e2-disaster-root-cause）===
+        % fix: specs/archive/2026-04-24-sctde-remove-post-cfo-compensation
+        % 根因：gen_uwa_channel 基带模型仅做时间伸缩 s_bb((1+α)t) + 多径，无载波频偏；
+        %       comp_resample_spline 补偿时间伸缩后，bb_comp 已无 CFO。
+        %       原 rx_sym_recv .* exp(-j·2π·α·fc·t) 在 static 下 α=+1e-3 起注入 α·fc 频偏破 50% BER。
+        % D10 验证（static）：skip 后 α=+1e-3 50.66%→0%，α=+1e-2 50.36%→0.29%，α=0 1.84%→0.04%。
+        % V3 验证（时变）：apply post-CFO（plan C 实验）反而使 fd=1Hz SNR=20 0%→37%，
+        %       证明时变路径也不需 post-CFO；历史 V5.2 "fd=1Hz 0.76%" 不可复现（代码演化累积差异）。
+        % fd=1Hz 的非单调 BER vs SNR（SNR=15 27.96% / SNR=20 0%）属 Turbo+BEM 在时变信道下
+        %       的稀有触发，已 known limitation，独立 spec 调研：
+        %       specs/active/2026-04-24-sctde-fd1hz-nonmonotonic-investigation
+        % 未来若切 passband Doppler 信道（gen_uwa_channel 输出含真 CFO），需重新评估。
+        % 反义 toggle 保留供历史行为回溯/对照实验：
+        if abs(alpha_est) > 1e-10 && ...
+           exist('diag_enable_legacy_cfo','var') && diag_enable_legacy_cfo
             cfo_res_hz = alpha_est * fc;
             t_sym_vec = (0:length(rx_sym_recv)-1) / sym_rate;
             rx_sym_recv = rx_sym_recv .* exp(-1j*2*pi*cfo_res_hz*t_sym_vec);
-        elseif h_disable_cfo && abs(alpha_est) > 1e-10 && si == 1 && fi == 1
-            fprintf('  [DIAG-D10] skip post-CFO compensation (α·fc=%+.1f Hz not applied)\n', ...
-                alpha_est*fc);
+            if si == 1 && fi == 1
+                fprintf('  [LEGACY-CFO] 启用历史 post-CFO 补偿：α·fc=%+.1f Hz\n', cfo_res_hz);
+            end
         end
 
         if strcmpi(ftype, 'static')
@@ -823,6 +812,7 @@ if benchmark_mode
             row.frame_detected   = 1;
             row.turbo_final_iter = 10;
             row.runtime_s        = NaN;
+            row.alpha_est        = alpha_est_matrix(fi_b, si_b);  % 2026-04-24 verify 用
             bench_append_csv(bench_csv_path, row);
         end
     end

@@ -103,7 +103,8 @@
 | 任务 | 状态 | 说明 |
 |------|------|------|
 | ~~**SC-TDE α=+1e-2 100% 灾难根因深挖**~~ | ✅ 2026-04-23 | RCA 完成（spec `2026-04-23-sctde-alpha-1e2-disaster-root-cause.md`）。10 步 diag（D0b→D10）锁定根因：`test_sctde_timevarying.m:436-441` 的 `exp(-j·2π·α·fc·t)` 在基带 Doppler 模型下是伪补偿。D10 验证 disable 后 α=+1e-2 BER 50%→0.29%。**副发现**：α=+1e-3 原来也是 100% 灾难（历史认知错误）。Fix spec + cross-scheme audit spec 已开 |
-| **SC-TDE 删除 post-CFO 伪补偿**（fix） | 🆕 2026-04-24 | spec `2026-04-24-sctde-remove-post-cfo-compensation.md`；删 runner line 436-441 + V1 α 扫描（8 α × 5 seed）+ V2 D0b 回归 + V3 时变路径回归；保留 `diag_enable_legacy_cfo` 反义 toggle |
+| ~~**SC-TDE 删除 post-CFO 伪补偿**（fix）~~ | ✅ 2026-04-24 | spec `archive/2026-04-24-sctde-remove-post-cfo-compensation.md`；runner V5.4（删 D6/D7 pre-CFO + post-CFO 默认 skip + `diag_enable_legacy_cfo` 反义 toggle + `row.alpha_est` CSV）；V1 α 扫描 PASS（+1e-3 50.66%→0%，+1e-2 50.36%→0.29%）V2 α=0 gate PASS（1.84%→0.04%）；**plan C 证伪**（时变 apply post-CFO 反让 fd=1Hz SNR=20 0%→37%），回滚到全 skip；fd=1Hz 非单调 BER vs SNR 独立 investigation spec |
+| **SC-TDE fd=1Hz 非单调 BER vs SNR investigation** | 🆕 2026-04-24 | spec `2026-04-24-sctde-fd1hz-nonmonotonic-investigation.md`；5 H 假设（Turbo+BEM 稀有触发/BEM Q 阶/nv_post 偏差/α 偏估/定时）+ 3 阶段矩阵（15 seed Monte Carlo / oracle 隔离 / fix）；known limitation |
 | **CFO postcomp 横向检查 5 体制**（audit） | 🆕 2026-04-24 | spec `2026-04-24-cfo-postcomp-cross-scheme-audit.md`；grep + 逐 runner 审计 SC-FDE/OFDM/DSSS/FH-MFSK/OTFS；对命中 runner 做对应 D10 验证；DSSS 热、OFDM 温、FH-MFSK/OTFS 冷 |
 | **DSSS α=+1e-2 100% 灾难根因深挖（Sun-2020 扩展）** | 🆕 2026-04-23 | Phase c sanity check 发现 15/15 全灾难 median 46.2%；Sun-2020 符号级跟踪对 α=+1e-2 失效（已部分归档 `2026-04-22-dsss-symbol-doppler-tracking`），需 adaptive Gold31 bank；2-3h |
 | **L5/L6 ch_est_gamp V1.1→V1.4 修复链 + SNR 受限归档** | 2026-04-23 | 修订：真根因是 `ch_est_gamp.m`（不是 BEM，static 路径走 GAMP）；V1.1 divergence guard+LS fallback / V1.2 双跑 / V1.3 CV 撤回 / V1.4 偏 LS 0.8；30 seed Monte Carlo: 灾难率 10% → 0%/6.7%；残余 2/30 验证 SNR=15 恢复 0% → 边界 limitation，非 bug |
