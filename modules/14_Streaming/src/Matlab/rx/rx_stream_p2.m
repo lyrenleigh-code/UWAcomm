@@ -1,9 +1,12 @@
-function [text, info] = rx_stream_p2(session, sys)
+function [text, info] = rx_stream_p2(session, sys, opts)
 % 功能：多帧流式 RX —— channel.wav → 滑动检测 → 逐帧解 → text_assembler
-% 版本：V1.0.0（P2）
+% 版本：V1.1.0（2026-04-23：去 oracle α，默认盲估 estimate_alpha_dual_hfm）
+%       V1.0.0（P2）
 % 输入：
 %   session - 会话目录
 %   sys     - 系统参数
+%   opts    - optional struct:
+%     .use_oracle_alpha - bool (default false) 回退到 chinfo.mat oracle α
 % 输出：
 %   text - 拼接后的 UTF-8 文本
 %   info - struct
@@ -12,6 +15,8 @@ function [text, info] = rx_stream_p2(session, sys)
 %       .decoded          cell{各帧解码 struct}
 %       .N_detected       检测帧数
 %       .N_expected       TX 实际帧数（来自 meta_tx）
+
+if nargin < 3 || ~isstruct(opts), opts = struct(); end
 
 frame_idx_outer = 1;
 
@@ -34,18 +39,31 @@ rx_pb_padded = [zeros(1, N_lpf_warmup), rx_pb(:).'];
 [bb_padded, ~] = downconvert(rx_pb_padded, sys.fs, sys.fc, sys.fhmfsk.total_bw);
 bb_raw = bb_padded(N_lpf_warmup+1 : end);
 
-% ---- 4. Doppler 补偿（oracle）----
-chinfo_path = fullfile(session, 'channel_frames', sprintf('%04d.chinfo.mat', frame_idx_outer));
-if exist(chinfo_path, 'file')
-    ci = load(chinfo_path);
-    if isfield(ci, 'doppler_rate') && abs(ci.doppler_rate) > 1e-10
-        alpha = ci.doppler_rate;
-        N_rx = length(bb_raw);
-        t_orig = (0:N_rx-1) / sys.fs;
-        t_query = t_orig / (1 + alpha);
-        bb_raw = interp1(t_orig, bb_raw, t_query, 'spline', 0);
-        fprintf('[RX-P2] Doppler 补偿 α=%.3e (fd@fc=%gHz)\n', alpha, alpha*sys.fc);
+% ---- 4. Doppler 补偿（2026-04-23 P2 去 oracle：default estimate_alpha_dual_hfm 盲估）----
+% 可选 opts.use_oracle_alpha=true 回退 chinfo.mat 读 α
+use_oracle_alpha = isfield(opts, 'use_oracle_alpha') && opts.use_oracle_alpha;
+alpha = 0;
+if use_oracle_alpha
+    chinfo_path = fullfile(session, 'channel_frames', sprintf('%04d.chinfo.mat', frame_idx_outer));
+    if exist(chinfo_path, 'file')
+        ci = load(chinfo_path);
+        if isfield(ci, 'doppler_rate'), alpha = ci.doppler_rate; end
     end
+else
+    try
+        [alpha, conf] = estimate_alpha_dual_hfm(bb_raw, sys);
+        fprintf('[RX-P2] α 盲估 (dual-HFM): α=%.3e, conf=%.2f\n', alpha, conf);
+    catch ME
+        fprintf('[RX-P2] α 盲估失败 (%s)，fallback α=0\n', ME.message);
+        alpha = 0;
+    end
+end
+if abs(alpha) > 1e-10
+    N_rx = length(bb_raw);
+    t_orig = (0:N_rx-1) / sys.fs;
+    t_query = t_orig / (1 + alpha);
+    bb_raw = interp1(t_orig, bb_raw, t_query, 'spline', 0);
+    fprintf('[RX-P2] Doppler 补偿 α=%.3e (fd@fc=%gHz)\n', alpha, alpha*sys.fc);
 end
 
 % ---- 5. 流式帧检测 ----

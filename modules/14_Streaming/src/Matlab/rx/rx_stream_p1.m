@@ -1,9 +1,13 @@
-function [text, info] = rx_stream_p1(session, sys)
+function [text, info] = rx_stream_p1(session, sys, opts)
 % 功能：RX 接收链（P1 单帧 FH-MFSK）
-% 版本：V1.0.0
+% 版本：V1.1.0（2026-04-23：去 oracle α，默认盲估 estimate_alpha_dual_hfm；
+%                opts.use_oracle_alpha=true 回退 chinfo.mat 读 α）
+%       V1.0.0
 % 输入：
 %   session - 会话目录
 %   sys     - 系统参数
+%   opts    - optional struct:
+%     .use_oracle_alpha - bool (default false) 回退到 chinfo.mat oracle α
 % 输出：
 %   text - 解码出的 UTF-8 字符串
 %   info - struct
@@ -15,6 +19,8 @@ function [text, info] = rx_stream_p1(session, sys)
 % 产出：
 %   <session>/rx_out/0001.meta.mat    RX 解码详情
 %   <session>/rx_out/session_text.log 累积文本（追加）
+
+if nargin < 3 || ~isstruct(opts), opts = struct(); end
 
 frame_idx = 1;
 
@@ -31,21 +37,34 @@ meta_tx = load(meta_tx_path);
 % ---- 2. 下变频 ----
 [bb_raw, ~] = downconvert(rx_pb, sys.fs, sys.fc, sys.fhmfsk.total_bw);
 
-% ---- 2b. Doppler 补偿（P1：oracle，从 chinfo.mat 读 α）----
-% P5/P6 改盲估计（LFM1+LFM2 相位差或重采样搜索）
-chinfo_path = fullfile(session, 'channel_frames', sprintf('%04d.chinfo.mat', frame_idx));
-if exist(chinfo_path, 'file')
-    ci = load(chinfo_path);
-    if isfield(ci, 'doppler_rate') && abs(ci.doppler_rate) > 1e-10
-        alpha = ci.doppler_rate;
-        % 反向 resample：把 RX 时间轴拉回 TX 时间轴
-        % 信道做的是 rx(t) = tx(t·(1+α))；反向 = 在 t·(1-α)/(1+α) 重采样
-        N_rx = length(bb_raw);
-        t_rx_orig = (0:N_rx-1) / sys.fs;
-        t_rx_resampled = t_rx_orig / (1 + alpha);
-        bb_raw = interp1(t_rx_orig, bb_raw, t_rx_resampled, 'spline', 0);
-        fprintf('[RX] Doppler 补偿: α=%.3e (fd@fc=%gHz)\n', alpha, alpha*sys.fc);
+% ---- 2b. Doppler 补偿（2026-04-23 P1 去 oracle：default estimate_alpha_dual_hfm 盲估）----
+% 可选 opts.use_oracle_alpha=true 回退到 chinfo.mat 读 α（backwards-compat）
+use_oracle_alpha = isfield(opts, 'use_oracle_alpha') && opts.use_oracle_alpha;
+alpha = 0;
+if use_oracle_alpha
+    chinfo_path = fullfile(session, 'channel_frames', sprintf('%04d.chinfo.mat', frame_idx));
+    if exist(chinfo_path, 'file')
+        ci = load(chinfo_path);
+        if isfield(ci, 'doppler_rate'), alpha = ci.doppler_rate; end
     end
+else
+    % 盲估计：双 HFM 时延差（等价 13_SourceCode 各 runner 的 cascade stage 1）
+    try
+        [alpha, conf] = estimate_alpha_dual_hfm(bb_raw, sys);
+        fprintf('[RX] α 盲估 (dual-HFM): α=%.3e, conf=%.2f\n', alpha, conf);
+    catch ME
+        fprintf('[RX] α 盲估失败 (%s)，fallback α=0\n', ME.message);
+        alpha = 0;
+    end
+end
+if abs(alpha) > 1e-10
+    % 反向 resample：把 RX 时间轴拉回 TX 时间轴
+    % 信道做的是 rx(t) = tx(t·(1+α))；反向 = 在 t·(1-α)/(1+α) 重采样
+    N_rx = length(bb_raw);
+    t_rx_orig = (0:N_rx-1) / sys.fs;
+    t_rx_resampled = t_rx_orig / (1 + alpha);
+    bb_raw = interp1(t_rx_orig, bb_raw, t_rx_resampled, 'spline', 0);
+    fprintf('[RX] Doppler 补偿: α=%.3e (fd@fc=%gHz)\n', alpha, alpha*sys.fc);
 end
 
 % ---- 3. LFM 匹配滤波定位 ----
