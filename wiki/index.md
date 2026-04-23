@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
 > 最后更新：2026-04-23
-> 页面总数：51（cascade OOM Patch D+E + α=-1e-2 孤点 + Phase G 全场景验证；详见 conclusions + log）
+> 页面总数：51（cascade OOM Patch D+E + Phase I+J 揭示 SC-FDE ~10% deterministic 灾难触发率；详见 conclusions + log）
 
 ## Architecture（架构页）
 

@@ -2,6 +2,22 @@
 
 ## 2026-04-23
 
+- **Phase J Monte Carlo 真实灾难率 ~10%（重大修订）**
+  - 诊断: `modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_seed_monte_carlo.m`
+  - 矩阵: 30 seed × 2 α × SNR=10 dB = 60 trial
+  - **结果**: α=-1e-2 / +1e-2 灾难率均 **3/30 (10%)**，median=0%、mean=5%
+  - **双峰分布确认** → bug 性质明确（非统计涨落）
+  - **修订**: Phase G 的 "α=-1e-2 单点 SNR 受限" 被证伪 — 实际是 ~10% deterministic 灾难触发
+  - bench_seed hotfix: `uint32(mod(..., 2^32))` 处理 seed<42 负值 rng 拒绝
+  - 配套诊断脚本 4 个: disaster / oracle_isolation / high_snr / monte_carlo
+  - 5 候选根因层（Channel est 极性 / BCJR 固定点 / Frame timing / CFO 边界 / Soft demap）待 L2' 深挖
+
+- **Phase I oracle 隔离 + 高 SNR 扫描 — cascade 完全无辜**
+  - 诊断: `diag_seed1024_oracle_isolation.m` + `diag_seed1024_high_snr.m`
+  - oracle α 真值替代 cascade 估值，BER 仍 ~50% → cascade 不背锅
+  - 高 SNR 扫描发现 **非单调 BER vs SNR**（α=+1e-2: SNR=15/20 救活，SNR=25 又崩）
+  - 违反通信系统基本规律 → deterministic 灾难（共振 / 反向收敛模式）
+
 - **`bench_seed` 注入修复（Phase H）+ seed=1024 灾难发现**
   - 修复：`test_scfde_timevarying.m` L163 + L257 两处 `rng()` 加 `(bench_seed-42)*100000` 偏移；默认 42 时偏移 0 → backwards-compat（diag_cascade_quick 与 Patch E baseline bit-exact 一致）
   - 验证：α=-1e-2 5 seed BER std 从 0 → 20.89（seed 现真生效）

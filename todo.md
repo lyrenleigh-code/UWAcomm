@@ -102,6 +102,7 @@
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
+| **L2' SC-FDE ~10% deterministic 灾难根因深挖** | 待做（2026-04-23） | Phase J Monte Carlo 确认 10% 触发率（30 seed × 2 α），cascade 无辜；5 候选层（Channel est 极性 / BCJR 错收敛 / Frame timing / CFO 边界 / Soft demap LLR）；最便宜首步：oracle bit 测试隔离 BCJR/demap；2-3h |
 | **rx_chain.rx_otfs 真重写（main_sim_single 改造）** | 骨架占位 | rx_otfs_real 已加入 switch 路径但未实现；需 main_sim_single 开启真实 passband + 信道 + rx_otfs_real 填充。独立 spec 待创建 |
 | ~~**OTFS 离散 Doppler 32% BER 专项 debug**~~ | ✅ 2026-04-21 | 根因 = `pilot_mode='sequence'` regression（非 Doppler 问题）。回滚 default → impulse，3 信道 × 3 trial BER 0-0.04%。详见 `wiki/modules/13_SourceCode/OTFS调试日志.md` |
 | ~~**α 补偿推广到其他 4 体制**~~ | 🟡 部分完成（2026-04-21） | OFDM/DSSS/FH-MFSK 推广成功（A2 全 0%，D |α|≤1e-2 大部分工作）；SC-TDE 失败（下游 α 敏感，独立 spec 待开） |
@@ -165,7 +166,8 @@
 | **SC-FDE cascade 盲估 OOM 修复（Patch D+E）** | 2026-04-23 | spec `2026-04-22-scfde-cascade-resample-oom-fix.md`；3 处 `rat()` 容差 `1e-7/1e-6 → 1e-5`，poly_resample 单次峰值 4 GB → 40 MB；试错链 Phase A guard 1e-3 副作用（α=5e-4 50% BER）+ Phase B 复用 stage1 双 bug 已记录在 plan；最终 5 点 BER 与 baseline 完全一致，内存 97% → <30% |
 | **SC-FDE α=-1e-2 单点 SNR 受限确认** | 2026-04-23 | 诊断 `diag_neg_1e2_root_cause.m`：2 α × 3 SNR × 5 seed；α=-1e-2 SNR=10 13.14% → SNR=15 0% 断崖恢复；物理根因 estimator ±α 系统偏差不对称（+1e-2 偏 5e-6 在底，-1e-2 偏 2e-5 超底）；接受 limitation（SNR≥15 全 α 工作）；附带发现 `bench_seed` 不生效（5 seed std=0）→ 归 E2E C 阶段 |
 | **SC-FDE cascade 全场景验证（Phase G）** | 2026-04-23 | 诊断 `diag_alpha_sweep_full.m`：10 α × 3 SNR = 30 trial；工作率 SNR=10 9/10、SNR≥15 10/10；**新发现**：α=-1e-2 是孤立异常点（α=-3e-2 BER=0% 证伪 ±α 系统单调不对称假设），疑似 HFM/LFM 模板对齐局部不连续，待精细扫描验证 |
-| **`bench_seed` 注入修复（Phase H）** | 2026-04-23 | `test_scfde_timevarying.m` L163 + L257 加 `(bench_seed-42)*100000` 偏移，默认 42 时 backwards-compat；多 seed 验证 α=-1e-2 std 从 0→20.89；**揭示新问题**：5/30 trial (17%) ~50% BER，seed=1024 全场景灾难（待 Phase I 追因） |
+| **`bench_seed` 注入修复（Phase H）** | 2026-04-23 | `test_scfde_timevarying.m` L163 + L257 加 `(bench_seed-42)*100000` 偏移，默认 42 时 backwards-compat；hotfix uint32 mod wrap 处理 seed<42 负值；多 seed 验证 α=-1e-2 std 从 0→20.89 |
+| **Phase I+J SC-FDE ~10% deterministic 灾难触发归档** | 2026-04-23 | 4 诊断脚本：disaster/oracle_isolation/high_snr/monte_carlo；**oracle α 仍 ~50%** → cascade 无辜；**非单调 BER vs SNR**（α=+1e-2 SNR=15/20 救活、25 又崩）违反单调律；30 seed Monte Carlo 双峰确认：mean 5%、median 0%、灾难率 **3/30 (10%)** ±α 均；候选根因 5 层（Channel 极性 / BCJR 固定点 / Frame timing / CFO 边界 / Soft demap）待 L2' |
 
 ---
 

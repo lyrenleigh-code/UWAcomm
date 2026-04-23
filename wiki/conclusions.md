@@ -7,30 +7,78 @@ updated: 2026-04-23
 
 累积记录项目中得出的技术结论，作为后续决策依据。
 
-## SC-FDE cascade 全场景验证 + α=-1e-2 孤点 SNR 受限（2026-04-23，详见 [[specs/archive/2026-04-22-scfde-cascade-resample-oom-fix]]）
+## SC-FDE 接收链路 ~10% deterministic 灾难触发（2026-04-23，详见 [[specs/archive/2026-04-22-scfde-cascade-resample-oom-fix]]）
 
-### Phase G 完整 α sweep（10 α × 3 SNR，`diag_alpha_sweep_full.m`）
+> [!warning] 重大修订
+> 之前 Phase G 单 seed 跑出"α=-1e-2 SNR=10 13.14% 是 SNR 受限单点"的结论 **被 Phase J Monte Carlo 证伪**：实际是 SC-FDE **接收链路 ~10% deterministic 灾难触发率**，与 cascade 估值无关。
 
-| α | SNR=10 | SNR=15 | SNR=20 |
-|:---:|:---:|:---:|:---:|
-| -3e-2 | 0% | 0% | 0% |
-| **-1e-2** | **13.14%** ⚠ | **0%** | 0% |
-| -3e-3 / -1e-3 / -5e-4 | 0% | 0% | 0% |
-| +5e-4 ~ +3e-2（5 点） | 0% | 0% | 0% |
+### Phase G 单 seed 全场景（保留为参考，需以 Phase J 重新解读）
 
-**工作率**：SNR=10 **9/10**，SNR≥15 **10/10**。
+`diag_alpha_sweep_full.m`（10 α × 3 SNR × seed=42）：SNR=10 9/10、SNR≥15 10/10。
+**但这个 9/10 是 seed=42 单样本结果，不是真实工作率**。
 
-### 关键发现（推翻原 H3 假设）
+### Phase I 关键证据（diag_seed1024_oracle_isolation.m）
 
-- **α=-1e-2 是孤立异常点，不是单调 ±α 不对称**：
-  - 原 H3 假设 "estimator 偏差随 |α| 增长" 被 **α=-3e-2 BER=0% 证伪**（如成立则 -3e-2 应更糟）
-  - α=-3e-2 cascade 偏差 -8.7e-6（与 +3e-2 同档）；α=-1e-2 偏差 -2e-5；α=-3e-3 等更小 α 也 OK
-  - **新假设**：HFM/LFM 模板对齐在 α=-1e-2 附近碰局部不连续（搜索网格 cusp / 帧边界 / 模板 phase 周期）
-- **物理边界**：`est_alpha_dual_chirp` 在 SNR=10 dB 噪底 ~5e-6；该孤点偏差 2e-5（4× 超底）→ α_p2 估不出 → 无法精修 → ~1 样本时钟漂移超 SC-FDE 容忍
-- **SNR=15 dB 噪底降到 ~1e-6**，2e-5 残余可被精修 → BER=0
-- **接受 limitation**：SNR=10 dB 是 cascade 物理边界，**SNR≥15 dB 全 α∈[±5e-4, ±3e-2] 工作**
-- **附带 issue**：`bench_seed` 未传到信道生成（5 seed BER std=0），属 todo `E2E benchmark C 阶段` 范畴
-- **后续可选**：(1) 精细 α 扫描（-8e-3 ~ -1.2e-2 步进 1e-3）验证孤点是否是网格 cusp；(2) LFM 噪底自适应门限让 SNR=10 边界场景也通（2-3h，性价比低）
+cascade 完全无辜：
+
+| α | SNR | cascade BER | oracle α BER | Δ |
+|---|---|:---:|:---:|:---:|
+| -1e-2 | 10 | 50.66% | 49.78% | +0.88 |
+| +1e-2 | 10 | 51.42% | 50.76% | +0.66 |
+| -1e-2 | 15 | 50.46% | 50.90% | -0.44 |
+
+cascade α 估值误差仅 **1e-6 量级**（比 baseline 13% 那次还准），但 BER ~50% — 估值正确无救。
+
+### Phase I 高 SNR 扫描（非单调 BER 反常）
+
+`diag_seed1024_high_snr.m`（seed=1024 + α=+1e-2）：
+
+| SNR | 10 | 15 | 20 | **25** | 30 | 40 |
+|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| BER | 51.42% | 0% | 0% | **49.58%** | 49.71% | 50.61% |
+
+SNR=15/20 救活、**SNR=25 又崩** → **违反 BER vs SNR 单调律** → deterministic 灾难，非 SNR 噪底。
+
+### Phase J Monte Carlo 真实灾难率（diag_seed_monte_carlo.m，30 seed × 2 α × SNR=10）
+
+| α | mean | **median** | 灾难率 (>30%) | 中间 (5-30%) | 健康 (<5%) |
+|:---:|:---:|:---:|:---:|:---:|:---:|
+| -1e-2 | 5.43% | **0%** | **3/30 (10%)** | 1 | 26 |
+| +1e-2 | 5.86% | **0%** | **3/30 (10%)** | 4 | 23 |
+
+- **双峰分布确认**（多数完美 + 少数全错），mean ≠ median
+- **±α 灾难率几乎相同**（3/3）→ 不是 ±α 不对称
+- **真实灾难率 ~10%**（不是 SNR 受限单点）
+
+### 五个候选根因层（待 L2' 深挖）
+
+| # | 机制 | 验证方法 |
+|---|------|------|
+| A | Channel est 极性翻转（训练相关峰相位错） | 看 h_est 与 oracle 极性 |
+| B | BCJR 错误固定点收敛 | 看 Turbo iter LLR 历史 |
+| C | Frame timing 偏 1 样本 | 看 lfm_pos 与 oracle 切片对比 |
+| D | CFO 边界相位翻转（残余 CFO 估计 ±π 翻面）| 看 CFO 估值跨 seed 分布 |
+| E | Soft demapper LLR 反号 | 加 oracle bit 跳过 demap 看 BER |
+
+最便宜的隔离：oracle bit 测试（跳过 BCJR 和 demap），看是否 0%（→ A/C/D 之一），还是仍灾难（→ E）。
+
+### 工程影响
+
+- **低 SNR + α=±1e-2 下 ~10% 帧丢失率** — 在生产 SC-FDE 系统中是高的
+- **ARQ 重传同 noise pattern 救不了** — 需要 random interleaver / frame hopping 或修根因
+- 不是 SNR 受限（SNR=40 dB 灾难仍 ~50%）
+
+### bench_seed 修复（Phase H, commit `4e6e263 + d9f9e09`）
+
+- `test_scfde_timevarying.m` L163 + L257 加 `(bench_seed-42)*100000` 偏移 + uint32 mod wrap
+- 修复前 5 seed BER std=0（rng 仅基于 fi/si）→ **完全掩盖**这个 10% 灾难触发率
+- backwards-compat：seed=42 与 baseline bit-exact 一致
+
+### 之前所有 cascade 工作（Patch D+E）独立有效
+
+- cascade 三处 `rat()` 容差 `1e-7/1e-6 → 1e-5` 解决了 OOM（从 97% → <30%）
+- 5 个 baseline α 点 BER 与 commit 2947777 完全一致
+- 这部分修复**与本节 deterministic 灾难根因独立**，不需要回退
 
 ## gen_doppler_channel 仿真-补偿架构修复（2026-04-22，V1.5，详见 [[specs/archive/2026-04-22-matching-pair-doppler-v1_5]]）
 
