@@ -103,7 +103,8 @@
 | 任务 | 状态 | 说明 |
 |------|------|------|
 | **L5/L6 ch_est_gamp V1.1→V1.4 修复链 + SNR 受限归档** | 2026-04-23 | 修订：真根因是 `ch_est_gamp.m`（不是 BEM，static 路径走 GAMP）；V1.1 divergence guard+LS fallback / V1.2 双跑 / V1.3 CV 撤回 / V1.4 偏 LS 0.8；30 seed Monte Carlo: 灾难率 10% → 0%/6.7%；残余 2/30 验证 SNR=15 恢复 0% → 边界 limitation，非 bug |
-| **（可选）static 路径换 `ch_est_ls`/`ch_est_omp` 替代 GAMP** | 待做 | custom6 6 径全活跃违反 GAMP 的 BG 稀疏先验；OMP with K=K_sparse=6 或 LS Tikhonov 预期完全消灾且更快；需独立 spec 评估对其他 fading 类型的影响 |
+| ~~**（可选）static 路径换 `ch_est_ls`/`ch_est_omp` 替代 GAMP**~~ | ❌ 试败（2026-04-23） | spec `2026-04-23-scfde-omp-replace-gamp-and-oracle-clean.md`；OMP K=6 反而 +1e-2 灾难率 6.7%→10%（残差驱动选错 support）；保留作 `tog.use_omp_static` toggle，默认仍 GAMP V1.4 |
+| **SC-FDE sps 相位选择真去 oracle**（独立 spec 待开） | 待做 | 当前 L484/L590 用 `all_cp_data(1:10)` 是 oracle 泄漏；功率最大化在 ISI 信道失效（spec 同上 Phase B 撤回）；可选方案：LFM 模板尾部相关 / Gardner TED 量化 / 改帧加 training preamble；需独立 spec |
 | **rx_chain.rx_otfs 真重写（main_sim_single 改造）** | 骨架占位 | rx_otfs_real 已加入 switch 路径但未实现；需 main_sim_single 开启真实 passband + 信道 + rx_otfs_real 填充。独立 spec 待创建 |
 | ~~**OTFS 离散 Doppler 32% BER 专项 debug**~~ | ✅ 2026-04-21 | 根因 = `pilot_mode='sequence'` regression（非 Doppler 问题）。回滚 default → impulse，3 信道 × 3 trial BER 0-0.04%。详见 `wiki/modules/13_SourceCode/OTFS调试日志.md` |
 | ~~**α 补偿推广到其他 4 体制**~~ | 🟡 部分完成（2026-04-21） | OFDM/DSSS/FH-MFSK 推广成功（A2 全 0%，D |α|≤1e-2 大部分工作）；SC-TDE 失败（下游 α 敏感，独立 spec 待开） |

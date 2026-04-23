@@ -2,6 +2,16 @@
 
 ## 2026-04-23
 
+- **OMP 替换 + sps 去 oracle 双失败实验（spec `2026-04-23-scfde-omp-replace-gamp-and-oracle-clean`）**
+  - Phase A 试用 `ch_est_omp(K=6)` 替代 GAMP V1.4：+1e-2 灾难率 6.7%→10% ↗（反向）
+    - 根因：OMP K=6 强制选 6 column，残差驱动可能选错 support
+    - 决策：默认回 GAMP，OMP 保留作 `tog.use_omp_static` toggle 便于复现
+  - Phase B sps 相位用功率最大化（去 `all_cp_data(1:10)` oracle）：α=-1e-2 BER 13%→48% ❌
+    - 根因：custom6 6 径 ISI 让错误相位捕获更多能量泄漏
+    - 决策：撤回，注释保留教训；真去 oracle 另起 spec（LFM 模板/training preamble）
+  - **教训**：教科书做法（OMP for sparse / power-max for RRC timing）在色散信道有反例；都需用真实 BER 验证才能信
+  - 试错记录归档 `wiki/conclusions.md`，便于未来引用
+
 - **L5/L6 修复链：`ch_est_gamp` V1.1→V1.4 + SNR 受限验证**
   - 修复: `modules/07_ChannelEstEq/src/Matlab/ch_est_gamp.m`
     - V1.1 divergence guard + LS Tikhonov fallback（救 80% 灾难）

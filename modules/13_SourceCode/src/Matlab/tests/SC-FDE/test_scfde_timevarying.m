@@ -137,7 +137,8 @@ end
 tog = struct('skip_resample', false, 'skip_downconvert_lpf', false, ...
              'force_best_off', false, 'oracle_h', false, ...
              'force_lfm_pos', false, 'pad_tx_tail', false, ...
-             'skip_alpha_cp', false, 'force_bem_q', []);
+             'skip_alpha_cp', false, 'force_bem_q', [], ...
+             'use_omp_static', false);   % Phase A 2026-04-23: 默认 V1.4 GAMP；true 走 OMP（实验：OMP 在 SNR=10 边界更糟）
 tog_fields = fieldnames(tog);
 for tog_k = 1:numel(tog_fields)
     if isfield(bench_toggles, tog_fields{tog_k})
@@ -480,6 +481,9 @@ for fi = 1:size(fading_cfgs,1)
         if e1 > length(bb_comp1), rd1=[bb_comp1(d1:end),zeros(1,e1-length(bb_comp1))];
         else, rd1=bb_comp1(d1:e1); end
         [rf1,~] = match_filter(rd1, sps, 'rrc', rolloff, span);
+        % Phase B 2026-04-23 撤回：功率最大化在色散信道下选错相位（custom6 6径
+        % ISI 让错误相位反而捕获更多能量泄漏 → BER 退化）。oracle 清理需另起 spec
+        % 用 LFM 模板/training preamble 做相关，而非纯功率
         b1=0; bp1=0;
         for off=0:sps-1
             st=rf1(off+1:sps:end);
@@ -587,6 +591,7 @@ for fi = 1:size(fading_cfgs,1)
         end
 
         [rx_filt,~] = match_filter(rx_data_bb, sps, 'rrc', rolloff, span);
+        % Phase B 撤回：见 L484-491 注释
         best_off=0; best_pwr=0;
         for off=0:sps-1
             st=rx_filt(off+1:sps:end);
@@ -623,7 +628,15 @@ for fi = 1:size(fading_cfgs,1)
                 for row = col:usable, T_mat(row, col) = tx_blk1(row - col + 1); end
             end
             y_train = rx_sym_all(1:usable).';
-            [h_gamp_vec, ~] = ch_est_gamp(y_train, T_mat, L_h, 50, nv_eq);
+            % Phase A 2026-04-23: 默认 V1.4 GAMP（divergence guard + LS Tikhonov fallback）
+            % toggle use_omp_static=true 走 OMP（K_sparse=6 真实径数）— 实验残留：
+            %   实测 OMP 在 SNR=10 边界 case 反而比 GAMP+LS 略差（+1e-2 灾难率 6.7%→10%）
+            %   保留为 toggle 便于复现实验，不作默认
+            if tog.use_omp_static
+                [h_gamp_vec, ~, ~] = ch_est_omp(y_train, T_mat, L_h, K_sparse, nv_eq);
+            else
+                [h_gamp_vec, ~] = ch_est_gamp(y_train, T_mat, L_h, 50, nv_eq);
+            end
             h_td_est = zeros(1, blk_fft);
             for p = 1:K_sparse
                 if sym_delays(p)+1 <= L_h
