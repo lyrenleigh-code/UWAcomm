@@ -102,7 +102,9 @@
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
-| **SC-TDE α=+1e-2 100% 灾难根因深挖** | 🆕 2026-04-23 | Phase c sanity check 发现 15/15 全灾难 median 49.6%；之前 todo 仅定性"下游 α 敏感"，首次定量；哪层导致（LMS eq / DFE / 训练序列？）需独立 spec；2-3h |
+| ~~**SC-TDE α=+1e-2 100% 灾难根因深挖**~~ | ✅ 2026-04-23 | RCA 完成（spec `2026-04-23-sctde-alpha-1e2-disaster-root-cause.md`）。10 步 diag（D0b→D10）锁定根因：`test_sctde_timevarying.m:436-441` 的 `exp(-j·2π·α·fc·t)` 在基带 Doppler 模型下是伪补偿。D10 验证 disable 后 α=+1e-2 BER 50%→0.29%。**副发现**：α=+1e-3 原来也是 100% 灾难（历史认知错误）。Fix spec + cross-scheme audit spec 已开 |
+| **SC-TDE 删除 post-CFO 伪补偿**（fix） | 🆕 2026-04-24 | spec `2026-04-24-sctde-remove-post-cfo-compensation.md`；删 runner line 436-441 + V1 α 扫描（8 α × 5 seed）+ V2 D0b 回归 + V3 时变路径回归；保留 `diag_enable_legacy_cfo` 反义 toggle |
+| **CFO postcomp 横向检查 5 体制**（audit） | 🆕 2026-04-24 | spec `2026-04-24-cfo-postcomp-cross-scheme-audit.md`；grep + 逐 runner 审计 SC-FDE/OFDM/DSSS/FH-MFSK/OTFS；对命中 runner 做对应 D10 验证；DSSS 热、OFDM 温、FH-MFSK/OTFS 冷 |
 | **DSSS α=+1e-2 100% 灾难根因深挖（Sun-2020 扩展）** | 🆕 2026-04-23 | Phase c sanity check 发现 15/15 全灾难 median 46.2%；Sun-2020 符号级跟踪对 α=+1e-2 失效（已部分归档 `2026-04-22-dsss-symbol-doppler-tracking`），需 adaptive Gold31 bank；2-3h |
 | **L5/L6 ch_est_gamp V1.1→V1.4 修复链 + SNR 受限归档** | 2026-04-23 | 修订：真根因是 `ch_est_gamp.m`（不是 BEM，static 路径走 GAMP）；V1.1 divergence guard+LS fallback / V1.2 双跑 / V1.3 CV 撤回 / V1.4 偏 LS 0.8；30 seed Monte Carlo: 灾难率 10% → 0%/6.7%；残余 2/30 验证 SNR=15 恢复 0% → 边界 limitation，非 bug |
 | ~~**（可选）static 路径换 `ch_est_ls`/`ch_est_omp` 替代 GAMP**~~ | ❌ 试败（2026-04-23） | spec `2026-04-23-scfde-omp-replace-gamp-and-oracle-clean.md`；OMP K=6 反而 +1e-2 灾难率 6.7%→10%（残差驱动选错 support）；保留作 `tog.use_omp_static` toggle，默认仍 GAMP V1.4 |
@@ -175,6 +177,7 @@
 | **E2E benchmark C 阶段启用（Phase a）** | 2026-04-23 | `benchmark_e2e_baseline.m` V1.0→V1.1 + 4 体制 runner 加 bench_seed 注入；Smoke test 4 combo 全 0% + alpha_est 随 seed 变化；270 pts 全矩阵未跑 |
 | **α estimator 符号约定参数化（Phase b）** | 2026-04-23 | `est_alpha_dual_chirp` V1.0→V1.1 加 `sign_convention`；6 runner 8 处 hack 清理；数学双翻号等价，BER 与 a53b6f3 一致 |
 | **5 体制灾难率横向 sanity check（Phase c）** | 2026-04-23 | 诊断 `diag_5scheme_monte_carlo.m`：5 scheme × α=+1e-2 × SNR=10 × 15 seed；**OFDM/SC-FDE/FH-MFSK 0 灾难，SC-TDE/DSSS 100% 灾难**；修正旧虚报"6 体制全能跑 α=3e-2"；新高优先任务：SC-TDE / DSSS α 深挖 |
+| **SC-TDE α=+1e-2 RCA 完成** | 2026-04-23 | spec `2026-04-23-sctde-alpha-1e2-disaster-root-cause.md`；10 步 diag（D0b-D10）锁定 `exp(-j·2π·α·fc·t)` post-CFO 伪操作；D10 disable 后 α=+1e-2 BER 50%→0.29%、α=+1e-3 50.66%→0%、α=0 1.84%→0.04%；副发现 α=+1e-3 static 原来也是 100% 灾难（历史认知错误，之前"能 work"是 bench_seed=42 单个例假象）；调试日志 V5.3 章节归档，fix + audit spec 已开 |
 
 ---
 
