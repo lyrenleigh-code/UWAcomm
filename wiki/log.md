@@ -2,6 +2,24 @@
 
 ## 2026-04-23
 
+- **5 体制灾难率横向首次量化（Phase c sanity check）**
+  - 诊断: `modules/13_SourceCode/src/Matlab/tests/bench_common/diag_5scheme_monte_carlo.m`
+  - 矩阵: 5 scheme × α=+1e-2 × SNR=10 × seed 1..15 = 75 trial
+  - 结果: OFDM 最健康（max 0.13%）；SC-FDE/FH-MFSK 0 灾难；**SC-TDE/DSSS 100% 灾难**（15/15 median 49%）
+  - 修正旧规划虚报"6 体制全能跑 α=3e-2"：SC-TDE/DSSS α=+1e-2 已完全不工作
+  - 揭示：之前 bench_seed=42 + A2/D 单 seed baseline 完全掩盖 SC-TDE/DSSS 的 100% 灾难
+  - 回流: wiki/conclusions.md 加"5 体制横向灾难率首次量化"条目 + 修正 α 工作上限表
+
+- **E2E benchmark C 阶段启用（Phase a）**
+  - 修改: `benchmark_e2e_baseline.m` V1.0→V1.1 加 C stage；4 体制 runner 加 bench_seed 注入
+  - SC-FDE runner 加 interactive mode bench_seed 兜底（修之前 commit 隐患）
+  - Smoke test: 4 combo 全 0%，alpha_est 随 seed 变化证明 seed 真生效
+
+- **α estimator 符号约定参数化（Phase b）**
+  - `est_alpha_dual_chirp` V1.0→V1.1 加 `search_cfg.sign_convention`（'raw'/'uwa-channel'）
+  - 6 runner 8 处 `-alpha_lfm_raw` + `+ (-delta_raw)` hack 清理
+  - 数学双翻号等价，cascade_quick BER 与 a53b6f3 一致
+
 - **第 3 次 sps 去 oracle 失败：QPSK 4 次方 NDA timing（spec `2026-04-23-scfde-sps-deoracle-fourth-power`）**
   - 设计：QPSK (±1±j)^4 = -4 统一 phasor，正确定时 sum 大、错定时 phasor 分散加和取消
   - 实测：cascade_quick 看似 OK（-1e-2 14%），但 Monte Carlo 灾难率 0%/6.7% → **10%/20%** 退化

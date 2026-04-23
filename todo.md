@@ -102,6 +102,8 @@
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
+| **SC-TDE α=+1e-2 100% 灾难根因深挖** | 🆕 2026-04-23 | Phase c sanity check 发现 15/15 全灾难 median 49.6%；之前 todo 仅定性"下游 α 敏感"，首次定量；哪层导致（LMS eq / DFE / 训练序列？）需独立 spec；2-3h |
+| **DSSS α=+1e-2 100% 灾难根因深挖（Sun-2020 扩展）** | 🆕 2026-04-23 | Phase c sanity check 发现 15/15 全灾难 median 46.2%；Sun-2020 符号级跟踪对 α=+1e-2 失效（已部分归档 `2026-04-22-dsss-symbol-doppler-tracking`），需 adaptive Gold31 bank；2-3h |
 | **L5/L6 ch_est_gamp V1.1→V1.4 修复链 + SNR 受限归档** | 2026-04-23 | 修订：真根因是 `ch_est_gamp.m`（不是 BEM，static 路径走 GAMP）；V1.1 divergence guard+LS fallback / V1.2 双跑 / V1.3 CV 撤回 / V1.4 偏 LS 0.8；30 seed Monte Carlo: 灾难率 10% → 0%/6.7%；残余 2/30 验证 SNR=15 恢复 0% → 边界 limitation，非 bug |
 | ~~**（可选）static 路径换 `ch_est_ls`/`ch_est_omp` 替代 GAMP**~~ | ❌ 试败（2026-04-23） | spec `2026-04-23-scfde-omp-replace-gamp-and-oracle-clean.md`；OMP K=6 反而 +1e-2 灾难率 6.7%→10%（残差驱动选错 support）；保留作 `tog.use_omp_static` toggle，默认仍 GAMP V1.4 |
 | **SC-FDE sps 相位选择真去 oracle**（架构改动） | 🟡 待开 | 试错 3 次（spec `archive/2026-04-23-scfde-omp-...` Phase B + spec `archive/2026-04-23-scfde-sps-deoracle-fourth-power`）：(1) `sum(\|st\|²)` 功率最大化失败 (2) `abs(sum(st^4))` QPSK 4 次方失败；纯 NDA blind 在 6 径 ISI + SNR=10 失效；下一轮试 LFM 模板尾部相关 / 帧加 training preamble / Gardner TED+量化；架构改动需独立 spec |
@@ -114,7 +116,7 @@
 | 任务 | 状态 | 说明 |
 |------|------|------|
 | **P3 demo Doppler 链路接入** | 待做 | `app.doppler_edit` 字段 UI 有但 TX 链路未用；spec 预占位 `2026-04-18-p3-doppler-integration.md`（待创建） |
-| **α estimator 符号约定参数化** | 待做 | `est_alpha_dual_chirp` 当前与 `gen_uwa_channel.doppler_rate` 反号，runner 里 hack `-alpha_lfm_raw`；建议在 estimator 内加 `sign_convention` 参数 |
+| ~~**α estimator 符号约定参数化**~~ | ✅ 2026-04-23 | `est_alpha_dual_chirp` V1.1 加 `sign_convention` 参数（'raw'/'uwa-channel'），6 runner 8 处 `-alpha_lfm_raw` hack 清理；数学双翻号等价，BER 与 a53b6f3 一致 |
 | ~~**α<0 不对称修复**（resample 层）~~ | ✅ 2026-04-22 | spec `2026-04-22-resample-negative-alpha-asymmetry.md`；根因 = `comp_resample_spline` 边界 clamp；V7.1 auto-pad 解决；单元 NMSE 差异 75-83→<3 dB，SC-FDE α=-3e-2 BER 2.66%→0%。**下游链路不对称**（DSSS/FH-MFSK/OFDM α 符号敏感）属独立 spec |
 | ~~**α=3e-2 物理极限突破**~~ | ✅ 完成（2026-04-21） | 诊断显示 Oracle 下 pipeline 无问题，根因是 estimator 2% 系统偏差 + CP wrap；3 patch 修复让 α=+3e-2 BER 50% → 5.4%，工作范围扩到 15→45 m/s |
 | **14_Streaming 去 Oracle α**（推广 13 的盲估计） | 待做 | 14_Streaming/P2/P3 仍 oracle α（从 chinfo 读），需将 13_SourceCode 的双 LFM + 迭代推广，属 `2026-04-16-deoracle-rx-parameters` 范畴 |
@@ -170,6 +172,9 @@
 | **SC-FDE cascade 全场景验证（Phase G）** | 2026-04-23 | 诊断 `diag_alpha_sweep_full.m`：10 α × 3 SNR = 30 trial；工作率 SNR=10 9/10、SNR≥15 10/10；**新发现**：α=-1e-2 是孤立异常点（α=-3e-2 BER=0% 证伪 ±α 系统单调不对称假设），疑似 HFM/LFM 模板对齐局部不连续，待精细扫描验证 |
 | **`bench_seed` 注入修复（Phase H）** | 2026-04-23 | `test_scfde_timevarying.m` L163 + L257 加 `(bench_seed-42)*100000` 偏移，默认 42 时 backwards-compat；hotfix uint32 mod wrap 处理 seed<42 负值；多 seed 验证 α=-1e-2 std 从 0→20.89 |
 | **Phase I+J SC-FDE ~10% deterministic 灾难触发归档** | 2026-04-23 | 4 诊断脚本：disaster/oracle_isolation/high_snr/monte_carlo；**oracle α 仍 ~50%** → cascade 无辜；**非单调 BER vs SNR**（α=+1e-2 SNR=15/20 救活、25 又崩）违反单调律；30 seed Monte Carlo 双峰确认：mean 5%、median 0%、灾难率 **3/30 (10%)** ±α 均；候选根因 5 层（Channel 极性 / BCJR 固定点 / Frame timing / CFO 边界 / Soft demap）待 L2' |
+| **E2E benchmark C 阶段启用（Phase a）** | 2026-04-23 | `benchmark_e2e_baseline.m` V1.0→V1.1 + 4 体制 runner 加 bench_seed 注入；Smoke test 4 combo 全 0% + alpha_est 随 seed 变化；270 pts 全矩阵未跑 |
+| **α estimator 符号约定参数化（Phase b）** | 2026-04-23 | `est_alpha_dual_chirp` V1.0→V1.1 加 `sign_convention`；6 runner 8 处 hack 清理；数学双翻号等价，BER 与 a53b6f3 一致 |
+| **5 体制灾难率横向 sanity check（Phase c）** | 2026-04-23 | 诊断 `diag_5scheme_monte_carlo.m`：5 scheme × α=+1e-2 × SNR=10 × 15 seed；**OFDM/SC-FDE/FH-MFSK 0 灾难，SC-TDE/DSSS 100% 灾难**；修正旧虚报"6 体制全能跑 α=3e-2"；新高优先任务：SC-TDE / DSSS α 深挖 |
 
 ---
 
