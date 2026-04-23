@@ -50,7 +50,10 @@ SNR=15/20 救活、**SNR=25 又崩** → **违反 BER vs SNR 单调律** → det
 - **±α 灾难率几乎相同**（3/3）→ 不是 ±α 不对称
 - **真实灾难率 ~10%**（不是 SNR 受限单点）
 
-### 真根因（L2' Step 1 锁定，2026-04-23）：BEM 信道估计 **ill-conditioned 数值发散**
+### 真根因（L2' Step 1 锁定，2026-04-23）：**`ch_est_gamp` GAMP 数值发散**
+
+> [!note] 关于 BEM/GAMP 的修订
+> L2' 初判 "BEM ill-conditioned" 错误。代码追踪发现 `fading_type='static'` 走 `ch_est_gamp.m:626`（**不是** BEM）。BEM 仅时变路径走（fd>0）。本节统一改为 GAMP。
 
 **证据**（`diag_disaster_layer_isolation.m` 4 trial Oracle H_est 表）：
 
@@ -61,10 +64,8 @@ SNR=15/20 救活、**SNR=25 又崩** → **违反 BER vs SNR 单调律** → det
 | 3 | +1e-2 | 1 | 0% | 1.009 | 0.131 | 健康 |
 | 4 | +1e-2 | 23 | 49.2% | **7.9×10²⁵** | **3.1×10²⁶** | 数值溢出（接近 NaN）|
 
-**机制**：BEM (Basis Expansion Model) 求解 `inv(H'H) · H'y` 在某些 (TX bits, RX noise)
-组合下观测矩阵 H 接近奇异 → 求逆放大噪声 → h_est 幅度发散 → MMSE 均衡用错信道 → 解码全错。
-
-经典 ill-conditioned LS 问题，BEM 估计器算法弱点。
+**机制**：`ch_est_gamp` 用伯努利-高斯 (BG) 稀疏先验（`lambda=0.1` hardcoded）。custom6 6 径 / 91 tap = 6.6% 占用率技术上稀疏，但 6 径**都强能量**（违反 BG "大部分为 0" 假设）。某些 (TX bits, RX noise) 组合让 GAMP 迭代消息传递**收敛到错误固定点**或**完全发散**：
+- `x_hat` 幅度爆 → MMSE 均衡用错信道 → BCJR 反向 LLR → 解码全错
 
 ### 5 候选层最终判定
 
@@ -78,21 +79,52 @@ SNR=15/20 救活、**SNR=25 又崩** → **违反 BER vs SNR 单调律** → det
 
 **实际只有一个根因：BEM 估计 ill-conditioned**。其他都是它的下游表现。
 
-### 修复方向（待 L5 实施）
+### 修复链 V1.1 → V1.4（L5/L6b/L6d/L6e）
 
-| # | 方法 | 风险 |
-|---|------|------|
-| 1 | **Tikhonov 正则化** `inv(H'H + λI) H'y`，λ=噪声方差或经验值 | 低（标准做法）|
-| 2 | **SVD 截断** 去掉小奇异值（条件数大于阈值）| 中（多了截断阈值参数）|
-| 3 | **运行时检测 + fallback** 监测 `\|h_est\| > 阈值` 回退到上一 block | 低（不改算法）|
+| 版本 | 策略 | -1e-2 灾难率 | +1e-2 灾难率 | mean BER | max BER |
+|---|---|:-:|:-:|:-:|:-:|
+| 修复前 | GAMP 原版（无保护）| 10% | 10% | 5.86 | 49.7 |
+| **V1.1** | divergence guard + LS fallback | 0% | 6.7% | 4.22 | 33.5 |
+| V1.2 | + GAMP/LS 双跑取小残差 | 0% | 6.7% | 4.06 | 33.5 |
+| V1.3 | + CV hold-out 比较 | **3.3% ↗** | 3.3% | - | 36.7 |
+| **V1.4** | 回退 CV，偏 LS（res_gamp > 0.8·res_ls 选 LS）| **0%** | **6.7%** | **4.06** | **30.6** |
 
-**建议 1（Tikhonov）** — 最低风险、最常用、不改架构。
+**V1.3 反向回归**：CV split 砍 trn 20% 让 LS 自身条件数恶化，反引入 -1e-2 一个新灾难。回退到 V1.2 in-sample。
 
-### 工程影响
+**V1.4 最终**：偏 LS 系数 0.8 在残余 6.7% case 上无效（GAMP 残差比 LS 小 20%+，仍走 GAMP）。后续不再追这 6.7% — 见下方 SNR 受限验证。
 
-- **低 SNR + α=±1e-2 下 ~10% 帧丢失率** — 在生产 SC-FDE 系统中是高的
-- **ARQ 重传同 noise pattern 救不了** — 需要 random interleaver / frame hopping 或修根因
-- 不是 SNR 受限（SNR=40 dB 灾难仍 ~50%）
+### 残余 6.7% 灾难是 SNR=10 边界（L6 SNR 验证）
+
+`diag_residual_snr_limit.m`（α=+1e-2 × seed ∈ {1, 17, 26} × SNR ∈ {10, 15, 20}）：
+
+| seed | SNR=10 | SNR=15 | SNR=20 |
+|:-:|:-:|:-:|:-:|
+| 1 (对照) | 0.10% | 0% | 0% |
+| **17** | **30.58%** | **0%** | **0%** |
+| **26** | **30.61%** | **0%** | **0%** |
+
+s17/s26 在 SNR=15 dB 立即恢复 → 是真 SNR 受限边界 case，不是 GAMP/LS bug。归档为 limitation。
+
+### 之前 L4 的 "非单调 BER vs SNR" 是 V1 修复前现象
+
+V1.4 修复后（α=+1e-2, seed=17/26）BER 单调下降 30%→0%→0%，违反单调律的现象消失。原 L4 报告的"SNR=25/30/40 仍灾难"是**未修复的 GAMP 病态固定点**反复触发，不是物理共振。
+
+### 工程影响（V1.4 后）
+
+- **SNR=10 dB 真实工作率**：α=-1e-2 30/30 健康；α=+1e-2 24/30 健康 + 4 中间 + 2 SNR 受限
+- **SNR≥15 dB**：60/60 BER=0%（30 seed × 2 α 全过）
+- 修复前：~50% trial 有问题；修复后：93% trial 健康
+
+### 为什么没换信道估计器（保留 GAMP）
+
+custom6 静态信道用 `ch_est_gamp`（L626），错配 BG 稀疏先验。可换 `ch_est_ls/omp/sbl` 等。
+**当前选保留 GAMP + 偏 LS 兜底** 因：
+- DSSS 等真稀疏场景 GAMP 仍可能更优
+- 接口零改动，调用方无感
+- 80%+ 灾难已救
+- 残余 6.7% 是 SNR 边界（已归档）
+
+**后续可独立 spec 评估** "static 信道直接调 `ch_est_ls`/`ch_est_omp(K=K_sparse)` 替代 GAMP"，预期完全消灾且更快。
 
 ### bench_seed 修复（Phase H, commit `4e6e263 + d9f9e09`）
 

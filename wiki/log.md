@@ -2,6 +2,20 @@
 
 ## 2026-04-23
 
+- **L5/L6 修复链：`ch_est_gamp` V1.1→V1.4 + SNR 受限验证**
+  - 修复: `modules/07_ChannelEstEq/src/Matlab/ch_est_gamp.m`
+    - V1.1 divergence guard + LS Tikhonov fallback（救 80% 灾难）
+    - V1.2 双跑取小残差
+    - V1.3 CV hold-out（撤回，引入反向回归）
+    - V1.4 偏 LS 系数 0.8（in-sample 比较）
+  - 诊断: 新增 `diag_residual_snr_limit.m`
+  - 修复链总效果（30 seed × 2 α × SNR=10）：
+    - 修复前：灾难率 10% / 10%，max BER 49.7%
+    - V1.4 后：灾难率 0% / 6.7%，max BER 30.6%
+  - 残余 6.7% 验证: α=+1e-2 s17/s26 在 SNR=15 立即恢复 0% → SNR 受限边界，非 bug
+  - **修订 L4 BEM 误判**: 静态路径走 `ch_est_gamp` 不是 BEM；"非单调 BER vs SNR" 是 V1 GAMP 病态反复触发，V1.4 修复后单调律恢复
+  - 后续可选: 独立 spec 评估 static 路径换 `ch_est_ls`/`ch_est_omp` 替代 GAMP
+
 - **L2' Step 1 真根因锁定：BEM 信道估计 ill-conditioned 数值发散**
   - 诊断: `modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_disaster_layer_isolation.m`
   - 4 trial Oracle H_est 表对比：健康 case |gain|≈1，灾难 case |gain|=10¹~10²⁶
