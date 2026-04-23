@@ -125,6 +125,11 @@ if benchmark_mode
             bench_channel_profile, bench_seed, bench_stage);
 end
 
+%% bench_seed 兜底（2026-04-23 E2E C 阶段）
+if ~exist('bench_seed','var') || isempty(bench_seed)
+    bench_seed = 42;
+end
+
 fprintf('通带: fs=%dHz, fc=%dHz, 带宽=%.0fHz\n', fs, fc, bw);
 fprintf('DSSS: Gold(%d), L=%d, 码片率=%d, 符号率=%.1f sym/s\n', 5, L, chip_rate, dsss_sym_rate);
 fprintf('通信速率: %.1f bps (BPSK, R=1/%d, L=%d)\n', info_rate_bps, n_code, L);
@@ -145,7 +150,8 @@ for fi = 1:size(fading_cfgs,1)
     fd_hz=fading_cfgs{fi,3}; dop_rate=fading_cfgs{fi,4};
 
     %% ===== TX ===== %%
-    rng(100+fi);
+    % bench_seed 注入（2026-04-23 E2E C 阶段）
+    rng(uint32(mod(100 + fi + (bench_seed - 42) * 100000, 4294967296)));
     training = 2*randi([0,1],1,train_sym) - 1;
     info_bits = randi([0 1], 1, N_info);
     coded = conv_encode(info_bits, codec.gen_polys, codec.constraint_len);
@@ -291,7 +297,8 @@ for fi = 1:size(fading_cfgs,1)
     for si = 1:length(snr_list)
         snr_db = snr_list(si);
         noise_var = sig_pwr * 10^(-snr_db/10);
-        rng(300+fi*1000+si*100);
+        % bench_seed 注入（2026-04-23 E2E C 阶段）
+        rng(uint32(mod(300 + fi*1000 + si*100 + (bench_seed - 42) * 100000, 4294967296)));
         rx_pb = rx_pb_clean + sqrt(noise_var)*randn(size(rx_pb_clean));
 
         % 1. 下变频

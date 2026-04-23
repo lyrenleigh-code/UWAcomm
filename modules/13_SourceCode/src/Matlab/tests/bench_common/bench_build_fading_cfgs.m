@@ -49,6 +49,14 @@ switch upper(stage)
     case 'B'
         fading_cfgs = pack_discrete(scheme, combo_spec.channel_tag);
 
+    case 'C'
+        % 多 seed 帧检测率（2026-04-23 启用）：doppler_rate=0 固定
+        fd_hz = combo_spec.fd_hz;
+        alpha = 0;
+        tag = ternary(fd_hz == 0, 'static', sprintf('fd=%gHz', fd_hz));
+        dop = ternary(fd_hz == 0, 'static', 'slow');
+        fading_cfgs = pack_timevarying(scheme, tag, dop, fd_hz, alpha);
+
     otherwise
         error('bench_build_fading_cfgs:UnknownStage', '未知 stage: %s', stage);
 end

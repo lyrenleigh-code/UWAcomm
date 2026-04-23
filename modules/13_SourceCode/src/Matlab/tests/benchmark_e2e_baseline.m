@@ -1,8 +1,9 @@
 function benchmark_e2e_baseline(stage, varargin)
-% 功能：E2E 时变信道基线 benchmark 主入口（五阶段 dispatch，C 延后）
-% 版本：V1.0.0（2026-04-19）
+% 功能：E2E 时变信道基线 benchmark 主入口（五阶段 dispatch）
+% 版本：V1.1.0（2026-04-23：C 阶段启用，5 体制 runner 加 bench_seed 注入）
+%       V1.0.0（2026-04-19）
 % 输入：
-%   stage - 'A1' | 'A2' | 'A3' | 'B'（C 需要 runner rng 改造，本期延后）
+%   stage - 'A1' | 'A2' | 'A3' | 'B' | 'C' | 'D'
 %   可选 name-value：
 %     'schemes',  {...}    限制体制子集（默认 grid.schemes）
 %     'profiles', {...}    限制 profile 子集（默认 {'custom6'}；exponential 需 runner 改造后启用）
@@ -22,7 +23,7 @@ function benchmark_e2e_baseline(stage, varargin)
 
 %% 1. 参数解析
 p = inputParser;
-p.addRequired('stage', @(s) ischar(s) && ismember(upper(s), {'A1','A2','A3','B','D'}));
+p.addRequired('stage', @(s) ischar(s) && ismember(upper(s), {'A1','A2','A3','B','C','D'}));
 p.addParameter('schemes', {}, @iscell);
 p.addParameter('profiles', {}, @iscell);
 p.addParameter('csv_path', '', @ischar);
@@ -227,6 +228,22 @@ for i = 1:numel(schemes)
                 cs = struct('channel_tag', tag);
                 combos(end+1) = make_combo(stage, scheme, tag, ...
                                            grid.snr_list, cs, grid.seed); %#ok<AGROW>
+            end
+
+        case 'C'
+            % 多 seed 帧检测率（2026-04-23 启用）：schemes × profiles × fd_hz × seeds
+            % snr_list 整体传入（不迭代），每 combo 单 seed
+            % 预期点数: 6×3×3×5 = 270（依 bench_grids.m grid.C）
+            for j = 1:numel(profiles)
+                for f = 1:numel(grid.fd_hz_list)
+                    for s = 1:numel(grid.seeds)
+                        fd = grid.fd_hz_list(f);
+                        seed_v = grid.seeds(s);
+                        cs = struct('fd_hz', fd);
+                        combos(end+1) = make_combo(stage, scheme, profiles{j}, ...
+                                                   grid.snr_list, cs, seed_v); %#ok<AGROW>
+                    end
+                end
             end
     end
 end

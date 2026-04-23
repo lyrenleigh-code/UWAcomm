@@ -146,6 +146,11 @@ if benchmark_mode
             bench_channel_profile, bench_seed, bench_stage);
 end
 
+%% bench_seed 兜底（2026-04-23 E2E C 阶段）
+if ~exist('bench_seed','var') || isempty(bench_seed)
+    bench_seed = 42;
+end
+
 fprintf('通带: fs=%dHz, fc=%dHz, HFM/LFM=%.0f~%.0fHz\n', fs, fc, f_lo, f_hi);
 fprintf('帧: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data], guard=%d样本(%.1fms)\n', guard_samp, guard_samp/fs*1000);
 fprintf('数据: train=%d + data=%d sym\n', train_len, N_data_sym);
@@ -164,7 +169,8 @@ for fi = 1:size(fading_cfgs,1)
     fd_hz=fading_cfgs{fi,3}; dop_rate=fading_cfgs{fi,4};
 
     %% ===== TX ===== %%
-    rng(100+fi);
+    % bench_seed 注入（2026-04-23 E2E C 阶段）
+    rng(uint32(mod(100 + fi + (bench_seed - 42) * 100000, 4294967296)));
     training = constellation(randi(4,1,train_len));
     pilot_sym_ref = constellation(randi(4,1,pilot_cluster_len));
 
@@ -253,7 +259,8 @@ for fi = 1:size(fading_cfgs,1)
     for si = 1:length(snr_list)
         snr_db = snr_list(si);
         noise_var = sig_pwr * 10^(-snr_db/10);
-        rng(300+fi*1000+si*100);
+        % bench_seed 注入（2026-04-23 E2E C 阶段）
+        rng(uint32(mod(300 + fi*1000 + si*100 + (bench_seed - 42) * 100000, 4294967296)));
         rx_pb = rx_pb_clean + sqrt(noise_var)*randn(size(rx_pb_clean));
 
         % 1. 下变频（有噪声信号）

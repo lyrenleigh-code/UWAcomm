@@ -119,6 +119,11 @@ if benchmark_mode
             bench_channel_profile, bench_seed, bench_stage);
 end
 
+%% bench_seed 兜底（2026-04-23 E2E C 阶段）：interactive mode 也要有默认 42
+if ~exist('bench_seed','var') || isempty(bench_seed)
+    bench_seed = 42;
+end
+
 fprintf('通带: fs=%dHz, fc=%dHz, HFM/LFM=%.0f~%.0fHz\n', fs, fc, f_lo, f_hi);
 fprintf('帧: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]\n');
 fprintf('RX: ①dual-HFM→alpha ②补偿 ③LFM精确定时 ④数据提取\n\n');
@@ -153,7 +158,8 @@ for fi = 1:size(fading_cfgs,1)
     N_info = M_total/n_code - mem;
 
     %% ===== TX（固定，不随SNR变）===== %%
-    rng(100 + fi);
+    % bench_seed 注入（2026-04-23 E2E C 阶段）：default seed=42 时偏移 0 → backwards-compat
+    rng(uint32(mod(100 + fi + (bench_seed - 42) * 100000, 4294967296)));
     info_bits = randi([0 1],1,N_info);
     coded = conv_encode(info_bits,codec.gen_polys,codec.constraint_len);
     coded = coded(1:M_total);
@@ -225,7 +231,8 @@ for fi = 1:size(fading_cfgs,1)
     for si = 1:length(snr_list)
         snr_db = snr_list(si);
         noise_var = sig_pwr * 10^(-snr_db/10);
-        rng(300+fi*1000+si*100);
+        % bench_seed 注入（2026-04-23 E2E C 阶段）
+        rng(uint32(mod(300 + fi*1000 + si*100 + (bench_seed - 42) * 100000, 4294967296)));
         rx_pb = rx_pb_clean + sqrt(noise_var)*randn(size(rx_pb_clean));
 
         % 保存static@10dB的RX波形

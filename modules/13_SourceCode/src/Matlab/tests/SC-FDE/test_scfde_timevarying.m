@@ -115,6 +115,11 @@ if benchmark_mode
             bench_channel_profile, bench_seed, bench_stage);
 end
 
+%% bench_seed 兜底：benchmark_mode=false 时也要有值（rng 行引用）→ 默认 42 等价旧行为
+if ~exist('bench_seed','var') || isempty(bench_seed)
+    bench_seed = 42;
+end
+
 fprintf('通带: fs=%dHz, fc=%dHz, HFM/LFM=%.0f~%.0fHz\n', fs, fc, f_lo, f_hi);
 fprintf('帧: [HFM+|guard|HFM-|guard|LFM1|guard|LFM2|guard|data]\n');
 fprintf('RX: ①dual-HFM→alpha ②补偿 ③LFM精确定时 ④数据提取\n\n');
