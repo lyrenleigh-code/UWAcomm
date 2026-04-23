@@ -1,6 +1,8 @@
 function [alpha, diag] = est_alpha_dual_chirp(bb_raw, LFM_up, LFM_dn, fs, fc, k, search_cfg)
 % 功能：双 LFM（up + down chirp）时延差法估计恒定多普勒伸缩率 α
-% 版本：V1.0.0（2026-04-20）
+% 版本：V1.1.0（2026-04-23：加 search_cfg.sign_convention 参数化符号约定，
+%               消除 runner 里 `-alpha_lfm_raw` hack）
+%       V1.0.0（2026-04-20）
 % 对应 spec: specs/active/2026-04-20-alpha-estimator-dual-chirp-refinement.md
 %
 % 原理：
@@ -27,6 +29,11 @@ function [alpha, diag] = est_alpha_dual_chirp(bb_raw, LFM_up, LFM_dn, fs, fc, k,
 %       .dn_start/.dn_end          down-chirp 峰搜索窗样本索引
 %       .nominal_delta_samples     τ_dn^nom - τ_up^nom（样本数，理论无 α 时）
 %       .use_subsample [optional]  true 启用峰值抛物线插值（默认 true）
+%       .sign_convention [optional] 符号约定（默认 'raw'，backwards-compat）：
+%         'raw'         — 公式原值。cascade stage 4（HFM 补偿后残余）用此
+%         'uwa-channel' — 取反号以匹配 gen_uwa_channel.doppler_rate 的正号=靠近约定
+%                         直接 RX 未经 HFM 预补偿的 bb_raw 时用此，省 runner 里
+%                         `alpha_lfm = -alpha_lfm_raw` hack
 %
 % 输出：
 %   alpha       - scalar double，α 估计
@@ -50,6 +57,12 @@ for f = required_fields
 end
 use_subsample = true;
 if isfield(search_cfg, 'use_subsample'), use_subsample = search_cfg.use_subsample; end
+sign_convention = 'raw';
+if isfield(search_cfg, 'sign_convention') && ~isempty(search_cfg.sign_convention)
+    sign_convention = lower(search_cfg.sign_convention);
+end
+assert(ismember(sign_convention, {'raw','uwa-channel'}), ...
+       'est_alpha_dual_chirp: sign_convention 必须是 ''raw'' 或 ''uwa-channel''');
 
 %% 2. 匹配滤波模板（conj + 翻转）
 mf_up = conj(fliplr(LFM_up(:).'));
@@ -99,6 +112,11 @@ dtau_nom_s = dtau_samples_nom / fs;
 denom = 2*fc/k - dtau_nom_s;
 assert(abs(denom) > 1e-8, 'est_alpha_dual_chirp: 病态参数 2fc/k ≈ dtau_nom，估计退化');
 alpha = dtau_residual_s / denom;
+
+%% 6b. 符号约定（V1.1）
+if strcmp(sign_convention, 'uwa-channel')
+    alpha = -alpha;   % 匹配 gen_uwa_channel.doppler_rate 正号=靠近/压缩
+end
 
 %% 7. 诊断
 corr_up_median = median(corr_up_abs(up_win));

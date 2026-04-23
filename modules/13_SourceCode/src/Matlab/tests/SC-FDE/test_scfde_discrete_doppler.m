@@ -253,10 +253,10 @@ for fi = 1:N_fading
         cfg_alpha.dn_end   = min(lfm2_search_len, length(bb_raw));
         cfg_alpha.nominal_delta_samples = N_lfm + guard_samp;
         cfg_alpha.use_subsample = true;
+        cfg_alpha.sign_convention = 'uwa-channel';   % V1.1: 内部取反号
         k_chirp = chirp_rate_lfm;
-        [alpha_lfm_raw, alpha_diag] = est_alpha_dual_chirp(bb_raw, LFM_bb_n, LFM_bb_neg_n, ...
-                                                           fs, fc, k_chirp, cfg_alpha);
-        alpha_lfm = -alpha_lfm_raw;  % 符号约定对齐 gen_uwa_channel
+        [alpha_lfm, alpha_diag] = est_alpha_dual_chirp(bb_raw, LFM_bb_n, LFM_bb_neg_n, ...
+                                                      fs, fc, k_chirp, cfg_alpha);
         % R1/p1_idx/p2_idx 保留旧变量名（下游 sync/BEM 使用）
         corr_est = filter(mf_lfm, 1, bb_raw);
         corr_est_abs = abs(corr_est);

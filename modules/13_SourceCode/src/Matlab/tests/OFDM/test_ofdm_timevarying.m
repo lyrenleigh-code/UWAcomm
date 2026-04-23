@@ -265,10 +265,10 @@ for fi = 1:size(fading_cfgs,1)
         cfg_alpha.dn_end   = min(lfm2_search_len, length(bb_raw));
         cfg_alpha.nominal_delta_samples = N_lfm + guard_samp;
         cfg_alpha.use_subsample = true;
+        cfg_alpha.sign_convention = 'uwa-channel';   % V1.1: 内部取反号
         k_chirp = chirp_rate_lfm;
-        [alpha_lfm_raw, alpha_diag] = est_alpha_dual_chirp(bb_raw, LFM_bb_n, LFM_bb_neg_n, ...
-                                                            fs, fc, k_chirp, cfg_alpha);
-        alpha_lfm = -alpha_lfm_raw;
+        [alpha_lfm, alpha_diag] = est_alpha_dual_chirp(bb_raw, LFM_bb_n, LFM_bb_neg_n, ...
+                                                      fs, fc, k_chirp, cfg_alpha);
         % 迭代 refinement（默认 2 次）
         if ~exist('bench_alpha_iter','var') || isempty(bench_alpha_iter)
             bench_alpha_iter = 2;
@@ -276,9 +276,9 @@ for fi = 1:size(fading_cfgs,1)
         if bench_alpha_iter > 0 && abs(alpha_lfm) > 1e-10
             for iter_a = 1:bench_alpha_iter
                 bb_iter = comp_resample_spline(bb_raw, alpha_lfm, fs, 'fast');
-                [delta_raw, ~] = est_alpha_dual_chirp(bb_iter, LFM_bb_n, LFM_bb_neg_n, ...
-                                                      fs, fc, k_chirp, cfg_alpha);
-                alpha_lfm = alpha_lfm + (-delta_raw);
+                [delta_signed, ~] = est_alpha_dual_chirp(bb_iter, LFM_bb_n, LFM_bb_neg_n, ...
+                                                        fs, fc, k_chirp, cfg_alpha);
+                alpha_lfm = alpha_lfm + delta_signed;
             end
         end
         % 【P8 2026-04-21】正向大 α 精扫（α_lfm>1.5e-2 时启用）

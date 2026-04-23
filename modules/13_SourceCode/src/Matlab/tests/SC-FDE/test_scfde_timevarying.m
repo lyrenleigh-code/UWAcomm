@@ -414,11 +414,10 @@ for fi = 1:size(fading_cfgs,1)
         cfg_alpha.dn_end   = min(lfm2_search_len, length(bb_raw));
         cfg_alpha.nominal_delta_samples = N_lfm + guard_samp;   % LFM_up tail 到 LFM_dn tail
         cfg_alpha.use_subsample = true;
+        cfg_alpha.sign_convention = 'uwa-channel';   % V1.1: 内部取反号，省外部 `-` hack
         k_chirp = chirp_rate_lfm;  % (f_hi-f_lo)/T_pre
-        [alpha_lfm_raw, alpha_diag] = est_alpha_dual_chirp(bb_raw, LFM_bb_n, LFM_bb_neg_n, ...
-                                                            fs, fc, k_chirp, cfg_alpha);
-        % 符号约定对齐：gen_uwa_channel 的 doppler_rate 与 est_alpha_dual_chirp 的 α 取反
-        alpha_lfm = -alpha_lfm_raw;
+        [alpha_lfm, alpha_diag] = est_alpha_dual_chirp(bb_raw, LFM_bb_n, LFM_bb_neg_n, ...
+                                                      fs, fc, k_chirp, cfg_alpha);
         % oracle_passband：rat() 精度 ~1e-10，强制 0
         % cascade：两级 cascade 后残余 <1e-6，强制 0 避免下游 LFM/CP 引入额外 bias
         if (use_cascade_estimator) || is_passband_oracle
@@ -433,9 +432,9 @@ for fi = 1:size(fading_cfgs,1)
         if bench_alpha_iter > 0 && abs(alpha_lfm) > 1e-10
             for iter_a = 1:bench_alpha_iter
                 bb_iter = comp_resample_spline(bb_raw, alpha_lfm, fs, 'fast');
-                [delta_raw, ~] = est_alpha_dual_chirp(bb_iter, LFM_bb_n, LFM_bb_neg_n, ...
-                                                      fs, fc, k_chirp, cfg_alpha);
-                alpha_lfm = alpha_lfm + (-delta_raw);  % 符号对齐
+                [delta_signed, ~] = est_alpha_dual_chirp(bb_iter, LFM_bb_n, LFM_bb_neg_n, ...
+                                                        fs, fc, k_chirp, cfg_alpha);
+                alpha_lfm = alpha_lfm + delta_signed;   % cfg_alpha.sign_convention='uwa-channel'，delta 已同号
             end
         end
 
