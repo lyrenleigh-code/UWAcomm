@@ -2,6 +2,13 @@
 
 ## 2026-04-23
 
+- **SC-TDE α=+1e-2 100% 灾难根因锁定（post-CFO 伪补偿）**
+  - Spec: `specs/active/2026-04-23-sctde-alpha-1e2-disaster-root-cause.md`
+  - 10 步 diag（D0b→D1→D2→D3→D5→D6→D7→D9→D10）排除 α 估计/GAMP/Turbo iter/pre-CFO 位置后，D9 对比 α=0 vs α=+1e-2 发现 **sps scan 前 corr=0.817 / post-CFO 后 corr=0.055**，D10 禁用后 BER 50%→0.29% 验证
+  - 真根因：`test_sctde_timevarying.m:436-441` 的 `exp(-j·2π·α·fc·t)` 补偿在基带 Doppler 信道模型下是伪操作，凭空添加 120 Hz 频偏破坏对齐
+  - 副发现：α=+1e-3 static 路径原来也是 100% 灾难（历史"能 work"是单 seed 假象）
+  - 回流: `wiki/modules/13_SourceCode/SC-TDE调试日志.md` 追加 V5.3 章节（10 步 diag + D10 验证数据 + 物理解释）
+
 - **5 体制灾难率横向首次量化（Phase c sanity check）**
   - 诊断: `modules/13_SourceCode/src/Matlab/tests/bench_common/diag_5scheme_monte_carlo.m`
   - 矩阵: 5 scheme × α=+1e-2 × SNR=10 × seed 1..15 = 75 trial

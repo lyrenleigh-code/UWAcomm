@@ -320,6 +320,13 @@ for fi = 1:size(fading_cfgs,1)
             end
             alpha_lfm = best_a;
         end
+        % === diag D1: Oracle α（spec 2026-04-23-sctde-alpha-1e2-disaster-rca） === %
+        if exist('diag_oracle_alpha','var') && diag_oracle_alpha
+            alpha_lfm = dop_rate;
+            if si == 1 && fi == 1
+                fprintf('  [DIAG-D1] oracle alpha=%+.2e injected (override LFM est)\n', alpha_lfm);
+            end
+        end
         % R1/p1_idx/p2_idx 保留变量
         corr_est = filter(mf_lfm, 1, bb_raw);
         corr_est_abs = abs(corr_est);
@@ -359,7 +366,8 @@ for fi = 1:size(fading_cfgs,1)
         elseif length(rc)<N_tx, rc=[rc,zeros(1,N_tx-length(rc))]; end
 
         % 【P7 2026-04-21】SC-TDE 保留训练精估（对 static 分支 + 小 α 有效），加阈值门禁避免大 α 下 wrap
-        if strcmpi(ftype, 'static')
+        % === diag D1: oracle α 开启时跳过训练精估（保持 alpha_est == dop_rate 干净）===
+        if strcmpi(ftype, 'static') && ~(exist('diag_oracle_alpha','var') && diag_oracle_alpha)
             T_half = floor(train_len / 2);
             R_t1 = sum(rc(1:T_half) .* conj(training(1:T_half)));
             R_t2 = sum(rc(T_half+1:2*T_half) .* conj(training(T_half+1:2*T_half)));
@@ -381,6 +389,18 @@ for fi = 1:size(fading_cfgs,1)
             bb_comp = comp_resample_spline(bb_raw, alpha_est, fs, 'fast');
         else
             bb_comp = bb_raw;
+        end
+
+        % === diag D6: sps 搜索前 pre-CFO 频偏补偿（验证 fc·α 残余频偏假设） === %
+        % 依据：bb_raw = s_bb((1+α)t)·exp(j·2π·fc·α·t)，comp_resample 只处理时间伸缩，
+        % fc·α=120 Hz 频偏保留在 bb_comp 中，sps 相位搜索在此频偏下无法对齐。
+        if exist('diag_precomp_cfo','var') && diag_precomp_cfo && abs(alpha_est) > 1e-10
+            cfo_hz_pre = alpha_est * fc;
+            t_bb_pre = (0:length(bb_comp)-1) / fs;
+            bb_comp = bb_comp .* exp(-1j * 2*pi * cfo_hz_pre * t_bb_pre);
+            if si == 1 && fi == 1
+                fprintf('  [DIAG-D6] pre-CFO compensation: %+.1f Hz applied to bb_comp (before sps search)\n', cfo_hz_pre);
+            end
         end
 
         % 【P5 2026-04-21】LFM2 定时改用 down-chirp 模板
@@ -405,6 +425,19 @@ for fi = 1:size(fading_cfgs,1)
             rx_data_bb = bb_comp(ds:de);
         end
 
+        % === diag D7: 数据段级 pre-CFO 频偏补偿（保留 LFM 定时完整性）=== %
+        % 对比 D6（bb_comp 级 pre-CFO 会偏移 LFM 匹配滤波峰 36 samples）。
+        % 时间轴：从帧原点 (ds-1)/fs 起算，与 bb_comp 时间基准一致。
+        if exist('diag_precomp_cfo_data','var') && diag_precomp_cfo_data && abs(alpha_est) > 1e-10
+            cfo_hz_pre = alpha_est * fc;
+            t_data_abs = ((ds-1) + (0:length(rx_data_bb)-1)) / fs;
+            rx_data_bb = rx_data_bb .* exp(-1j * 2*pi * cfo_hz_pre * t_data_abs);
+            if si == 1 && fi == 1
+                fprintf('  [DIAG-D7] pre-CFO on rx_data_bb: %+.1f Hz (t0=%.4fs, LFM 定时完整)\n', ...
+                    cfo_hz_pre, (ds-1)/fs);
+            end
+        end
+
         % RRC匹配+下采样+训练对齐
         [rx_filt,~] = match_filter(rx_data_bb, sps, 'rrc', rolloff, span_rrc);
         best_off = 0; best_pwr = 0;
@@ -420,16 +453,61 @@ for fi = 1:size(fading_cfgs,1)
         if length(rx_sym_recv)>N_tx, rx_sym_recv=rx_sym_recv(1:N_tx);
         elseif length(rx_sym_recv)<N_tx, rx_sym_recv=[rx_sym_recv,zeros(1,N_tx-length(rx_sym_recv))]; end
 
+        % === diag D9: dump rx_filt 前 48 + rx_sym_recv 前 10 + 扫描 8 sps 相位对齐 === %
+        if si == 1 && fi == 1 && exist('diag_dump_rxfilt','var') && diag_dump_rxfilt
+            fprintf('  [DIAG-D9] group_delay=span_rrc*sps/2=%d samples, sps=%d, best_off=%d\n', ...
+                span_rrc*sps/2, sps, best_off);
+            fprintf('  [DIAG-D9] rx_filt(1:48) abs:  '); fprintf('%.3f ', abs(rx_filt(1:48))); fprintf('\n');
+            fprintf('  [DIAG-D9] rx_filt(1:48) arg°: '); fprintf('%+5.0f ', angle(rx_filt(1:48))*180/pi); fprintf('\n');
+            fprintf('  [DIAG-D9] training(1:6) abs:  '); fprintf('%.3f ', abs(training(1:6))); fprintf('\n');
+            fprintf('  [DIAG-D9] training(1:6) arg°: '); fprintf('%+5.0f ', angle(training(1:6))*180/pi); fprintf('\n');
+            fprintf('  [DIAG-D9] rx_sym_recv(1:10) abs:  '); fprintf('%.3f ', abs(rx_sym_recv(1:10))); fprintf('\n');
+            fprintf('  [DIAG-D9] rx_sym_recv(1:10) arg°: '); fprintf('%+5.0f ', angle(rx_sym_recv(1:10))*180/pi); fprintf('\n');
+            % 全 8 sps 相位扫描（找最好对齐）
+            fprintf('  [DIAG-D9] sps phase scan (corr with training(1:50)):\n');
+            for off_p = 0:sps-1
+                idx_p = off_p+1 : sps : length(rx_filt);
+                n_p = min(length(idx_p), 50);
+                sym_p = rx_filt(idx_p(1:n_p));
+                c_p = sum(sym_p .* conj(training(1:n_p))) / (norm(sym_p)*norm(training(1:n_p))+1e-30);
+                fprintf('    off=%d: |corr(1:50)|=%.3f arg=%+6.1f°\n', off_p, abs(c_p), angle(c_p)*180/pi);
+            end
+            % 尝试"跳过 group_delay" 的 sps 对齐（理论上 rx_filt(gd+1) 对应第 1 符号）
+            gd = span_rrc*sps/2;
+            fprintf('  [DIAG-D9] 跳过 group_delay=%d sample 后对齐:\n', gd);
+            for off_p = 0:sps-1
+                start_p = gd + off_p + 1;
+                if start_p <= length(rx_filt)
+                    idx_p = start_p : sps : length(rx_filt);
+                    n_p = min(length(idx_p), 50);
+                    if n_p >= 10
+                        sym_p = rx_filt(idx_p(1:n_p));
+                        c_p = sum(sym_p .* conj(training(1:n_p))) / (norm(sym_p)*norm(training(1:n_p))+1e-30);
+                        fprintf('    off=%d (start=%d): |corr|=%.3f arg=%+6.1f°\n', ...
+                            off_p, start_p, abs(c_p), angle(c_p)*180/pi);
+                    end
+                end
+            end
+        end
+
         T = train_len;
         N_dsym = N_tx - T;
         nv_eq = max(noise_var, 1e-10);
         P_paths = length(sym_delays);
 
         % 残余CFO补偿（用估计alpha，不用oracle dop_rate）
-        if abs(alpha_est) > 1e-10
+        % === diag D6/D7: pre-CFO 开启时跳过此处符号级 CFO（避免双重补偿） === %
+        % === diag D10: gen_uwa_channel 是基带模型不产生 fc·α 频偏，此补偿可能是伪操作 === %
+        h_precomp_done = (exist('diag_precomp_cfo','var')      && diag_precomp_cfo) || ...
+                         (exist('diag_precomp_cfo_data','var') && diag_precomp_cfo_data);
+        h_disable_cfo  = exist('diag_disable_cfo_postcomp','var') && diag_disable_cfo_postcomp;
+        if abs(alpha_est) > 1e-10 && ~h_precomp_done && ~h_disable_cfo
             cfo_res_hz = alpha_est * fc;
             t_sym_vec = (0:length(rx_sym_recv)-1) / sym_rate;
             rx_sym_recv = rx_sym_recv .* exp(-1j*2*pi*cfo_res_hz*t_sym_vec);
+        elseif h_disable_cfo && abs(alpha_est) > 1e-10 && si == 1 && fi == 1
+            fprintf('  [DIAG-D10] skip post-CFO compensation (α·fc=%+.1f Hz not applied)\n', ...
+                alpha_est*fc);
         end
 
         if strcmpi(ftype, 'static')
@@ -440,10 +518,75 @@ for fi = 1:size(fading_cfgs,1)
             for col = 1:L_h
                 T_mat(col:train_len, col) = training(1:train_len-col+1).';
             end
-            [h_gamp_vec, ~] = ch_est_gamp(rx_train(:), T_mat, L_h, 50, noise_var);
-            h_est_gamp = h_gamp_vec(:).';
+
+            % === diag D2/D4: Oracle h / LS fallback（spec 2026-04-23-sctde-alpha-1e2-rca） === %
+            if exist('diag_oracle_h','var') && diag_oracle_h
+                h_est_gamp = h_sym;   % 名义冲激响应（gains 归一化后）
+                if si == 1 && fi == 1
+                    fprintf('  [DIAG-D2] oracle h injected (= h_sym, L=%d)\n', L_h);
+                end
+            elseif exist('diag_use_ls','var') && diag_use_ls
+                h_ls = (T_mat' * T_mat + 1e-3*eye(L_h)) \ (T_mat' * rx_train(:));
+                h_est_gamp = h_ls(:).';
+                if si == 1 && fi == 1
+                    fprintf('  [DIAG-D4] LS (ridge=1e-3) instead of GAMP\n');
+                end
+            else
+                [h_gamp_vec, ~] = ch_est_gamp(rx_train(:), T_mat, L_h, 50, noise_var);
+                h_est_gamp = h_gamp_vec(:).';
+            end
+
+            % === diag: dump h 对比（oracle vs estimated） === %
+            if si == 1 && fi == 1 && exist('diag_dump_h','var') && diag_dump_h
+                fprintf('  [DIAG-H] tap | |h_est|   arg°   | |h_true|  arg°\n');
+                for p_ = 1:length(sym_delays)
+                    idx_tap = sym_delays(p_)+1;
+                    fprintf('  [DIAG-H] %3d | %.4f  %+7.2f | %.4f  %+7.2f\n', ...
+                        idx_tap, abs(h_est_gamp(idx_tap)), angle(h_est_gamp(idx_tap))*180/pi, ...
+                        abs(h_sym(idx_tap)), angle(h_sym(idx_tap))*180/pi);
+                end
+                fprintf('  [DIAG-H] NMSE(h_est vs h_sym) = %.4f (norm²)\n', ...
+                    sum(abs(h_est_gamp - h_sym).^2) / sum(abs(h_sym).^2));
+            end
+
+            % === diag D5: 信号层对齐诊断（Turbo 之前） === %
+            if si == 1 && fi == 1 && exist('diag_dump_signal','var') && diag_dump_signal
+                lfm_expected_theory = 2*N_preamble + 3*guard_samp + N_lfm + 1;
+                fprintf('  [DIAG-S] lfm_pos=%d, theory≈%d, err=%d\n', ...
+                    lfm_pos, lfm_expected_theory, lfm_pos - lfm_expected_theory);
+                fprintf('  [DIAG-S] alpha_est=%+.4e, dop_rate=%+.4e, err=%+.2e\n', ...
+                    alpha_est, dop_rate, alpha_est - dop_rate);
+                fprintf('  [DIAG-S] best_off (sps phase)=%d / %d\n', best_off, sps);
+                % 前 50 符号对齐
+                c50 = sum(rx_sym_recv(1:50) .* conj(training(1:50))) / ...
+                      (norm(rx_sym_recv(1:50)) * norm(training(1:50)) + 1e-30);
+                fprintf('  [DIAG-S] corr(1:50)   |=%.3f, arg=%+7.1f°\n', abs(c50), angle(c50)*180/pi);
+                % 中段对齐（250-300）
+                c_mid = sum(rx_sym_recv(251:300) .* conj(training(251:300))) / ...
+                        (norm(rx_sym_recv(251:300)) * norm(training(251:300)) + 1e-30);
+                fprintf('  [DIAG-S] corr(251:300)|=%.3f, arg=%+7.1f°\n', abs(c_mid), angle(c_mid)*180/pi);
+                % 尾段对齐（450-500）
+                c_tail = sum(rx_sym_recv(451:500) .* conj(training(451:500))) / ...
+                         (norm(rx_sym_recv(451:500)) * norm(training(451:500)) + 1e-30);
+                fprintf('  [DIAG-S] corr(451:500)|=%.3f, arg=%+7.1f°\n', abs(c_tail), angle(c_tail)*180/pi);
+                % 模型拟合残差（用 h_sym 做 oracle 信道）
+                y_model = conv(training(1:train_len), h_sym);
+                y_model = y_model(1:train_len);
+                resid   = rx_sym_recv(1:train_len) - y_model;
+                pwr_sig   = mean(abs(y_model).^2);
+                pwr_resid = mean(abs(resid).^2);
+                fprintf('  [DIAG-S] P_sig=%.3e, P_resid=%.3e, SNR_emp=%.1f dB, noise_var=%.3e\n', ...
+                    pwr_sig, pwr_resid, 10*log10(pwr_sig/pwr_resid), noise_var);
+            end
+
+            % === diag D3: Turbo iter override === %
+            if exist('diag_turbo_iter','var') && ~isempty(diag_turbo_iter)
+                turbo_iter_use = diag_turbo_iter;
+            else
+                turbo_iter_use = turbo_iter;
+            end
             [bits_out,~] = turbo_equalizer_sctde(rx_sym_recv, h_est_gamp, training, ...
-                turbo_iter, noise_var, eq_params, codec);
+                turbo_iter_use, noise_var, eq_params, codec);
         else
             %% === 时变：BEM(DCT) + per-symbol ISI消除 + MMSE Turbo ===
 
