@@ -2,6 +2,14 @@
 
 ## 2026-04-23
 
+- **SC-FDE cascade 完整 α sweep × 多 SNR 全场景验证（Phase G）**
+  - 诊断: `modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_alpha_sweep_full.m`
+  - 矩阵: 10 α（±5e-4, ±1e-3, ±3e-3, ±1e-2, ±3e-2）× 3 SNR = 30 trial
+  - 工作率: SNR=10 dB **9/10**（仅 α=-1e-2 异常）；SNR≥15 dB **10/10**
+  - **新发现**：α=-1e-2 是孤立异常点，**不是 ±α 系统单调不对称**（被 α=-3e-2 BER=0% 证伪）
+  - 新假设: HFM/LFM 模板对齐在 α=-1e-2 附近碰局部不连续；待精细 α 扫描验证
+  - 回流: `wiki/conclusions.md` 修正 H3 假设 + 添加孤点性质说明
+
 - **SC-FDE α=-1e-2 单点 SNR 受限确认（H1 ✓）**
   - 诊断: `modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_neg_1e2_root_cause.m`
   - 矩阵: 2 α × 3 SNR × 5 seed = 30 trial

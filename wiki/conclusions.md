@@ -7,23 +7,30 @@ updated: 2026-04-23
 
 累积记录项目中得出的技术结论，作为后续决策依据。
 
-## SC-FDE cascade α=-1e-2 单点 SNR 受限（2026-04-23，详见 [[specs/archive/2026-04-22-scfde-cascade-resample-oom-fix]]）
+## SC-FDE cascade 全场景验证 + α=-1e-2 孤点 SNR 受限（2026-04-23，详见 [[specs/archive/2026-04-22-scfde-cascade-resample-oom-fix]]）
 
-诊断脚本 `tests/SC-FDE/diag_neg_1e2_root_cause.m`：2 α × 3 SNR × 5 seed = 30 trial。
+### Phase G 完整 α sweep（10 α × 3 SNR，`diag_alpha_sweep_full.m`）
 
-| α | SNR=10 dB | SNR=15 dB | SNR=20 dB |
+| α | SNR=10 | SNR=15 | SNR=20 |
 |:---:|:---:|:---:|:---:|
-| **-1e-2** | **13.14%** | **0%** | **0%** |
-| +1e-2 | 0% | 0% | 0% |
+| -3e-2 | 0% | 0% | 0% |
+| **-1e-2** | **13.14%** ⚠ | **0%** | 0% |
+| -3e-3 / -1e-3 / -5e-4 | 0% | 0% | 0% |
+| +5e-4 ~ +3e-2（5 点） | 0% | 0% | 0% |
 
-- **物理根因**：`est_alpha_dual_chirp` 在 SNR=10 dB 下噪底 ~5e-6
-  - α=+1e-2 estimator 系统偏差 -5e-6（在底）→ α_p2 < 3e-6 门限被吞 → 已是噪底极限，OK
-  - α=-1e-2 estimator 系统偏差 -2e-5（**4× 超底**）→ α_p2_raw 同样估不出（噪声主导）→ stage1 残余无法精修 → ~1 样本时钟漂移超 SC-FDE 容忍
-  - SNR=15 dB 噪底降到 ~1e-6，2e-5 残余可被精修 → BER=0
-- **Estimator ±α 不对称**（4× 偏差差异）是上层根因，但 2026-04-22 暂不深挖
+**工作率**：SNR=10 **9/10**，SNR≥15 **10/10**。
+
+### 关键发现（推翻原 H3 假设）
+
+- **α=-1e-2 是孤立异常点，不是单调 ±α 不对称**：
+  - 原 H3 假设 "estimator 偏差随 |α| 增长" 被 **α=-3e-2 BER=0% 证伪**（如成立则 -3e-2 应更糟）
+  - α=-3e-2 cascade 偏差 -8.7e-6（与 +3e-2 同档）；α=-1e-2 偏差 -2e-5；α=-3e-3 等更小 α 也 OK
+  - **新假设**：HFM/LFM 模板对齐在 α=-1e-2 附近碰局部不连续（搜索网格 cusp / 帧边界 / 模板 phase 周期）
+- **物理边界**：`est_alpha_dual_chirp` 在 SNR=10 dB 噪底 ~5e-6；该孤点偏差 2e-5（4× 超底）→ α_p2 估不出 → 无法精修 → ~1 样本时钟漂移超 SC-FDE 容忍
+- **SNR=15 dB 噪底降到 ~1e-6**，2e-5 残余可被精修 → BER=0
 - **接受 limitation**：SNR=10 dB 是 cascade 物理边界，**SNR≥15 dB 全 α∈[±5e-4, ±3e-2] 工作**
 - **附带 issue**：`bench_seed` 未传到信道生成（5 seed BER std=0），属 todo `E2E benchmark C 阶段` 范畴
-- **可选方案 B**（未做）：LFM 噪底自适应门限（基于训练残差估 SNR）让 SNR=10 边界场景也通；2-3h 工时，BER 改善 1 个点，性价比低
+- **后续可选**：(1) 精细 α 扫描（-8e-3 ~ -1.2e-2 步进 1e-3）验证孤点是否是网格 cusp；(2) LFM 噪底自适应门限让 SNR=10 边界场景也通（2-3h，性价比低）
 
 ## gen_doppler_channel 仿真-补偿架构修复（2026-04-22，V1.5，详见 [[specs/archive/2026-04-22-matching-pair-doppler-v1_5]]）
 
