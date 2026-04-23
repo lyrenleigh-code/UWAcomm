@@ -160,7 +160,9 @@ for fi = 1:size(fading_cfgs,1)
     N_info = M_total/n_code - mem;
 
     %% ===== TX（固定，不随SNR变）===== %%
-    rng(100 + fi);
+    % bench_seed 注入（2026-04-23 修：原 rng 仅含 fi，5 seed BER std=0）
+    % 偏移 (bench_seed-42)*100000 保 backwards-compat：默认 42 时 → 偏移 0 → baseline 完全一致
+    rng(100 + fi + (bench_seed - 42) * 100000);
     info_bits = randi([0 1],1,N_info);
     coded = conv_encode(info_bits,codec.gen_polys,codec.constraint_len);
     coded = coded(1:M_total);
@@ -253,7 +255,8 @@ for fi = 1:size(fading_cfgs,1)
     for si = 1:length(snr_list)
         snr_db = snr_list(si);
         noise_var = sig_pwr * 10^(-snr_db/10);
-        rng(300+fi*1000+si*100);
+        % bench_seed 注入（2026-04-23 修）；偏移 (bench_seed-42)*100000 保 backwards-compat
+        rng(300 + fi*1000 + si*100 + (bench_seed - 42) * 100000);
         rx_pb = rx_pb_clean + sqrt(noise_var)*randn(size(rx_pb_clean));
 
         % 【诊断开关】bench_oracle_passband_resample：在通带先用 oracle α 做 resample

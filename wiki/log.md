@@ -2,6 +2,13 @@
 
 ## 2026-04-23
 
+- **`bench_seed` 注入修复（Phase H）+ seed=1024 灾难发现**
+  - 修复：`test_scfde_timevarying.m` L163 + L257 两处 `rng()` 加 `(bench_seed-42)*100000` 偏移；默认 42 时偏移 0 → backwards-compat（diag_cascade_quick 与 Patch E baseline bit-exact 一致）
+  - 验证：α=-1e-2 5 seed BER std 从 0 → 20.89（seed 现真生效）
+  - **新发现**：5/30 trial（17%）出现 ~50% BER；seed=1024 + α=±1e-2 → 多场景灾难
+  - α=-1e-2 4/5 seed 在 SNR=15 dB 恢复 0%（H1 部分确认），seed=1024 三个 SNR 都 50%（独立异常）
+  - 后续：Phase I 追因 seed=1024 灾难（同步 / 估计 / 解码 哪层崩）
+
 - **SC-FDE cascade 完整 α sweep × 多 SNR 全场景验证（Phase G）**
   - 诊断: `modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_alpha_sweep_full.m`
   - 矩阵: 10 α（±5e-4, ±1e-3, ±3e-3, ±1e-2, ±3e-2）× 3 SNR = 30 trial
