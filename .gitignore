@@ -19,6 +19,9 @@ tmp/
 bench_results/
 diag_results/
 diag_results_large/
+diag_results_*/
+diag_*_out/
+single_*.csv
 
 # OS
 Thumbs.db
