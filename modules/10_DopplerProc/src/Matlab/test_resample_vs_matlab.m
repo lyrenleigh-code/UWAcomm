@@ -212,29 +212,68 @@ end
 %% ============ 可视化 ============
 try
     % Figure 1: NMSE vs |α| 曲线（每条方法一条线，分 +α / -α）
+    % 画图顺序：MATLAB 方法先画（下层），项目自实现方法后画（上层）
+    % 避免 spline-accurate 与 matlab-spline NMSE 完全重叠时被覆盖
     f1 = figure('Name','NMSE vs α 对比','Position',[100 100 1100 700]);
-    colors = lines(n_methods);
-    markers = {'o','s','d','^','v','x'};
+
+    % 自实现方法（高亮）：粗实线 + 大实心 marker
+    ours_idx = [find(strcmp(method_names,'spline-accurate')), ...
+                find(strcmp(method_names,'spline-fast'))];
+    % MATLAB 方法：细虚线 + 小 marker
+    matlab_idx = setdiff(1:n_methods, ours_idx);
+
+    plot_order = [matlab_idx, ours_idx];   % MATLAB 先画，自实现后画（覆盖在上）
+
+    % 配色：MATLAB 方法用灰度/浅色，自实现用鲜明色
+    color_map = struct();
+    color_map.('spline_fast')       = [0.85 0.33 0.10];   % 橙红
+    color_map.('spline_accurate')   = [0.00 0.45 0.74];   % 蓝
+    color_map.('matlab_spline')     = [0.47 0.67 0.19];   % 绿
+    color_map.('matlab_pchip')      = [0.49 0.18 0.56];   % 紫
+    color_map.('matlab_linear')     = [0.50 0.50 0.50];   % 灰
+    color_map.('matlab_resample')   = [0.93 0.69 0.13];   % 黄
 
     subplot(2,1,1);
-    for m = 1:n_methods
+    for k = 1:length(plot_order)
+        m = plot_order(k);
+        key = strrep(method_names{m}, '-', '_');
+        c = color_map.(key);
+        if any(m == ours_idx)
+            lw = 2.5; ms = 11; lstyle = '-';
+        else
+            lw = 1.2; ms = 7;  lstyle = '--';
+        end
+        markers_all = {'o','s','d','^','v','x'};
+        mkr = markers_all{m};
         pos_mask = alpha_list > 0;
-        plot(alpha_list(pos_mask), nmse(m, pos_mask), '-', ...
-             'Color', colors(m,:), 'Marker', markers{m}, 'LineWidth', 1.5, ...
+        plot(alpha_list(pos_mask), nmse(m, pos_mask), lstyle, ...
+             'Color', c, 'Marker', mkr, 'MarkerSize', ms, 'LineWidth', lw, ...
+             'MarkerFaceColor', c * 0.8 + 0.2, ...
              'DisplayName', method_names{m});
         hold on;
     end
     set(gca, 'XScale', 'log');
     grid on;
     xlabel('+α'); ylabel('NMSE (dB)');
-    title('+α 方向：NMSE vs |α|（QPSK-RRC, N=48000）');
+    title('+α 方向：NMSE vs |α|（QPSK-RRC, N=48000）| 粗实线=项目自实现，细虚线=MATLAB');
     legend('show', 'Location','southwest');
 
     subplot(2,1,2);
-    for m = 1:n_methods
+    for k = 1:length(plot_order)
+        m = plot_order(k);
+        key = strrep(method_names{m}, '-', '_');
+        c = color_map.(key);
+        if any(m == ours_idx)
+            lw = 2.5; ms = 11; lstyle = '-';
+        else
+            lw = 1.2; ms = 7;  lstyle = '--';
+        end
+        markers_all = {'o','s','d','^','v','x'};
+        mkr = markers_all{m};
         neg_mask = alpha_list < 0;
-        plot(abs(alpha_list(neg_mask)), nmse(m, neg_mask), '-', ...
-             'Color', colors(m,:), 'Marker', markers{m}, 'LineWidth', 1.5, ...
+        plot(abs(alpha_list(neg_mask)), nmse(m, neg_mask), lstyle, ...
+             'Color', c, 'Marker', mkr, 'MarkerSize', ms, 'LineWidth', lw, ...
+             'MarkerFaceColor', c * 0.8 + 0.2, ...
              'DisplayName', method_names{m});
         hold on;
     end
