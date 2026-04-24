@@ -123,7 +123,7 @@ end
 %% Step 2：对整个多径信号应用 Doppler
 if alpha_const && ~isempty(fc) && abs(alpha_base) > 1e-10
     %% Constant α：poly_resample（与 RX 补偿形成完美匹配对）
-    [p_num, q_den] = rat(1 + alpha_base, 1e-10);
+    [p_num, q_den] = rat(1 + alpha_base, 1e-7);
     y_dop = poly_resample(y_mpath, q_den, p_num);   % 时间压缩 1/(1+α)
     N_out_bb = length(y_dop);
     % 基带 CFO：exp(j·2π·fc·α·n/fs)
@@ -135,7 +135,7 @@ elseif alpha_const && abs(alpha_base) < 1e-10
     N_out_bb = length(r);
 elseif alpha_const && isempty(fc)
     %% constant α 无 fc：fallback 到 V1.0 公式
-    [p_num, q_den] = rat(1 + alpha_base, 1e-10);
+    [p_num, q_den] = rat(1 + alpha_base, 1e-7);
     y_dop = poly_resample(y_mpath, q_den, p_num);
     N_out_bb = length(y_dop);
     warning('gen_doppler_channel:NoFc', '未传入 fc，使用 V1.0 α·fs·t 相位近似');
