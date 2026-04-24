@@ -2,6 +2,20 @@
 
 ## 2026-04-24
 
+- **SC-FDE sps+GAMP 去 oracle 迁移 14_Streaming 架构（V2.2）**
+  - Spec: `specs/active/2026-04-24-scfde-sps-deoracle-arch.md`（归档中）
+  - Phase 1: TX 第 0 block = training（seed=77），sps 两处用 `train_cp_rx(1:10)`，
+    Turbo decoder 只处理 data block（N-1 个）
+  - Phase 2 自动完成：GAMP `tx_blk1 = all_cp_data(1:sym_per_block)` 内容等价 train_cp
+  - Phase 3 BEM 单 block 观测证伪：fd=1Hz 5dB 0.16%→49.64%（BEM 无法拟合 Jakes 时变）
+  - 回滚 Phase 3，保留 Phase 1+2 收益（BER bit-exact 与 Phase 1 一致）
+  - `test_scfde_static.m` + `test_scfde_discrete_doppler.m` 加 OFFLINE ORACLE BASELINE
+    声明（§2 白名单豁免）
+  - Phase 3b spec: `2026-04-24-scfde-bem-decision-feedback-arch.md`（移植 14_Streaming
+    build_bem_observations 两阶段判决反馈方案，~2-3h future work）
+  - 回流：`wiki/modules/13_SourceCode/SC-FDE调试日志.md` V2.2 章节；
+    `wiki/conclusions.md` #41 架构迁移条目
+
 - **CFO postcomp 跨体制横向审计完成**
   - Spec: `specs/active/2026-04-24-cfo-postcomp-cross-scheme-audit.md`（归档中）
   - Grep 覆盖：6 体制 runner + common + 14_Streaming

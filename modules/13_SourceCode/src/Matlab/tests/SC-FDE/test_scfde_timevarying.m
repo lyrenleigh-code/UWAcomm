@@ -161,13 +161,24 @@ for fi = 1:size(fading_cfgs,1)
     blk_fft=fading_cfgs{fi,5}; blk_cp=fading_cfgs{fi,6}; N_blocks=fading_cfgs{fi,7};
     sym_per_block = blk_cp + blk_fft;
 
+    % === 2026-04-24 迁移 14_Streaming 架构（spec scfde-sps-deoracle-arch）===
+    % Block 1 = 训练块（seed=77，RX 本地重建）；Blocks 2..N = 数据块
+    % info_bits / M_total 口径按 data block 计算，旧 BER 基线作废
+    N_data_blocks = N_blocks - 1;
     M_per_blk = 2*blk_fft;
-    M_total = M_per_blk * N_blocks;
+    M_total = M_per_blk * N_data_blocks;  % 只对 data block 编码
     N_info = M_total/n_code - mem;
 
     %% ===== TX（固定，不随SNR变）===== %%
-    % bench_seed 注入（2026-04-23 修：原 rng 仅含 fi，5 seed BER std=0）
-    % 偏移 (bench_seed-42)*100000 保 backwards-compat：默认 42 时 → 偏移 0 → baseline 完全一致
+    % Block 1: 训练块（seed=77 与 14_Streaming modem_encode_scfde.m 对齐）
+    rng_state_save_tx = rng;
+    rng(77);
+    train_sym = constellation(randi(4, 1, blk_fft));
+    rng(rng_state_save_tx);
+    train_cp = [train_sym(end-blk_cp+1:end), train_sym];
+
+    % Blocks 2..N: 数据块（bench_seed 注入，info_bits 真随机）
+    % 偏移 (bench_seed-42)*100000 保 backwards-compat：默认 42 时 → 偏移 0
     % uint32+mod 处理 seed<42 负值（rng 拒绝负数）
     rng(uint32(mod(100 + fi + (bench_seed - 42) * 100000, 4294967296)));
     info_bits = randi([0 1],1,N_info);
@@ -177,8 +188,10 @@ for fi = 1:size(fading_cfgs,1)
     sym_all = bits2qpsk(inter_all);
 
     all_cp_data = zeros(1, N_blocks * sym_per_block);
-    for bi=1:N_blocks
-        data_sym = sym_all((bi-1)*blk_fft+1:bi*blk_fft);
+    all_cp_data(1:sym_per_block) = train_cp;       % Block 1: training
+    for data_bi = 1:N_data_blocks
+        bi = data_bi + 1;                          % 全局 block index (2..N)
+        data_sym = sym_all((data_bi-1)*blk_fft+1:data_bi*blk_fft);
         x_cp = [data_sym(end-blk_cp+1:end), data_sym];
         all_cp_data((bi-1)*sym_per_block+1:bi*sym_per_block) = x_cp;
     end
@@ -186,6 +199,14 @@ for fi = 1:size(fading_cfgs,1)
     [shaped_bb,~,~] = pulse_shape(all_cp_data, sps, 'rrc', rolloff, span);
     N_shaped = length(shaped_bb);
     [data_pb,~] = upconvert(shaped_bb, fs, fc);
+
+    % === RX 本地重建训练块（与 14_Streaming modem_decode_scfde 契约一致）===
+    % 独立重建（语义：RX 不依赖 TX 变量），内容与 TX train_cp 完全一致
+    rng_state_save_rx = rng;
+    rng(77);
+    train_sym_rx = constellation(randi(4, 1, blk_fft));
+    rng(rng_state_save_rx);
+    train_cp_rx = [train_sym_rx(end-blk_cp+1:end), train_sym_rx];
 
     % 功率归一化
     data_rms = sqrt(mean(data_pb.^2));
@@ -485,16 +506,13 @@ for fi = 1:size(fading_cfgs,1)
         if e1 > length(bb_comp1), rd1=[bb_comp1(d1:end),zeros(1,e1-length(bb_comp1))];
         else, rd1=bb_comp1(d1:e1); end
         [rf1,~] = match_filter(rd1, sps, 'rrc', rolloff, span);
-        % ⚠ Oracle 泄漏：用 TX 数据 all_cp_data(1:10) 做 sps 相位参考
-        % 试错记录（2026-04-23 撤回）：
-        %   - sum(|st|^2) 功率最大化 → 6 径 ISI 让错相位捕获更多能量泄漏 → -1e-2 13%→48% ❌
-        %   - abs(sum(st^4)) QPSK NDA → 噪声/ISI 4 次放大 → 灾难率翻倍 ❌
-        % 真去 oracle 需架构改动（加 training preamble 到帧结构 / Gardner TED+量化 /
-        % LFM 模板尾部相关）→ 独立 spec 待开
+        % 2026-04-24 架构去 oracle（spec archive/scfde-sps-deoracle-arch）：
+        %   原 all_cp_data(1:10) 已替换为 RX 本地重建 train_cp_rx(1:10)
+        %   迁移路径：14_Streaming/rx/modem_decode_scfde.m
         b1=0; bp1=0;
         for off=0:sps-1
             st=rf1(off+1:sps:end);
-            if length(st)>=10, c=abs(sum(st(1:10).*conj(all_cp_data(1:10))));
+            if length(st)>=10, c=abs(sum(st(1:10).*conj(train_cp_rx(1:10))));
                 if c>bp1, bp1=c; b1=off; end, end, end
         rc = rf1(b1+1:sps:end);
         if length(rc)>N_total_sym, rc=rc(1:N_total_sym);
@@ -598,11 +616,11 @@ for fi = 1:size(fading_cfgs,1)
         end
 
         [rx_filt,~] = match_filter(rx_data_bb, sps, 'rrc', rolloff, span);
-        % ⚠ Oracle 泄漏：见 L484-491 注释
+        % 2026-04-24 架构去 oracle：改用本地重建的 train_cp_rx（见上方注释）
         best_off=0; best_pwr=0;
         for off=0:sps-1
             st=rx_filt(off+1:sps:end);
-            if length(st)>=10, c=abs(sum(st(1:10).*conj(all_cp_data(1:10))));
+            if length(st)>=10, c=abs(sum(st(1:10).*conj(train_cp_rx(1:10))));
                 if c>best_pwr, best_pwr=c; best_off=off; end
             end
         end
@@ -627,10 +645,12 @@ for fi = 1:size(fading_cfgs,1)
         eff_delays = mod(sym_delays - sync_offset_sym, blk_fft);
 
         if strcmpi(ftype, 'static')
-            % GAMP估计（用第1块CP段）
+            % GAMP估计（用训练块 CP 段，2026-04-24 Phase 2 形式清洁化）
+            %   原 tx_blk1 = all_cp_data(1:sym_per_block) 内容等价 train_cp_rx
+            %   （因 all_cp_data(1:sym_per_block)=train_cp=train_cp_rx），显式改用 RX 本地重建
             usable = blk_cp;
             T_mat = zeros(usable, L_h);
-            tx_blk1 = all_cp_data(1:sym_per_block);
+            tx_blk1 = train_cp_rx;   % 本地重建训练块（非 oracle）
             for col = 1:L_h
                 for row = col:usable, T_mat(row, col) = tx_blk1(row - col + 1); end
             end
@@ -656,6 +676,12 @@ for fi = 1:size(fading_cfgs,1)
             end
         else
             % BEM(DCT)跨块估计（每块CP段作为导频）
+            % ⚠ Oracle 泄漏（bi>=2）: x_vec(pp)=all_cp_data(idx) 是 TX data 符号
+            % 2026-04-24 Phase 3 单 block 观测尝试证伪（BEM 需跨块时间分散观测拟合
+            % Jakes 时变；fd=1Hz 单训练块观测 37 个 → BER 0%→~50%）。保留 oracle 作
+            % benchmark baseline，真去 oracle 需 Turbo 判决反馈两阶段方案：
+            %   Phase 3b spec: 2026-04-24-scfde-bem-decision-feedback-arch
+            %   参考: 14_Streaming/rx/modem_decode_scfde.m::build_bem_observations
             obs_y = []; obs_x = []; obs_n = [];
             for bi = 1:N_blocks
                 blk_start = (bi-1)*sym_per_block;
@@ -665,7 +691,7 @@ for fi = 1:size(fading_cfgs,1)
                     for pp = 1:K_sparse
                         idx = n - sym_delays(pp);
                         if idx >= 1 && idx <= N_total_sym
-                            x_vec(pp) = all_cp_data(idx);
+                            x_vec(pp) = all_cp_data(idx);  % ⚠ Phase 3b TODO: 替换判决反馈
                         end
                     end
                     if any(x_vec ~= 0) && n <= length(rx_sym_all)
@@ -728,22 +754,27 @@ for fi = 1:size(fading_cfgs,1)
         end
 
         % 8. 跨块Turbo均衡: LMMSE-IC ⇌ BCJR + DD信道重估计
+        % 2026-04-24 架构改动：Block 1 = training（已知 train_sym，不进 LLR/decoder）
+        %                      data_bi ∈ 1..N_data_blocks 对应全局 bi=data_bi+1
         turbo_iter = 6;
         x_bar_blks = cell(1,N_blocks);
         var_x_blks = ones(1,N_blocks);
         H_cur_blocks = H_est_blocks;
         for bi=1:N_blocks, x_bar_blks{bi}=zeros(1,blk_fft); end
+        x_bar_blks{1} = train_sym;        % 训练块符号已知（RX 重建）
+        var_x_blks(1) = 1e-6;             % 训练块方差极小
         La_dec_info = [];
         bits_decoded = [];
 
         for titer = 1:turbo_iter
-            % 1. Per-block LMMSE-IC → LLR
+            % 1. Per-block LMMSE-IC → LLR（只对 data block）
             LLR_all = zeros(1, M_total);
-            for bi = 1:N_blocks
+            for data_bi = 1:N_data_blocks
+                bi = data_bi + 1;             % 全局 block index (2..N)
                 [x_tilde,mu,nv_tilde] = eq_mmse_ic_fde(Y_freq_blocks{bi}, ...
                     H_cur_blocks{bi}, x_bar_blks{bi}, var_x_blks(bi), nv_eq);
                 Le_eq_blk = soft_demapper(x_tilde, mu, nv_tilde, zeros(1,M_per_blk), 'qpsk');
-                LLR_all((bi-1)*M_per_blk+1:bi*M_per_blk) = Le_eq_blk;
+                LLR_all((data_bi-1)*M_per_blk+1:data_bi*M_per_blk) = Le_eq_blk;
             end
 
             % 2. 跨块解交织 + BCJR
@@ -753,7 +784,7 @@ for fi = 1:size(fading_cfgs,1)
                 Le_eq_deint, La_dec_info, codec.gen_polys, codec.constraint_len);
             bits_decoded = double(Lpost_info > 0);
 
-            % 3. 反馈 + DD信道重估计
+            % 3. 反馈 + DD信道重估计（只对 data block）
             if titer < turbo_iter
                 Lpost_inter = random_interleave(Lpost_coded, codec.interleave_seed);
                 if length(Lpost_inter)<M_total
@@ -761,8 +792,9 @@ for fi = 1:size(fading_cfgs,1)
                 else
                     Lpost_inter=Lpost_inter(1:M_total);
                 end
-                for bi = 1:N_blocks
-                    coded_blk = Lpost_inter((bi-1)*M_per_blk+1:bi*M_per_blk);
+                for data_bi = 1:N_data_blocks
+                    bi = data_bi + 1;
+                    coded_blk = Lpost_inter((data_bi-1)*M_per_blk+1:data_bi*M_per_blk);
                     [x_bar_blks{bi}, var_x_raw] = soft_mapper(coded_blk, 'qpsk');
                     var_x_blks(bi) = max(var_x_raw, nv_eq);
 
@@ -791,10 +823,10 @@ for fi = 1:size(fading_cfgs,1)
         % 【N7/N8 + 逐块 BER】Turbo 最终迭代的 LLR + 逐块 coded BER（H6 关键诊断）
         if bench_diag.enable && si == 1
             hard_coded = double(LLR_all > 0);
-            ber_per_block_coded = zeros(1, N_blocks);
-            for bi_d = 1:N_blocks
-                idx = (bi_d-1)*M_per_blk + (1:M_per_blk);
-                ber_per_block_coded(bi_d) = mean(hard_coded(idx) ~= inter_all(idx));
+            ber_per_block_coded = zeros(1, N_data_blocks);
+            for data_bi = 1:N_data_blocks  % 2026-04-24 架构：只对 data block 计 BER
+                idx = (data_bi-1)*M_per_blk + (1:M_per_blk);
+                ber_per_block_coded(data_bi) = mean(hard_coded(idx) ~= inter_all(idx));
             end
             N_head = min(50, floor(M_per_blk/4));
             ber_head = mean(hard_coded(1:N_head) ~= inter_all(1:N_head));

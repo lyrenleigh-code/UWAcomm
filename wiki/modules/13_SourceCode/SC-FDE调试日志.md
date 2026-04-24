@@ -1,6 +1,6 @@
 # SC-FDE 端到端调试日志
 
-> 体制：SC-FDE | 当前版本：V4.0
+> 体制：SC-FDE | 当前版本：V2.2 (benchmark runner，Phase 1+2 sps+GAMP 去 oracle)
 > 关联模块：[[06_多载波变换]] [[07_信道估计与均衡]] [[08_同步与帧结构]] [[09_脉冲成形与变频]] [[10_多普勒处理]] [[12_迭代调度器]]
 > 关联笔记：[[端到端帧组装调试笔记]] [[UWAcomm MOC]] [[项目仪表盘]]
 > 技术参考：[[水声信道估计与均衡器详解]] [[时变信道估计与均衡调试笔记]]
@@ -15,6 +15,7 @@
 | 版本 | 日期 | 核心变更 | 状态 |
 |------|------|---------|------|
 | V4.0 | 2026-04-09 | 两级分离架构+LFM定时 | ✅ fd<=1Hz完成 |
+| V2.2 | 2026-04-24 | 迁移 14_Streaming 架构（Phase 1+2: sps+GAMP 去 oracle）| ✅ timevarying runner 完成 |
 
 ---
 
@@ -171,3 +172,87 @@ SNR=15dB  BER=0.00%  iter=6 conv=1 est_snr=13.9dB est_ber=1.19e-1
 
 本修复不引入发射端参数，conv/est_snr 均用接收端训练块本地估计。符合 CLAUDE.md §7 去 oracle 规则。
 
+---
+
+## V2.2 — 迁移 14_Streaming 架构：Phase 1+2 sps+GAMP 去 oracle (2026-04-24)
+
+**Git**: 待提交
+**Spec**: `specs/archive/2026-04-24-scfde-sps-deoracle-arch.md`
+**Parent**: 前 3 次试错 `specs/archive/2026-04-23-scfde-{omp-replace-gamp, sps-deoracle-fourth-power}.md`
+**Phase 3b 后续 spec**: `specs/active/2026-04-24-scfde-bem-decision-feedback-arch.md`
+**关联模块**: [[07_信道估计与均衡]] [[12_迭代调度器]]
+
+### 背景
+
+`test_scfde_timevarying.m:488/605` 用 `all_cp_data(1:10)` oracle 做 sps 相位参考。前 3
+次 NDA 尝试（功率最大化、4 次方）均因 6 径 ISI + SNR=10 退化（archive spec 记录）。
+
+### 新架构设计
+
+迁移 14_Streaming `modem_encode/decode_scfde.m` 架构：
+- **Block 1 = training block**（seed=77 固定，RX 本地重建）
+- **Blocks 2..N = data block**（bench_seed 注入，info_bits 真随机）
+- **RX 端** `rng(77); train_sym = constellation(randi(4,1,blk_fft))` 重建 `train_cp`
+- **bit efficiency 下降** 1/N_blocks（N=4→75%，N=16→94%，N=32→97%）
+
+### Phase 1 改动（实施）
+
+| 位置 | 改动 |
+|------|------|
+| L168-188 TX | `N_data_blocks = N_blocks-1`，`M_total = M_per_blk*N_data_blocks`；seed=77 生成 train_sym/train_cp；blocks 2..N 填 data |
+| L190 后 | RX 侧加 train_cp_rx 独立重建（`rng(77)`）|
+| L488/L605 sps ×2 | `conj(all_cp_data(1:10))` → `conj(train_cp_rx(1:10))` |
+| L730-800 Turbo | `for data_bi=1:N_data_blocks, bi=data_bi+1`；LLR 索引/Lpost_inter 索引调整；`x_bar_blks{1}=train_sym, var=1e-6` |
+| L791 逐块 BER | `for data_bi=1:N_data_blocks` |
+
+### Phase 2 自动完成
+
+Phase 1 改动 `all_cp_data(1:sym_per_block) = train_cp` 的副作用：GAMP 的 `tx_blk1 =
+all_cp_data(1:sym_per_block)` 内容 = train_cp = RX 本地可重建。**Phase 2 的 oracle 清理
+自动完成**（仅形式化 L651 `tx_blk1 = train_cp_rx` 明示语义）。
+
+### Phase 3 失败与回滚
+
+Phase 3 尝试 BEM 观测矩阵单 block 限制（仅用训练块 CP 段 37 个观测）→ **fd=1Hz
+5dB 0.16%→49.64%**（BEM 无法拟合 Jakes 时变，单 block 观测只看帧初始快照）。
+
+回滚 BEM 改动，保留 sps+GAMP Phase 1+2 收益。Phase 3b 独立 spec 移植 14_Streaming 的
+`build_bem_observations` 两阶段（训练块 + Turbo 判决反馈 x_bar_blks）。
+
+### 验证矩阵（Phase 1+2 最终版）
+
+| 场景 | 5dB | 10dB | 15dB | 20dB |
+|------|-----|------|------|------|
+| static | 0.00% | 0.00% | 0.00% | 0.00% |
+| fd=1Hz | 0.16% | 0.00% | 0.00% | 0.00% |
+| fd=5Hz | 49.90% | 49.47% | 50.63% | 50.10% |
+
+对比 Phase 1 bit-exact（架构切换后 BER 与 Phase 1 完全一致，回滚 Phase 3 后再验证一致）。
+lfm_pos/peak/α_est/H_est 全部与历史一致。
+
+### 达成事项
+
+- ✅ sps 相位参考去 oracle（4 th 次尝试成功，架构方向而非 NDA）
+- ✅ GAMP 训练矩阵去 oracle（自动副产品）
+- ✅ Turbo decoder 口径按 data block only
+- ✅ bit efficiency 下降接受为 trade-off（架构一致性）
+- 🟡 BEM 观测矩阵仍 oracle（时变路径）→ Phase 3b
+- 🟡 noise_var (nv_post) 仍 harness 注入 → 未来改
+
+### 副产物
+
+- `test_scfde_static.m` + `test_scfde_discrete_doppler.m` 加文件头 OFFLINE ORACLE
+  BASELINE 声明（CLAUDE.md §2 白名单合规）
+- 参考实现：`modules/14_Streaming/src/Matlab/rx/modem_decode_scfde.m`
+
+### 旧 BER 基线作废
+
+info_bits 口径下调 → 旧 E2E benchmark / Monte Carlo 基线不可直接对比（需重跑）。
+当前 Phase 1 回归验证 bit-exact，但作为"架构一致性 BER"新基线。
+
+### Oracle 排查
+
+本修复主动消除 RX 链路对 `all_cp_data` 的引用（仅保留 TX 侧生成），符合 CLAUDE.md §7
+排查清单第 8 条"测试 harness 允许传递协议参数，禁止传递 TX 数据"。
+
+BEM 观测仍 oracle 部分已加明确 `⚠ Phase 3b TODO` 注释 + 指向 Phase 3b spec。

@@ -7,6 +7,15 @@
 %     BEM(DCT)信道估计 + 跨块Turbo均衡(LMMSE-IC+BCJR+DD)
 % 版本: V1.1.0 — 加 benchmark_mode 注入（spec 2026-04-19-e2e-timevarying-baseline）
 % 目的: 验证SC-FDE在离散Doppler/Rician混合信道下是否显著优于Jakes连续谱
+%
+% ⚠ OFFLINE ORACLE BASELINE（2026-04-24 audit 声明）
+%   本脚本保留 oracle 参考（sps/GAMP/BEM 观测矩阵均用 all_cp_data），用于离散
+%   Doppler/Rician 信道对比基准。非 production path，不在 E2E benchmark 主路径
+%   （benchmark_e2e_baseline.m 只调 timevarying runner）。
+%   Production 去 oracle 版本: 14_Streaming/rx/modem_decode_scfde.m
+%   架构迁移版本: test_scfde_timevarying.m V2.2（Phase 1+2，commit 2026-04-24）
+%   若未来需要 discrete_doppler 迁移架构 → 合并到 Phase 3b 独立 spec
+%   CLAUDE.md §2 白名单允许 benchmark baseline 保留 oracle 作算法对比基准。
 
 %% ========== Benchmark mode 注入（2026-04-19） ========== %%
 if ~exist('benchmark_mode','var') || isempty(benchmark_mode)

@@ -5,6 +5,15 @@
 % RX: 09下变频 → 08同步检测 → 提取数据 → 09 RRC匹配 → 下采样 →
 %     分块去CP+FFT → MMSE均衡 → 跨块BCJR译码
 % 版本：V2.0.0 — 通带实数帧组装 + 同步检测
+%
+% ⚠ OFFLINE ORACLE BASELINE（2026-04-24 audit 声明）
+%   本脚本是 offline MMSE+BCJR pipeline 快速基线验证工具，非 production path：
+%   - 信道 h_bb 直接 hardcode（sym_delays + gains oracle，未做信道估计）
+%   - sps 对齐 L155 用 all_cp_data(1:10) oracle 参考（与信道 oracle 同类）
+%   - 无 GAMP/BEM/Turbo 迭代（单次 LMMSE + BCJR）
+%   Production 去 oracle 版本: 14_Streaming/rx/modem_decode_scfde.m
+%   架构迁移版本: test_scfde_timevarying.m V2.2（Phase 1+2，commit 2026-04-24）
+%   CLAUDE.md §2 白名单允许 benchmark baseline 保留 oracle 作算法对比基准。
 
 clc; close all;
 fprintf('========================================\n');

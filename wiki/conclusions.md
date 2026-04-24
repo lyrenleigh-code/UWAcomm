@@ -363,6 +363,26 @@ L484-487 + L590-596 用 `all_cp_data(1:10)` 做相关挑 sps 相位（oracle 泄
   衍生：原先拟用 [[yang-2026-uwa-otfs-nonuniform-doppler]] 的非均匀 Doppler 理论被证伪
   （H4 否定），暂不引入 off-grid block-sparse OMP。详见 [[OTFS调试日志]]。
 
+41. **SC-FDE 迁移 14_Streaming 架构 Phase 1+2：sps+GAMP 去 oracle (2026-04-24)**：
+  `test_scfde_timevarying.m` L488/L605 sps 相位参考 + L651 GAMP 训练矩阵去 oracle。架构：
+  - 第 0 block 改为 **training block**（seed=77 固定，RX `rng(77); train_sym=...` 本地
+    重建）；blocks 2..N 承载 data（bench_seed 注入）
+  - sps 对齐用 `train_cp_rx(1:10)`，GAMP 训练矩阵自动变为 `train_cp_rx`（内容等价）
+  - Turbo 只处理 data block（`data_bi=1:N_data_blocks`，`x_bar_blks{1}=train_sym`）
+  - bit efficiency 下降 1/N_blocks（N=4→75%，N=16→94%）
+  **BER 基线 bit-exact 保持**（回滚 Phase 3 后，架构切换不影响 BER）：
+  - static × 4 SNR 全 0%，fd=1Hz 0.16/0/0/0%，fd=5Hz ~50%（物理极限）
+  **Phase 3 BEM 观测单 block 方案证伪**：fd=1Hz 5dB 0.16%→49.64%（BEM 无法拟合 Jakes
+  时变需跨块观测）→ 回滚，判决反馈两阶段方案独立 spec
+  `specs/active/2026-04-24-scfde-bem-decision-feedback-arch.md`。
+  前 3 次 NDA 尝试（`sum(|st|²)`、`abs(sum(st^4))`）在 archive spec 记录均失败，教训：
+  "纯 NDA blind timing 在 6 径 ISI + SNR=10 失效；去 oracle 必须给 RX 等价 ground
+  truth（training preamble / LFM 模板 / Gardner TED）"。本次选择 training preamble 架
+  构方向成功。
+  `test_scfde_static.m` + `test_scfde_discrete_doppler.m` 加 OFFLINE ORACLE BASELINE 声
+  明（CLAUDE.md §2 白名单），非 production path 的 benchmark 对比基准。
+  详见 [[SC-FDE调试日志]] V2.2 章节。
+
 40. **CFO postcomp 跨体制横向审计结论 (2026-04-24)**：
   Audit spec `2026-04-24-cfo-postcomp-cross-scheme-audit` grep 6 体制 runner + common + 14_Streaming：
   - **命中同 bug（4 runner）**：SC-TDE timevarying/discrete_doppler、DSSS timevarying/discrete_doppler — 全部 V1.2/V5.4 默认 skip + `diag_enable_legacy_cfo` 反义 toggle
