@@ -118,7 +118,7 @@
 
 | 任务 | 状态 | 说明 |
 |------|------|------|
-| **P3 demo Doppler 链路接入** | 待做 | `app.doppler_edit` 字段 UI 有但 TX 链路未用；spec 预占位 `2026-04-18-p3-doppler-integration.md`（待创建） |
+| ~~**P3 demo Doppler 链路接入**~~ | ✅ 2026-04-24 stale | 探索发现 UI→TX 链路 2026-04-22 之前已接入（`p3_demo_ui.m:864` on_transmit callback：`dop_hz → α → comp_resample_spline + exp(j·2π·fc·α·t)`）；RX 侧 α 补偿按 P4 spec 非目标显式保留为 known limitation（`specs/active/2026-04-22-p4-real-doppler-fork.md`）；P3 已冻结，后续 Doppler 工作归 P4 范围 |
 | ~~**α estimator 符号约定参数化**~~ | ✅ 2026-04-23 | `est_alpha_dual_chirp` V1.1 加 `sign_convention` 参数（'raw'/'uwa-channel'），6 runner 8 处 `-alpha_lfm_raw` hack 清理；数学双翻号等价，BER 与 a53b6f3 一致 |
 | ~~**α<0 不对称修复**（resample 层）~~ | ✅ 2026-04-22 | spec `2026-04-22-resample-negative-alpha-asymmetry.md`；根因 = `comp_resample_spline` 边界 clamp；V7.1 auto-pad 解决；单元 NMSE 差异 75-83→<3 dB，SC-FDE α=-3e-2 BER 2.66%→0%。**下游链路不对称**（DSSS/FH-MFSK/OFDM α 符号敏感）属独立 spec |
 | ~~**α=3e-2 物理极限突破**~~ | ✅ 完成（2026-04-21） | 诊断显示 Oracle 下 pipeline 无问题，根因是 estimator 2% 系统偏差 + CP wrap；3 patch 修复让 α=+3e-2 BER 50% → 5.4%，工作范围扩到 15→45 m/s |
@@ -127,7 +127,7 @@
 | ~~**E2E benchmark C 阶段（多 seed 检测率）**~~ | ✅ 2026-04-23 | Phase a 启用：`benchmark_e2e_baseline.m` V1.1 + 4 体制 runner 加 bench_seed 注入（SC-FDE 已修），smoke 验证；270 pts 全矩阵未跑 |
 | **E2E benchmark profile 扩展** | 待做 | 当前仅 custom6，需 runner 支持 `bench_channel_profile` 切换 ch_params（exponential 等） |
 | **E2E benchmark NMSE/sync/turbo iter 填充** | 待做 | CSV schema 有字段但本期全 NaN，需 runner 暴露 h_est / sync_tau_err / 逐轮 BER |
-| **p3_demo_ui.m refactor Step C** | 进行中 | 主文件 1649→≤900 行（嵌套函数物理分段），spec `2026-04-17-p3-demo-ui-refactor.md` |
+| ~~**p3_demo_ui.m refactor Step 2+3**~~ | ✅ 2026-04-22 归档 | spec `archive/2026-04-17-p3-demo-ui-refactor.md`；主文件 1832 → 1359（外化 `p3_render_tabs.m` 486 / `p3_apply_scheme_params.m` 68 + setup 拆 4 nested build_*）；超 ≤1000 目标但结构清晰，遗留 render_channel/tx_panel/rx_panel 拆分作 P3.x optional |
 | **OTFS 通带 2D 脉冲整形 Phase 4** | Phase 2 完成 | 端到端 BER 验证待做；spec `2026-04-13-otfs-pulse-shaping.md` |
 | **OTFS PAPR 专项降低** | 待做 | 需 SLM/PTS/削峰等专用技术 |
 | **OTFS 扩散 pilot** | 待做 | spec `2026-04-14-otfs-spread-pilot.md` |

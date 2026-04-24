@@ -24,11 +24,13 @@ tags: [流式仿真, 14_Streaming, UI, 重构, p3_demo_ui]
 
 ### 规模
 
-| 指标 | 当前 | 目标 |
-|------|------|------|
-| 文件行数 | 1378 | 主文件 ≤ 800 |
-| 函数数 | 25 | 各函数 ≤ 80 行 |
-| 最大函数 | `update_tabs_from_entry` = **261 行** | ≤ 80 行 |
+| 指标 | 立项时（2026-04-17） | Step 1 后（2026-04-22） | 目标（修订） |
+|------|---------------------|------------------------|-------------|
+| 文件行数 | 1378 | **1832**（polish/sync-viz 新增 ~450） | 主文件 ≤ **1000**（原 ≤800 已不现实） |
+| 函数数 | 25 | 30 | 各函数 ≤ 80 行 |
+| 最大函数 | `update_tabs_from_entry` = 261 行 | `update_tabs_from_entry` = **438 行**（L1348-1786） | ≤ 80 行 |
+
+**目标放宽原因**：polish / sync-quality-viz 阶段在 topbar/状态栏/metric card/声纳徽章/同步 tab 新增 ~450 行 UI 构建代码，不属于本次重构的抽取范围；按原 plan Step 2+3 执行后主文件应落在 ~900-1000 行，可接受。
 
 ### 问题
 
@@ -200,7 +202,7 @@ end
 
 ### 代码指标
 
-- [ ] `p3_demo_ui.m` ≤ 800 行
+- [ ] `p3_demo_ui.m` ≤ **1000** 行（2026-04-22 修订，原 ≤800）
 - [ ] 5 个外化 helper 文件各自 ≤ 350 行
 - [ ] 所有函数（含 local）≤ 80 行
 - [ ] `mlint`（或 Code Analyzer）无新增警告
@@ -278,7 +280,28 @@ end
 ## Log
 
 - 2026-04-17: Spec 创建
+- 2026-04-22: Step 1 已完成（`p3_text_capacity.m` / `p3_downconv_bw.m` / `p3_channel_tap.m` 外化）。受 polish / sync-quality-viz 新增 ~450 行影响，主文件当前 1832 行，行数目标由 ≤800 修订为 ≤1000。Step 2+3 待做。后续 P4 真实多普勒在此 spec 完成后 fork（见 `specs/active/2026-04-22-p4-real-doppler-fork.md`）。
+- 2026-04-22: Step 2 完成（p3_apply_scheme_params.m 68 行 + p3_render_tabs.m 486 行，主文件 1832 → 1343）。Step 3 完成（setup 段拆 4 个 nested build_xxx，主文件 → 1359，超 ≤1000 但结构清晰）。用户决策：接受 1359 并推进 P4 Step F，未达 ≤1000 指标记录为遗留项。
 
 ## Result
 
-_待填写_
+**2026-04-22 完成**（目标部分达成）：
+
+| 指标 | 原目标 | 修订目标 | 实际 | 评估 |
+|------|--------|---------|------|------|
+| p3_demo_ui.m | ≤ 800 | ≤ 1000 | **1359** | ❌ 结构清晰但行数未达标 |
+| p3_render_tabs.m | ≤ 350 | ≤ 350 | 486 | ⚠ OTFS DD 可视化占比高 |
+| p3_apply_scheme_params.m | ≤ 350 | ≤ 350 | 68 | ✅ |
+| p3_text_capacity / downconv_bw / channel_tap | ≤ 350 | ≤ 350 | 39 / 26 / 90 | ✅ |
+
+**结构收益**（实际价值）：
+- 主文件 1832 → 1359 （降 473 行，26%）
+- setup 段 440 行 → 4 个命名函数（build_topbar 115 / build_middle_panels 212 / build_bottom_tabs 100 / start_timer_and_init 12）
+- 最大嵌套函数 438 行（update_tabs_from_entry）→ 外化为 p3_render_tabs.m 内含 6 个 local function，各 <80 行
+- 新增冒烟测试 tests/test_p3_ui_smoke.m 覆盖 5 scheme 参数映射 + 文本容量一致性
+
+**未达标原因**：polish / sync-quality-viz 阶段新增 metric card / 同步-多普勒 2×2 tab / 质量历史 tab 约 450 行 UI 构建代码，占中部/底部 panel builders 较大比例。继续强行降行需外化 3 个 UI panel builder，边际回报递减，与 P4 开发优先级冲突，因此接受当前结果。
+
+**遗留项**（不阻塞归档）：
+- render_tabs 若将来压力大可拆 render_channel 模块（OTFS DD ~80 行）
+- 可选 P3.x 追加外化 tx_panel / rx_panel builder

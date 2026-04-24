@@ -281,9 +281,11 @@ end
 
 ## 实施步骤
 
-### Step 1 — 纯函数外化（低风险）
+### Step 1 — 纯函数外化（低风险）✅ 已完成（2026-04-17~19）
 
 **目标**：3 个小 helper 建好，最小替换验证。
+
+**已交付**：`ui/p3_text_capacity.m` (39 行) / `ui/p3_downconv_bw.m` (26 行) / `ui/p3_channel_tap.m` (90 行)。
 
 1. 新建 `ui/p3_text_capacity.m` （如上签名）
 2. 新建 `ui/p3_downconv_bw.m`
@@ -304,9 +306,9 @@ end
 
 ---
 
-### Step 2 — 复杂函数外化（中风险）
+### Step 2 — 复杂函数外化（中风险）🔴 待做
 
-**目标**：两个最大函数外化。
+**目标**：两个最大函数外化。`update_tabs_from_entry` 已长到 438 行（L1348-1786），比立项时 261 行又涨 177 行（polish 阶段新增同步/多普勒/质量 tab 渲染）。
 
 1. 新建 `ui/p3_apply_scheme_params.m`（签名见字段映射 #4）
 2. 新建 `ui/p3_render_tabs.m`（签名 + local functions 见字段映射 #5）
@@ -339,13 +341,13 @@ end
    - [ ] 解码历史下拉 → 切换历史条目重渲染
 7. **commit**：`refactor: 14_Streaming P3 UI 外化 render_tabs 和 scheme_params`
 
-**文件行数预期**：1290 → ~800
+**文件行数预期**：1832 → ~1400（抽出 ~430 行 render_tabs + ~50 行 scheme_params，净 -480）
 
 ---
 
-### Step 3 — 主文件内部重组（低风险，最后做）
+### Step 3 — 主文件内部重组（低风险，最后做）🔴 待做
 
-**目标**：主文件 setup 段拆嵌套函数，最终 ≤ 800 行。
+**目标**：主文件 setup 段拆嵌套函数，最终 **≤ 1000 行**（修订，原 ≤ 800）。
 
 1. 在主函数体内把 L87-374（287 行）拆为 4 个嵌套函数：
    - `build_topbar(main)` — 原 L98-158
@@ -377,7 +379,7 @@ end
    - [ ] 所有回调响应正常
 4. **commit**：`refactor: 14_Streaming P3 UI 主文件 setup 拆嵌套函数`
 
-**文件行数预期**：800 → 780（少量净降，因减少注释分隔符）
+**文件行数预期**：1400 → ~950-1000（setup 段 L87-374 共 287 行拆成 4 个嵌套函数 + 1 个调度主函数，净降 ~50 行，主要是去掉分节注释）
 
 ---
 
@@ -449,3 +451,4 @@ end
 ## Log
 
 - 2026-04-17: Plan 创建，完成 5 个 helper 字段映射
+- 2026-04-22: Step 1 完成标记。行数目标由 ≤800 调整为 ≤1000（baseline 因 polish 阶段从 1378 涨到 1832，非重构引入）。Step 2 `update_tabs_from_entry` 实际需拆 438 行（立项时 261 行）。续做 Step 2+3 后 fork P4（见 `specs/active/2026-04-22-p4-real-doppler-fork.md`）。
