@@ -2,6 +2,26 @@
 
 ## 2026-04-25
 
+- **SC-TDE fd=1Hz V5.5 partial fix（H4 confirmed 后续）**
+  - Spec 状态：`specs/active/2026-04-25-sctde-fd1hz-alpha-estimator-fix.md`（保留 active，等用户判断后续）
+  - Plan: `plans/2026-04-25-sctde-fd1hz-alpha-estimator-fix.md`
+  - Phase 1.2：runner 暴露 4 层 α (`L0 raw / L1 iter / L2 scan / L3 final`) + LFM peak 7 字段；`bench_init_row` schema 扩 10 字段（向后兼容 NaN）
+  - 量化数据：L0 偏差 deterministic +1.5e-5（不随 SNR 变），iter L1 翻倍至 +3.0e-5
+  - Phase 2 三条假设：
+    - **R3 排除**：sub-sample 必需（关掉 \|err\| 5.7× 恶化，dtau 真值 μs 级被 1/fs ≈ 21μs 量化掉）
+    - **R5 confirmed（新）**：iter refinement 反向收敛（累加 deterministic bias）
+    - **R1 部分支持**：LFM tau_up_frac 系统偏 +0.44（Jakes 时变 deterministic peak shift）
+    - bad/good seed estimator 偏差几乎相同 → **灾难非 estimator 偏差驱动**（类比 SC-FDE Phase J）
+  - V5.5 fix（runner V5.5）：`test_sctde_timevarying.m` 加 fd-conditional default — fd=1Hz Jakes 自动 iter=0，其他场景保留 V5.4 default=2，caller explicit 仍优先
+  - Verify 1：`verify_alpha_sweep` 55 trial × 5 min — V5.4 大 α 行为完全保留
+  - Verify 2：三方对比（base/fix/oracle，default 3 fading × 15 seed × 3 SNR）
+    - SNR=15 mean 4.33→**2.97%**（≤3% ✓）/ 灾难率 33.3→**20.0%**（≤25% ✓）
+    - SNR=20 mean 4.55→**2.55%**（vs ≤1.5% ✗ partial，oracle 0.89%）/ 灾难率 33.3→**33.3%**（vs ≤15% ✗ partial，oracle 6.7%）
+    - **单调性恢复 ✓**（base 4.33→4.55 反弹消失）
+  - 接受准则 3/5 PASS（SNR=15 全 + 单调）+ 2/5 partial（SNR=20）
+  - 残余分析：mean 1.66% gap 由 L0 deterministic +1.5e-5 bias 解释（iter=0 已是层内最优）；灾难 4/15 由 estimator 偏差驱动，1/15 (s15) 是 estimator-外机制
+  - conclusions.md 顶部追加新章节（"SC-TDE fd=1Hz V5.5 partial fix"）
+  - SC-TDE 调试日志追加 V5.5 章节
 - **SC-TDE fd=1Hz 非单调 BER vs SNR investigation 闭环**
   - Spec 归档：`specs/archive/2026-04-24-sctde-fd1hz-nonmonotonic-investigation.md`
   - Follow-up fix spec 起草：`specs/active/2026-04-25-sctde-fd1hz-alpha-estimator-fix.md`
