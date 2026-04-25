@@ -1,11 +1,40 @@
 ---
 tags: [结论, 技术决策]
-updated: 2026-04-24
+updated: 2026-04-25
 ---
 
 # 关键技术结论
 
 累积记录项目中得出的技术结论，作为后续决策依据。
+
+## SC-TDE fd=1Hz 非单调 BER vs SNR 根因（2026-04-25，详见 [[../specs/archive/2026-04-24-sctde-fd1hz-nonmonotonic-investigation]]）
+
+V5.4 删 post-CFO 伪补偿后，SC-TDE fd=1Hz Jakes 实测 mean BER 在 SNR=15→20 反弹（4.33→4.55%，违反单调）。3 阶段调研：
+
+### 阶段 1+1.5+2 数据（修正版）
+
+| 阶段 | trial | 关键数据 |
+|------|------|---------|
+| 1 V2 多 seed MC | 45 | mean 10.06/4.33/**4.55**（SNR=10/15/20，**15→20 反弹**） |
+| 1.5 seed=42 复现 | 12 | 4/4 SNR 完美复现 spec 历史表（差异 <0.01pp）|
+| 2 H4 Oracle α 全量 | 45 | mean 8.45/2.43/**0.89**（**单调递降**，灾难率 47/20/6.7%）|
+
+### H4 confirmed：α estimator 偏差是非单调直接根因
+
+- Oracle α 替换让 SNR=15→20 mean 单调（4.33→4.55 反弹消失为 2.43→0.89）
+- SNR=20 灾难率从 33% 降到 6.7%
+- 关键 seed s11 SNR=20 BER 从 10.57% 降到 0.07%（α 偏离主导）
+
+### 衍生发现 — `bench_fading_cfgs` 行数影响 RNG seed
+
+SC-TDE/OFDM/DSSS 等 timevarying runner 的 `rng(uint32(mod(N + fi*M + ...)))` 设计让 fading_cfgs 行号 `fi` 进入 RNG seed。**任何诊断脚本传单行 `bench_fading_cfgs={'fd=1Hz',...}` 都会与 default 3 行（fd=1Hz 是 fi=2）跑出完全不同的 trial 实例**。
+
+后续诊断脚本必须传 default 3 行，从 CSV 按 `fd_hz` 字段筛行。RNG seed 改用 `fading_label` 哈希是独立技术债。
+
+### 派生工作
+
+1. fix spec [[../specs/active/2026-04-25-sctde-fd1hz-alpha-estimator-fix]]
+2. SNR=10 残余灾难（46.7%）属低 SNR 物理极限或非 α 机制（独立 known limitation，与非单调无关）
 
 ## 5 体制横向灾难率首次量化（2026-04-23 Phase c sanity check）
 

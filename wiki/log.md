@@ -1,5 +1,19 @@
 # Wiki 操作日志
 
+## 2026-04-25
+
+- **SC-TDE fd=1Hz 非单调 BER vs SNR investigation 闭环**
+  - Spec 归档：`specs/archive/2026-04-24-sctde-fd1hz-nonmonotonic-investigation.md`
+  - Follow-up fix spec 起草：`specs/active/2026-04-25-sctde-fd1hz-alpha-estimator-fix.md`
+  - 3 阶段 + 102 trial Monte Carlo 数据（diag_sctde_fd1hz_monte_carlo.m / replay_seed42.m / h4_oracle_alpha.m / h4_oracle_full.m）
+  - **H4 confirmed**：α estimator 偏差是 SNR=15→20 mean 反弹（4.33→4.55%）的直接根因
+    - Oracle α 替换：mean 单调恢复（2.43→0.89%），SNR=20 灾难率 33%→6.7%
+    - s11 SNR=20 BER 10.57%→0.07%（α 偏离主导）
+  - **衍生发现**：runner RNG seed 依赖 `fading_cfgs` 行号 fi → 单行 `bench_fading_cfgs` 偏离 default 验证条件（独立技术债）
+  - SNR=10 残余灾难（46.7%）与 α 无关，归 known limitation
+  - Plan: `plans/sctde-fd1hz-nonmonotonic-investigation.md`
+  - conclusions.md 累积新条目（头部）
+
 ## 2026-04-24
 
 - **SC-FDE sps+GAMP 去 oracle 迁移 14_Streaming 架构（V2.2）**

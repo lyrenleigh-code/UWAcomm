@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
-> 最后更新：2026-04-24
-> 页面总数：53（SC-FDE 调试日志追加 V2.2 章节；本日 SC-FDE sps+GAMP 去 oracle 迁移 14_Streaming 架构 + Phase 3 BEM 证伪 + Phase 3b spec，详见 conclusions #41 + log）
+> 最后更新：2026-04-25
+> 页面总数：53（conclusions 增 SC-TDE fd=1Hz 非单调 RCA 闭环条目；H4 Oracle α confirmed 是 SNR=15→20 反弹根因，详见 conclusions 头部 + log）
 
 ## Architecture（架构页）
 
