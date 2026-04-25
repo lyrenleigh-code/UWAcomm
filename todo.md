@@ -127,7 +127,7 @@
 | ~~**α<0 不对称修复**（resample 层）~~ | ✅ 2026-04-22 | spec `2026-04-22-resample-negative-alpha-asymmetry.md`；根因 = `comp_resample_spline` 边界 clamp；V7.1 auto-pad 解决；单元 NMSE 差异 75-83→<3 dB，SC-FDE α=-3e-2 BER 2.66%→0%。**下游链路不对称**（DSSS/FH-MFSK/OFDM α 符号敏感）属独立 spec |
 | ~~**α=3e-2 物理极限突破**~~ | ✅ 完成（2026-04-21） | 诊断显示 Oracle 下 pipeline 无问题，根因是 estimator 2% 系统偏差 + CP wrap；3 patch 修复让 α=+3e-2 BER 50% → 5.4%，工作范围扩到 15→45 m/s |
 | **14_Streaming P1/P2 去 Oracle α**（2026-04-23 Phase d） | ✅ 2026-04-23 | `rx_stream_p1/p2` V1.0→V1.1 默认调 `estimate_alpha_dual_hfm` 盲估，`opts.use_oracle_alpha=true` 回退；P3/P4/P5/P6 待后续 spec |
-| **SC-FDE runner oracle 清理** | 待做 | `test_scfde_timevarying.m:229` 仍用 `all_cp_data(1:10)` 做 sps 相位选择，属 §7 oracle 泄漏 |
+| ~~**SC-FDE runner sps oracle 清理**~~ | ✅ 2026-04-24 已闭环 | spec `archive/2026-04-24-scfde-sps-deoracle-arch.md`；L515 `all_cp_data(1:10)` → `train_cp_rx(1:10)` (RX 本地重建 training preamble)；剩余 BEM `x_vec(pp) = all_cp_data(idx)` (L694) 属 A2 BEM Phase 3b spec 范围 |
 | ~~**E2E benchmark C 阶段（多 seed 检测率）**~~ | ✅ 2026-04-23 | Phase a 启用：`benchmark_e2e_baseline.m` V1.1 + 4 体制 runner 加 bench_seed 注入（SC-FDE 已修），smoke 验证；270 pts 全矩阵未跑 |
 | **E2E benchmark profile 扩展** | 待做 | 当前仅 custom6，需 runner 支持 `bench_channel_profile` 切换 ch_params（exponential 等） |
 | **E2E benchmark NMSE/sync/turbo iter 填充** | 待做 | CSV schema 有字段但本期全 NaN，需 runner 暴露 h_est / sync_tau_err / 逐轮 BER |
