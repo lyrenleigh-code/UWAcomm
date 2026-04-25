@@ -219,3 +219,15 @@ function [alpha, diag] = est_alpha_dual_chirp(bb_raw, LFM_up, LFM_dn, fs, fc, k,
   - α ∈ [1e-2, 3e-2] 超出当前 MVP 范围
   - 其他 4 体制（OFDM/SC-TDE/DSSS/FH-MFSK）切换
   - OTFS 专题（无 HFM 对帧结构）
+
+## Result
+
+- **完成日期**：2026-04-20
+- **状态**：✅ 完成
+- **关键产出**：双 LFM up+down chirp α estimator + 迭代 refinement；A2 α=5e-4 BER 48.7%→0%；α 工作范围 1e-4→1e-2（15 m/s）
+- **后继 spec**：
+  - `archive/2026-04-20-alpha-compensation-pipeline-debug.md`（α=2e-3 崩溃 → CP 精修阈值 + 迭代 refinement，全 0%）
+  - `archive/2026-04-21-alpha-pipeline-large-alpha-debug.md`（α=3e-2 突破，工作范围扩到 45 m/s）
+  - `archive/2026-04-21-alpha-refinement-other-schemes.md`（推广 OFDM/DSSS/FH-MFSK，partial）
+  - `archive/2026-04-22-resample-negative-alpha-asymmetry.md`（α<0 修复，已归档）
+- **归档**：2026-04-25 by spec 状态审计批量归档

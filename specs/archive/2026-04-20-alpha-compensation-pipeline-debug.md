@@ -262,3 +262,11 @@ cfg.h1_skip_resample = true;
   - `figures/D_*_{before,mvp,after_iter}.png` 9 PNG 三代对比
   - `modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_alpha_pipeline.m`
   - 诊断数据 `diag_results/` 12 MAT + CSV
+
+## Result
+
+- **完成日期**：2026-04-20
+- **状态**：✅ 完成
+- **关键产出**：α=2e-3 崩溃根因 = CP 精修 ±2.4e-4 相位模糊阈值；修复 = 迭代 α refinement（默认 2 次）+ CP 阈值门禁；A2 α=2e-3 BER 47%→0%，工作范围扩 10× → \|α\|≤1e-2 全 0%
+- **后继 spec**：`archive/2026-04-21-alpha-pipeline-large-alpha-debug.md`（α=3e-2 物理极限突破）
+- **归档**：2026-04-25 by spec 状态审计批量归档

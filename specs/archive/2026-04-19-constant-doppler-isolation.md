@@ -183,3 +183,11 @@ fading_cfgs = {
   SC-FDE 激活双 LFM（up+down）时延差法后，A2 α=5e-4 @ SNR=10 BER **48.7% → 0%**，
   α=1e-3 **49% → 2%**；本诊断 spec 目标达成（证明当前 estimator 不工作并定位根因），
   实际改造结论详见 [[modules/10_DopplerProc/双LFM-α估计器]]
+
+## Result
+
+- **完成日期**：2026-04-19（D 阶段诊断 + surprising finding）
+- **状态**：✅ 完成（已被下游 spec 取代）
+- **关键产出**：D 阶段 SC-FDE × 13α × SNR=10dB 矩阵；定位根因 = LFM2 与 LFM1 同形 up-chirp，相关峰相位差对 α 不敏感
+- **后继 spec**：`archive/2026-04-20-alpha-estimator-dual-chirp-refinement.md`（双 LFM up+down 改造，已闭环）
+- **归档**：2026-04-25 by spec 状态审计批量归档

@@ -240,3 +240,16 @@ function [alpha, diag] = est_alpha_dual_hfm_vss(bb_raw, HFM_up, HFM_dn, fs, fc, 
     （若需要突破 estimator 精度再回来继续）
   - **开新 spec**：`2026-04-21-alpha-pipeline-large-alpha-debug.md`
     用 diag_alpha_pipeline 工具诊断 α=±3e-2 pipeline 节点 RMS 不对称根因
+
+## Result
+
+- **完成日期**：2026-04-21（实施中断 / parked）
+- **状态**：📌 parked
+- **关键发现**：α=±3e-2 BER 17× 差异 estimator 精度无关 → 根因在 pipeline 而非 estimator；wei-2020 Eq.14 基带实现 PSR≈1（公式映射问题未解决），简化版精度 7-19% 无显著优势
+- **工程产出（保留作未来入口）**：
+  - `modules/10_DopplerProc/src/Matlab/est_alpha_dual_hfm_vss.m`
+  - `modules/10_DopplerProc/src/Matlab/test_est_alpha_dual_hfm_vss.m`
+  - `wiki/source-summaries/wei-2020-dual-hfm-speed-spectrum.md`
+- **替代方案**：`archive/2026-04-21-alpha-pipeline-large-alpha-debug.md`（3 patch 已突破 α=3e-2，BER 50%→5.4%）
+- **二次激活触发条件**：α>3e-2 工况下 estimator 精度 RCA 重新指向 estimator（当前根因在 pipeline，不在此处）
+- **归档**：2026-04-25 by spec 状态审计批量归档（标记 parked，不删除工程代码）

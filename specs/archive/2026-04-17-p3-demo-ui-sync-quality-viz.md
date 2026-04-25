@@ -330,7 +330,16 @@ end
 ## Log
 
 - 2026-04-17: Spec 创建
+- 2026-04-17: 三项合一全部完成（真同步切换 + Sync tab + Quality tab）
 
 ## Result
 
-_待填写_
+- **完成日期**：2026-04-17
+- **状态**：✅ 完成
+- **关键产出**：
+  - 移除 `frame_start_write` TX/RX 共享捷径，`try_decode_frame` 走真实 LFM 匹配滤波（`detect_frame_stream` V1.0）
+  - UI 6 → 8 tab（新增 Sync / Quality）
+  - Sync tab：匹配滤波 peak / 符号定时 / 多普勒占位（scheme 分支渲染）
+  - Quality tab：最近 N 帧 BER/SNR/iter 演进曲线
+- **遗留**：Doppler 链路接入留 `2026-04-18-p3-doppler-integration.md`（后改归 P4 范围，详见 `active/2026-04-22-p4-real-doppler-fork.md`）
+- **归档**：2026-04-25 by spec 状态审计批量归档

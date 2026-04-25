@@ -327,3 +327,13 @@ end
   - DSSS/FH-MFSK 在 α≥1e-2 的扩频/跳频固有限制（若要突破需改 RX 架构）
   - OFDM α=+3e-2 11.4%（稍超 10% 门槛但已达 5× 改善）
   - 其他 4 体制 discrete_doppler runner 未改（B 阶段保持旧 baseline）
+
+## Result
+
+- **完成日期**：2026-04-21
+- **状态**：🟡 partial（OFDM/DSSS/FH-MFSK ✅；SC-TDE 失败已拆出独立 spec 链）
+- **关键产出**：A2 全 0%（4 体制）；D \|α\|≤1e-2 大部分工作；α=+3e-2 SC-FDE 5.4% / OFDM 11.4% / DSSS 崩 / FH-MFSK 21%
+- **拆分线索**：
+  - SC-TDE → `archive/2026-04-23-sctde-alpha-1e2-disaster-root-cause.md`（RCA 闭环）→ `archive/2026-04-24-sctde-remove-post-cfo-compensation.md`（V5.4 fix）→ `active/2026-04-25-sctde-fd1hz-alpha-estimator-fix.md`（V5.5+V5.6，4/5 PASS）
+  - DSSS α≥1e-2 → `archive/2026-04-22-dsss-symbol-doppler-tracking.md`（Sun-2020 符号级跟踪 partial）
+- **归档**：2026-04-25 by spec 状态审计批量归档

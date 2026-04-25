@@ -95,4 +95,17 @@ UI V3.0：
 
 ## Result
 
-P3.1 完成。剩余 4 体制（OFDM / SC-TDE / DSSS / OTFS）按相同模板分两次推进。
+- **完成日期**：2026-04-16（P3.1 + P3.2 + P3.3 三子 spec 全部 ✅）
+- **状态**：✅ 完成
+- **关键产出**：
+  - `modules/14_Streaming/src/Matlab/common/modem_dispatch.m` 6 体制统一 API
+  - P3.1 (FH-MFSK + SC-FDE) — 2026-04-16
+  - P3.2 (OFDM + SC-TDE) — 2026-04-16，spec `archive/2026-04-16-streaming-p3.2-ofdm-sctde.md`
+  - P3.3 (DSSS + OTFS) — 2026-04-16，Gold31 Rake+DCD + DD 域 LMMSE Turbo
+  - BER 与 `13_SourceCode/tests/*_timevarying.m` baseline 一致
+- **后继 spec**：
+  - `archive/2026-04-17-p3-demo-ui-refactor.md`（UI 重构）
+  - `archive/2026-04-17-p3-demo-ui-polish.md`（深色科技风 V2）
+  - `archive/2026-04-17-p3-demo-ui-sync-quality-viz.md`（真同步 + Quality/Sync tab）
+  - `active/streaming-p4-scheme-routing.md` / `p5-concurrent.md` / `p6-amc.md`（待启动）
+- **归档**：2026-04-25 by spec 状态审计批量归档

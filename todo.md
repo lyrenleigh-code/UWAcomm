@@ -128,7 +128,7 @@
 | ~~**α=3e-2 物理极限突破**~~ | ✅ 完成（2026-04-21） | 诊断显示 Oracle 下 pipeline 无问题，根因是 estimator 2% 系统偏差 + CP wrap；3 patch 修复让 α=+3e-2 BER 50% → 5.4%，工作范围扩到 15→45 m/s |
 | **14_Streaming P1/P2 去 Oracle α**（2026-04-23 Phase d） | ✅ 2026-04-23 | `rx_stream_p1/p2` V1.0→V1.1 默认调 `estimate_alpha_dual_hfm` 盲估，`opts.use_oracle_alpha=true` 回退；P3/P4/P5/P6 待后续 spec |
 | ~~**SC-FDE runner sps oracle 清理**~~ | ✅ 2026-04-24 已闭环 | spec `archive/2026-04-24-scfde-sps-deoracle-arch.md`；L515 `all_cp_data(1:10)` → `train_cp_rx(1:10)` (RX 本地重建 training preamble)；剩余 BEM `x_vec(pp) = all_cp_data(idx)` (L694) 属 A2 BEM Phase 3b spec 范围 |
-| **SC-FDE BEM 判决反馈 Phase 3b（去最后一处 oracle）** | 🟡 进行中（3b.1 ✅ 2026-04-25） | spec `active/2026-04-24-scfde-bem-decision-feedback-arch.md`；plan `plans/2026-04-24-scfde-bem-decision-feedback-arch.md`；**Phase 3b.1 完成**（commit `55e3cd5`）：移植 14_Streaming `build_bem_observations` → `tests/bench_common/build_bem_observations_scfde.m`（13 全局 index 版本，x_bar_blks{1}=train_sym/{2..N}=data 软符号）+ 单元测试 `test_build_bem_obs_scfde.m` 6/6 PASS（n_obs=96, h_tv 6×1280, ch_est_bem 兼容）；**Phase 3b.2 待做**：BEM 调用从 pre-Turbo 移到 iter=2（用 Turbo 第一轮软符号），iter 0-1 用 GAMP/per-block DD fallback 估计；**Phase 3b.3 验证**：V3a static 不退化、V3b fd=1Hz BER 回归 Phase 1（0.16/0/0/0%）、V3c fd=5Hz 持平物理极限、V3d α=±1e-2 不退化；**Phase 3b.4 推广**：`test_scfde_discrete_doppler.m` 同模板迁移；预估 3b.2-4 工作量 ~2-2.5h |
+| **SC-FDE BEM 判决反馈 Phase 3b（去最后一处 oracle）** | 🟡 3b.1 ✅ + 3b.2 ⚠ 待决策 2026-04-25 | spec `active/2026-04-24-scfde-bem-decision-feedback-arch.md`；plan `plans/2026-04-24-scfde-bem-decision-feedback-arch.md`；**Phase 3b.1 ✅ commit `55e3cd5`**：`build_bem_observations_scfde.m` + 单测 6/6 PASS；**Phase 3b.2 🟡 实施完成未 commit**：`test_scfde_timevarying.m` 3 处 edit（addpath bench_common + L648-720 重构 GAMP 公共 fallback + Turbo titer=2 BEM 重估）；实测 4 SNR × 3 fading × 1 seed — static 0/0/0/0% V3a ✅ PASS（all_cp_data 在 RX 链路完全消除），**fd=1Hz 50.23/50.13/50.03/50.31% V3b ❌ 灾难**（接受准则 0.16/0/0/0% 不可达成），fd=5Hz ~50% V3c ✅ 物理极限；根因：jakes fd=1Hz × 16 block ≈ 1s = 一个 Jakes 周期，iter=0..1 用 GAMP 静态 H 在第 8 block 完全失配 → titer=1 软符号 ~50% 错 → titer=2 BEM 用 garbage 软符号 → Turbo 不收敛（**软符号-BEM 鸡蛋耦合，spec R1 兑现**）；**14_Streaming production 没在 jakes fd=1Hz 验证过 BER**（用 gen_doppler_channel α 时变 + 静态多径 conv，与 13 用 gen_uwa_channel jakes Doppler spread 不同），无 reference 标杆；**Phase 3b.3 V3d/V3a 多 seed 未跑**；**Phase 3b.4 ⏸ 未启动**；待用户决策路线：A 接受 limitation 重写 V3b 准则 / B 回滚到 oracle BEM / C 改 fallback（预期无效）/ D 精确验证（自定义 14_Streaming jakes fd=1Hz 测试）；详 [[wiki/modules/13_SourceCode/SC-FDE调试日志]] V2.3 |
 | ~~**E2E benchmark C 阶段（多 seed 检测率）**~~ | ✅ 2026-04-23 | Phase a 启用：`benchmark_e2e_baseline.m` V1.1 + 4 体制 runner 加 bench_seed 注入（SC-FDE 已修），smoke 验证；270 pts 全矩阵未跑 |
 | **E2E benchmark profile 扩展** | 待做 | 当前仅 custom6，需 runner 支持 `bench_channel_profile` 切换 ch_params（exponential 等） |
 | **E2E benchmark NMSE/sync/turbo iter 填充** | 待做 | CSV schema 有字段但本期全 NaN，需 runner 暴露 h_est / sync_tau_err / 逐轮 BER |
@@ -184,6 +184,7 @@
 | **α estimator 符号约定参数化（Phase b）** | 2026-04-23 | `est_alpha_dual_chirp` V1.0→V1.1 加 `sign_convention`；6 runner 8 处 hack 清理；数学双翻号等价，BER 与 a53b6f3 一致 |
 | **5 体制灾难率横向 sanity check（Phase c）** | 2026-04-23 | 诊断 `diag_5scheme_monte_carlo.m`：5 scheme × α=+1e-2 × SNR=10 × 15 seed；**OFDM/SC-FDE/FH-MFSK 0 灾难，SC-TDE/DSSS 100% 灾难**；修正旧虚报"6 体制全能跑 α=3e-2"；新高优先任务：SC-TDE / DSSS α 深挖 |
 | **SC-TDE α=+1e-2 RCA 完成** | 2026-04-23 | spec `2026-04-23-sctde-alpha-1e2-disaster-root-cause.md`；10 步 diag（D0b-D10）锁定 `exp(-j·2π·α·fc·t)` post-CFO 伪操作；D10 disable 后 α=+1e-2 BER 50%→0.29%、α=+1e-3 50.66%→0%、α=0 1.84%→0.04%；副发现 α=+1e-3 static 原来也是 100% 灾难（历史认知错误，之前"能 work"是 bench_seed=42 单个例假象）；调试日志 V5.3 章节归档，fix + audit spec 已开 |
+| **spec 状态审计 + 批量归档（11 张）** | **2026-04-25** | active 23→12；归档批次：constant-doppler-isolation（被 dual-chirp 取代）/ alpha-estimator-dual-chirp-refinement（α 工作范围 1e-4→1e-2）/ alpha-compensation-pipeline-debug（α=2e-3 修复）/ alpha-pipeline-large-alpha-debug（α=3e-2 突破）/ alpha-refinement-other-schemes（partial，4 体制推广 + SC-TDE 拆分线索）/ hfm-velocity-spectrum-refinement（📌parked，VSS estimator 工程代码留入口）/ dsss-symbol-doppler-tracking（partial，Sun-2020 25× 改善）/ streaming-p3-unified-modem / streaming-p3.2-ofdm-sctde（自标 done 已清理）/ p3-demo-ui-polish / p3-demo-ui-sync-quality-viz；每张 spec 追加 `## Result` 段（完成日期/状态/产出/后继 spec/归档时间） |
 
 ---
 
@@ -193,10 +194,10 @@
 - **累积技术结论**：`wiki/conclusions.md`（36 条）
 - **项目仪表盘**：`wiki/dashboard.md`
 - **函数索引**：`wiki/function-index.md`
-- **活跃 spec**：`specs/active/`（13 张）
-  - OTFS 3 张（pulse-shaping / sync-architecture / spread-pilot）
-  - 14_Streaming 6 张（framework-master / p3-unified / p3.2 / p4 / p5 / p6）
+- **活跃 spec**：`specs/active/`（**12 张**，2026-04-25 spec 状态审计批量归档 11 张后；详见里程碑末行）
+  - OTFS 2 张（pulse-shaping / spread-pilot）
+  - 14_Streaming 5 张（framework-master / p4-scheme-routing / p4-real-doppler-fork / p5-concurrent / p6-amc）
   - 去 Oracle 1 张（deoracle-rx-parameters）
-  - P3 demo UI 3 张（refactor / polish / sync-quality-viz）
+  - E2E / 多普勒 / 实施进行中 4 张（e2e-timevarying-baseline / resample-roundtrip-nodoppler-test / scfde-bem-decision-feedback-arch / sctde-fd1hz-alpha-estimator-fix）
 - **活跃 plan**：`plans/`（9 张）
 - **项目 CLAUDE.md**：根目录，含 Oracle §7 排查清单

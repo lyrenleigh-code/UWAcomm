@@ -275,3 +275,16 @@ function [alpha_track, alpha_block, diag] = est_alpha_dsss_symbol(bb_raw, ...
   - α=-3e-2 仍 35%：α<0 不对称（与 SC-FDE 同款 estimator 问题）
   - benchmark_e2e_baseline 不传 `doppler_track_mode`：需加参数透传（未来优化）
   - 时变 α（Jakes）下 symbol per-sym 应优于 mean（A1 Jakes 测试未做）
+
+## Result
+
+- **完成日期**：2026-04-22
+- **状态**：🟡 partial（Phase 1 主目标达成；Phase 2 未启动）
+- **关键产出**：
+  - 新增 `modules/10_DopplerProc/src/Matlab/est_alpha_dsss_symbol.m`（Sun-2020 符号级 α 估计）
+  - 新增 `modules/10_DopplerProc/src/Matlab/comp_resample_piecewise.m`（逐符号自适应 resample）
+  - D α=+3e-2 BER **51% → 2.2%**（25× 改善，预期外的巨大突破）
+  - A2 全 0% 维持，D \|α\|≤3e-3 维持 0%
+- **未达标项**：D \|α\|=1e-2 38-41%（adaptive Gold31 bank 未实现）；D α=-3e-2 35%（α<0 不对称，与 SC-FDE 同款）
+- **Phase 2 方向（未立 spec）**：adaptive dopplerized Gold31 bank / α<0 estimator 修复 / Jakes 时变 α 验证 / benchmark 参数透传
+- **归档**：2026-04-25 by spec 状态审计批量归档

@@ -215,3 +215,14 @@ UI 路径注册需追加：`04_Modulation`（若用到）、`06_MultiCarrier`、
 - SC-TDE time-varying：modem_decode 内部手写 BEM + 逐符号 ISI 消除（模块 12 无时变版）
 
 UI 改动最小化：仅更新 dispatch + scheme 下拉，不加体制专属参数行。
+
+## Result
+
+- **完成日期**：2026-04-16（frontmatter 已自标 status: done）
+- **状态**：✅ 完成
+- **关键产出**：
+  - OFDM `modem_encode_ofdm` / `modem_decode_ofdm`（复用 `turbo_equalizer_scfde_crossblock`）
+  - SC-TDE `modem_encode_sctde` / `modem_decode_sctde`（static 用 `turbo_equalizer_sctde`，time-varying 内部手写 BEM）
+  - 静态 6 径 BER 0%@15dB+
+  - BER 与 `13_SourceCode/tests/*_timevarying.m` baseline 一致
+- **归档**：2026-04-25 by spec 状态审计批量归档（frontmatter `status: done` 但仍在 active/，本次清理移动）
