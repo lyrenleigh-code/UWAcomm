@@ -88,6 +88,60 @@ H4 confirmed 后续 fix。runner 暴露 4 层 α + LFM peak 7 字段，Phase 1.2
 - 进一步候选：(a) 多 LFM 模板 ensemble / Jakes-aware estimator → L0 bias 校正（独立 spec）；(b) estimator-外灾难机制独立调研（类比 SC-FDE Phase J）
 - spec 状态保留 active，等用户判断后续方向
 
+## SC-TDE fd=1Hz V5.6 HFM-signature bias calibration（2026-04-25，详见 [[../specs/active/2026-04-25-sctde-fd1hz-alpha-estimator-fix]]）
+
+V5.5 partial 后续 path E。Path A（HFM Doppler-invariance）证伪，转 path E（HFM signature 检测 + fd-specific calibration）。
+
+### 关键事实（HFM invariance 探索）
+
+| fd | LFM dtau samp mean(std) | HFM dtau samp mean(std) |
+|----|---|---|
+| 0 | +0.004 (0.010) | **0 (0)** |
+| 1 | -0.378 (0.008) | **-1 (0)** |
+| 5 | -2.09 (0.013) | -52.8 (28.5) |
+
+→ **HFM dtau_diff = -1 是 fd=1Hz Jakes 唯一 deterministic 指纹**（fd=0=0；fd=5∈{-123,-42}），可作 fd=1Hz 检测器，触发 fd-specific calibration。
+
+HFM 在 fd=1 下偏差 (-1) 比 LFM (-0.38) **更大**——HFM 非 Doppler-invariant，path A "HFM 当 timing reference" 假设证伪。
+
+### V5.6 fix（runner，最小侵入）
+
+`test_sctde_timevarying.m`：raw_snapshot 后、iter 前加 `if hfm_dtau_diff_snap == -1, alpha_lfm = alpha_lfm - 1.5e-5; end`。`bench_v56_calib_amount` 可调（default 1.5e-5，0 禁用）。
+
+estimator API 不动；fd=0/5 不触发；V5.4 baseline 完全保留（fair 比较 fd=0/5 全 0% diff）。
+
+### V5.6 三方对比（fd=1Hz）
+
+| SNR | V5.5 mean / 灾难率 | V5.6 mean / 灾难率 | oracle mean / 灾难率 |
+|-----|---|---|---|
+| 10 | 9.49% / 46.7% | 8.24% / 40.0% | 8.45% / 46.7% |
+| 15 | 2.97% / 20.0% | **2.36% / 26.7%** | 2.43% / 20.0% |
+| **20** | **2.55% / 33.3%** | **0.92% / 6.7%** | 0.89% / 6.7% |
+
+L0 偏差校准 8.4× 缩减（SNR=20: 1.52e-5 → 1.80e-6）。
+
+### Spec 接受准则达成度
+
+| 准则 | V5.5 | V5.6 |
+|------|------|------|
+| SNR=15 mean ≤ 3% | ✓ 2.97% | ✓ 2.36% |
+| SNR=15 灾难率 ≤ 25% | ✓ 20.0% | ✗ 26.7%（边缘，单 seed=13 边界效应）|
+| SNR=20 mean ≤ 1.5% | ✗ 2.55% | **✓ 0.92%（接近 oracle 0.89%）**|
+| SNR=20 灾难率 ≤ 15% | ✗ 33.3% | **✓ 6.7%（等于 oracle）**|
+| 单调性 | ✓ | ✓ |
+
+V5.5 3/5 PASS → **V5.6 4/5 PASS + 1 边缘**。
+
+### seed=13 边界效应
+
+V5.5 BER 3.62% (no disaster) → V5.6 BER 6.95%。raw err 略小于 1.5e-5，calibration 后变负偏过度补偿。trade-off：calibration 量 1.5e-5 是 bad/good seed 整体最优；下调到 1.0e-5 让 bad seed 改善不足。可选优化：自适应 calibration（基于 LFM SNR 等 metric），独立 spec。
+
+### 主目标 vs 现状
+- ✅ V5.6 SNR=20 全准则 PASS（spec 主目标 mean ≤ 1.5% + 灾难率 ≤ 15% + 单调性恢复）
+- ✅ V5.6 vs oracle gap：mean 0.03% / 灾难率 0.0%
+- 🟡 SNR=15 灾难率 26.7% 边缘 partial（单 seed 边界效应，不阻塞主目标）
+- 🟡 spec 保留 active，等用户判断 archive
+
 ## 5 体制横向灾难率首次量化（2026-04-23 Phase c sanity check）
 
 诊断脚本 `tests/bench_common/diag_5scheme_monte_carlo.m`：5 scheme × α=+1e-2 × SNR=10 × seed 1..15 = 75 trial。

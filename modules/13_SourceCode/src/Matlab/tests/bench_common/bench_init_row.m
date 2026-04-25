@@ -38,6 +38,9 @@ row.diag_tau_dn_frac  = NaN; % down-chirp 子样本偏移
 row.diag_snr_up       = NaN; % up-chirp peak/median 启发式 SNR
 row.diag_snr_dn       = NaN; % down-chirp peak/median 启发式 SNR
 row.diag_dtau_resid_s = NaN; % dual-chirp 残差时间差（秒）
+row.diag_hfm_pos1_int  = NaN; % 2026-04-25 V1.2 path A：HFM+ 整数样本峰位置
+row.diag_hfm_pos2_int  = NaN; % HFM- 整数样本峰位置
+row.diag_hfm_dtau_diff = NaN; % HFM dtau 偏差 = obs - nom（样本数）
 
 end
 

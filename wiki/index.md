@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
 > 最后更新：2026-04-25
-> 页面总数：53（conclusions 增 SC-TDE fd=1Hz V5.5 partial fix 条目；3/5 接受准则 PASS + 单调性恢复；SNR=20 partial 残余 estimator-外机制，详见 conclusions 头部 + log）
+> 页面总数：53（conclusions 增 SC-TDE fd=1Hz V5.6 HFM-signature bias calibration 条目；4/5 接受准则 PASS + SNR=20 接近 oracle（0.92% vs 0.89%、6.7% vs 6.7%）；详见 conclusions 头部 + log）
 
 ## Architecture（架构页）
 

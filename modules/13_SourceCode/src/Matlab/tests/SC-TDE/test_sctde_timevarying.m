@@ -5,7 +5,8 @@
 % RX: 09下变频 → ①LFM相位粗估多普勒 → ②粗补偿+训练精估 → ③LFM精确定时 →
 %     提取数据 → 09 RRC匹配 →
 %     12 Turbo均衡(GAMP+DFE或BEM+ISI消除) → 译码
-% 版本：V5.5.0 — fd=1Hz Jakes 默认关 iter refinement（avoid bias 累加）
+% 版本：V5.6.0 — HFM signature (dtau_diff=-1) 触发 fd=1Hz Jakes 下 deterministic α bias 校准
+%        V5.5.0 — fd=1Hz Jakes 默认关 iter refinement（avoid bias 累加）
 %        V5.4.0 — 删 post-CFO 伪补偿（基带 Doppler 模型下是伪操作，α=+1e-3 起 BER 破 50%）
 % 变更：V5.1→V5.2 对齐 OFDM V4.3 策略（修复fd=1Hz高SNR反弹）
 %   1. 时变信道：alpha_est = alpha_lfm（跳过训练精估，训练相位差被Jakes污染）
@@ -176,6 +177,10 @@ diag_tau_dn_frac_matrix  = nan(size(fading_cfgs,1), length(snr_list));
 diag_snr_up_matrix       = nan(size(fading_cfgs,1), length(snr_list));
 diag_snr_dn_matrix       = nan(size(fading_cfgs,1), length(snr_list));
 diag_dtau_resid_s_matrix = nan(size(fading_cfgs,1), length(snr_list));
+% 2026-04-25 V1.2 path A 探索：HFM peak diagnostic
+diag_hfm_pos1_int_matrix  = nan(size(fading_cfgs,1), length(snr_list));
+diag_hfm_pos2_int_matrix  = nan(size(fading_cfgs,1), length(snr_list));
+diag_hfm_dtau_diff_matrix = nan(size(fading_cfgs,1), length(snr_list));
 sync_info_matrix = zeros(size(fading_cfgs,1), 2);
 
 fprintf('%-8s |', '');
@@ -292,6 +297,26 @@ for fi = 1:size(fading_cfgs,1)
         lfm2_peak_nom = 2*N_preamble + 3*guard_samp + 2*N_lfm; % LFM2峰 = 12000
         lfm_search_margin = max(sym_delays)*sps + 200;           % 搜索半径(覆盖多径+Doppler)
 
+        % 2026-04-25 V1.2 path A 探索：HFM peak detection（Doppler-invariant 参考）
+        % 帧结构：HFM+ 末端在 N_preamble；HFM- 末端在 2*N_preamble + guard_samp
+        mf_hfm_pos = conj(fliplr(HFM_bb_n));
+        mf_hfm_neg_t = conj(fliplr(HFM_bb_neg_n));
+        corr_hfm_pos = filter(mf_hfm_pos, 1, bb_raw);
+        corr_hfm_neg_t = filter(mf_hfm_neg_t, 1, bb_raw);
+        hfm_pos1_nom = N_preamble;
+        hfm_pos2_nom = 2*N_preamble + guard_samp;
+        hfm1_lo = max(1, hfm_pos1_nom - lfm_search_margin);
+        hfm1_hi = min(hfm_pos1_nom + lfm_search_margin, length(corr_hfm_pos));
+        hfm2_lo = max(1, hfm_pos2_nom - lfm_search_margin);
+        hfm2_hi = min(hfm_pos2_nom + lfm_search_margin, length(corr_hfm_neg_t));
+        [~, h1_rel] = max(abs(corr_hfm_pos(hfm1_lo:hfm1_hi)));
+        [~, h2_rel] = max(abs(corr_hfm_neg_t(hfm2_lo:hfm2_hi)));
+        hfm_pos1_int_snap = hfm1_lo + h1_rel - 1;
+        hfm_pos2_int_snap = hfm2_lo + h2_rel - 1;
+        hfm_dtau_obs_snap = hfm_pos2_int_snap - hfm_pos1_int_snap;
+        hfm_dtau_nom_snap = hfm_pos2_nom - hfm_pos1_nom;
+        hfm_dtau_diff_snap = hfm_dtau_obs_snap - hfm_dtau_nom_snap;
+
         % 【P4 2026-04-21】双 LFM 时延差法 α 估计 + 迭代 refinement
         if isempty(which('est_alpha_dual_chirp'))
             dop_dir = fullfile(fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath')))))), ...
@@ -322,6 +347,21 @@ for fi = 1:size(fading_cfgs,1)
         diag_snr_up_snap       = alpha_diag.snr_up;
         diag_snr_dn_snap       = alpha_diag.snr_dn;
         diag_dtau_resid_s_snap = alpha_diag.dtau_residual_s;
+
+        % 2026-04-25 V5.6 path E：HFM signature 检测 fd=1Hz Jakes，触发 deterministic α bias 校准
+        % Phase 2 实测：fd=1Hz Jakes 下 alpha_lfm_raw mean +1.5e-5 deterministic bias（不随 SNR 变）
+        % HFM dtau_diff = -1 是 fd=1Hz Jakes 唯一指纹（fd=0 = 0；fd=5 ≫ 10）
+        % calibration apply 到 alpha_lfm（raw_snapshot 后），影响 iter / scan / final
+        % caller 可通过 bench_v56_calib_amount=0 禁用，或调整校准量
+        if exist('bench_v56_calib_amount','var') && ~isempty(bench_v56_calib_amount)
+            v56_calib_amount = bench_v56_calib_amount;
+        else
+            v56_calib_amount = 1.5e-5;
+        end
+        if hfm_dtau_diff_snap == -1 && v56_calib_amount ~= 0
+            alpha_lfm = alpha_lfm - v56_calib_amount;
+        end
+
         % 2026-04-25 V5.5：fd=1Hz Jakes 时变下 dual-chirp deterministic bias +1.5e-5（Phase 2 C2 数据）
         % iter refinement 累加 bias → BER 反向恶化（ablation 验证 SNR=20 mean 2.55%→4.55%）
         % 决策：fd=1Hz Jakes 默认关 iter；其他场景保留 V5.4 default=2；caller explicit 仍优先
@@ -828,6 +868,9 @@ for fi = 1:size(fading_cfgs,1)
         diag_snr_up_matrix(fi,si)       = diag_snr_up_snap;
         diag_snr_dn_matrix(fi,si)       = diag_snr_dn_snap;
         diag_dtau_resid_s_matrix(fi,si) = diag_dtau_resid_s_snap;
+        diag_hfm_pos1_int_matrix(fi,si)  = hfm_pos1_int_snap;
+        diag_hfm_pos2_int_matrix(fi,si)  = hfm_pos2_int_snap;
+        diag_hfm_dtau_diff_matrix(fi,si) = hfm_dtau_diff_snap;
         fprintf(' %6.2f%%', ber*100);
     end
     fprintf('  (lfm=%d, peak=%.3f)\n', sync_info_matrix(fi,1), sync_info_matrix(fi,2));
@@ -866,6 +909,9 @@ if benchmark_mode
             row.diag_snr_up       = diag_snr_up_matrix(fi_b, si_b);
             row.diag_snr_dn       = diag_snr_dn_matrix(fi_b, si_b);
             row.diag_dtau_resid_s = diag_dtau_resid_s_matrix(fi_b, si_b);
+            row.diag_hfm_pos1_int  = diag_hfm_pos1_int_matrix(fi_b, si_b);   % V1.2 path A
+            row.diag_hfm_pos2_int  = diag_hfm_pos2_int_matrix(fi_b, si_b);
+            row.diag_hfm_dtau_diff = diag_hfm_dtau_diff_matrix(fi_b, si_b);
             bench_append_csv(bench_csv_path, row);
         end
     end

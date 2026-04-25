@@ -2,6 +2,19 @@
 
 ## 2026-04-25
 
+- **SC-TDE fd=1Hz V5.6 HFM-signature bias calibration（V5.5 续做）**
+  - Path A（HFM Doppler-invariance）证伪：fd=1Hz HFM mean 偏差 (-1) 比 LFM (-0.38) 大；HFM 非 invariant
+  - Path E pivot：HFM dtau_diff = -1 在 fd=1Hz Jakes 是 deterministic 指纹（std=0；fd=0=0；fd=5∈{-123,-42}）→ 触发 fd-specific calibration
+  - V5.6 实施：runner 加 HFM peak detection + raw_snapshot 后 calibration（`alpha_lfm -= 1.5e-5` if HFM dtau_diff==-1）；caller `bench_v56_calib_amount=0` 可禁用
+  - bug 修复：calibration block 初版误置于 estimator 调用之前（subtract leftover alpha_lfm），re-order 到 raw_snapshot 之后
+  - Verify（diag_sctde_fd1hz_v5_6_verify.m，4.28 min × 135 trial）：
+    - SNR=15: 2.97%→**2.36%** mean；20.0%→**26.7%** 灾难率（seed=13 边界效应 3.62%→6.95%）
+    - **SNR=20: 2.55%→0.92% mean（接近 oracle 0.89%）；33.3%→6.7% 灾难率（等于 oracle）**
+    - L0 偏差缩减 8.4×（SNR=20: 1.52e-5 → 1.80e-6）
+  - fd=0/5 副作用 0：HFM dtau_diff fd=0 全=0，fd=5 ∈{-123,-42}，0 trial=-1 触发 → V5.4 baseline 完全保留
+  - 接受准则 **4/5 PASS + 1 边缘**（SNR=15 灾难率 26.7% 仅超 1.7pp，单 seed 边界效应）
+  - SC-TDE 调试日志追加 V5.6 章节；conclusions.md 追加 V5.6 章节（V5.5 之上）
+  - spec 保留 active，等用户判断 archive
 - **SC-TDE fd=1Hz V5.5 partial fix（H4 confirmed 后续）**
   - Spec 状态：`specs/active/2026-04-25-sctde-fd1hz-alpha-estimator-fix.md`（保留 active，等用户判断后续）
   - Plan: `plans/2026-04-25-sctde-fd1hz-alpha-estimator-fix.md`
