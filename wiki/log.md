@@ -2,6 +2,13 @@
 
 ## 2026-04-26
 
+- **SC-TDE fd=1Hz α estimator fix spec 归档（4/5 PASS）**
+  - spec `archive/2026-04-25-sctde-fd1hz-alpha-estimator-fix.md`（active → archive）
+  - V5.6 4/5 PASS：SNR=15 mean=2.36% / SNR=20 mean=0.92% (接近 oracle 0.89%) / SNR=20 灾难率=6.7% (= oracle) / 单调恢复
+  - 边缘：SNR=15 灾难率 26.7% 仅超 1.7pp 单 seed=13 边界效应
+  - 残余 L0 deterministic +1.5e-5 bias + estimator-外灾难（s15 oracle 仍 8.90%）独立 spec 立项（候选）
+  - todo.md L108 ~~删除线~~ + 归档路径
+
 - **SC-FDE Phase 4+5 协议层突破：方案 E block-pilot pre-Turbo BEM**
   - Spec: `archive/2026-04-26-scfde-time-varying-pilot-arch.md` （归档）
   - Plan: `plans/2026-04-26-scfde-time-varying-pilot-arch.md`

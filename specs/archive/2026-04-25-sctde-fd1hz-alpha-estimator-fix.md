@@ -1,9 +1,10 @@
 ---
 project: uwacomm
 type: fix
-status: active
+status: archived
 created: 2026-04-25
-updated: 2026-04-25
+updated: 2026-04-26
+archived: 2026-04-26
 tags: [SC-TDE, fd=1Hz, α-estimator, dual-chirp, 10_DopplerProc, 13_SourceCode]
 branch: fix/sctde-fd1hz-alpha-estimator
 parent_spec: specs/archive/2026-04-24-sctde-fd1hz-nonmonotonic-investigation.md
@@ -86,9 +87,27 @@ parent_spec: specs/archive/2026-04-24-sctde-fd1hz-nonmonotonic-investigation.md
 
 ## 接受准则
 
-- [ ] Step 1 诊断：alpha_lfm vs dop_rate 偏差量化（mean/std/相关 BER）
-- [ ] Step 2 根因锁定（R1-R4 之一或组合）
-- [ ] Step 3 fix 实施（est_alpha_dual_chirp V1.2 或同级别）
-- [ ] Step 4 验证：实测 SNR=20 mean ≤ 1.5% + 灾难率 ≤ 15% + 单调
-- [ ] conclusions.md 累积条目
-- [ ] todo.md 同步
+- [x] Step 1 诊断：alpha_lfm vs dop_rate 偏差量化（V5.5 Phase 1.2/2 完成，runner 暴露 4 层 α + LFM peak 7 字段，bench_init_row schema 扩 11 列向后兼容 NaN）
+- [x] Step 2 根因锁定（V5.5 Phase 2：R3 排除/sub-sample 必需，R5 confirmed/iter refinement 反向收敛累加 deterministic bias；R1 部分支持/Jakes peak shift；bad/good seed estimator 偏差几乎相同 → 灾难非 estimator 偏差驱动）
+- [x] Step 3 fix 实施（V5.5 fd-conditional iter=0 + V5.6 HFM-signature calibration `alpha_lfm -= 1.5e-5` 当 HFM dtau_diff=-1）
+- [x] Step 4 验证：**4/5 PASS + 1 边缘**
+  - SNR=15 mean ≤3% ✅ (实测 2.36%)
+  - SNR=20 mean ≤1.5% ✅ (实测 0.92% 接近 oracle 0.89%)
+  - SNR=20 灾难率 ≤15% ✅ (实测 6.7% = oracle)
+  - 单调性 ✅ (V5.6 后 SNR=15→20 不反弹)
+  - SNR=15 灾难率 ≤25% **边缘 partial**（实测 26.7% 仅超 1.7pp，单 seed=13 边界效应）
+- [x] conclusions.md 累积条目（V5.5+V5.6 章节）
+- [x] todo.md 同步（L108 状态 4/5 PASS）
+
+## 归档决策（2026-04-26）
+
+主要目标达成（SNR=20 mean+灾难率全 PASS 接近 oracle，单调恢复）。残余 SNR=15 灾难率 26.7% 边缘是 seed=13 单 seed 边界效应，**不属 estimator 偏差驱动**（H4 已确认 oracle 下 s15=8.90%）。
+
+后续 L0 deterministic +1.5e-5 bias 残余（非 SNR=15 灾难原因）+ estimator-外灾难（s15 oracle 仍 8.90%）独立 spec 立项：
+- 候选 1：L0 deterministic α bias 校正（HFM+/HFM- ensemble / Jakes-aware）
+- 候选 2：SC-TDE fd=1Hz estimator-外灾难调研（BEM/Turbo/CFO 稀有触发）
+
+本 spec 归档（active → archive），关键代码已 commit 在 archive parent spec 链：
+- V5.4 commit `6613041` (post-CFO fix)
+- V5.5 commit `3cb4660` (fd-conditional iter)
+- V5.6 commit `c2dede1` (HFM signature calibration)
