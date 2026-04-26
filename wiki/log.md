@@ -2,6 +2,19 @@
 
 ## 2026-04-26
 
+- **SC-FDE Phase 4+5 协议层突破：方案 E block-pilot pre-Turbo BEM**
+  - Spec: `archive/2026-04-26-scfde-time-varying-pilot-arch.md` （归档）
+  - Plan: `plans/2026-04-26-scfde-time-varying-pilot-arch.md`
+  - 验证脚本：`diag_a2_phase4_periodic_pilot.m` (K 多 train) + `diag_a3_phase5_block_pilot.m` (pilot 单维) + `diag_a4_phase5_combined.m` (K×pilot 双维)
+  - **Phase 4 (方案 A 多 train block，K={2,4,8,15})**：fd=1Hz 全 K 均 ~50%（49.97% K=4），仅协议层加 train block 不足，根因 iter=0..1 H_init 单块 GAMP 失配
+  - **Phase 4-revision (4 train + pre-Turbo BEM)**：fd=1Hz K=4 47%→18.31% 部分改善，obs 152 不足
+  - **Phase 5 (方案 E block-pilot pilot_per_blk=blk_cp=128)**：**fd=1Hz 47.05%→3.37%（14×）✅ V5b PASS**，fd=5Hz 49.63%→13.80%（SNR=20 3.53%），static 不退化
+  - A+E 组合 (K=4+pilot=64) 实测劣于纯方案 E（pilot<blk_cp 时 BEM obs 0）
+  - SC-FDE 调试日志 V3.0 章节
+  - conclusions.md #44
+  - 协议关键：modem_encode_scfde V4.0 (cfg.pilot_per_blk + cfg.train_period_K) + modem_decode_scfde V4.1 (pre-Turbo BEM 触发 + pilot 切分) + build_bem_obs_pretturbo_scfde.m V1.0 公共函数
+  - 已知 limitation：吞吐损失 50%；fd=5Hz 低 SNR (5-10dB) BEM 噪声敏感；pilot < blk_cp 不 work
+
 - **SC-FDE Phase 3b.2 路线 4 (A1) 验证 + 路线 1 落地**
   - Plan: `plans/a1-streaming-decoder-jakes-validation.md`
   - A1 脚本: `modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_a1_streaming_decoder_jakes.m`

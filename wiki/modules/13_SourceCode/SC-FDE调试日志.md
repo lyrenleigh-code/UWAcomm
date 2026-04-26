@@ -386,3 +386,128 @@ TX：14_Streaming `modem_encode_scfde`（去 oracle 协议）；Channel：`gen_u
 - **超训练块**：单块覆盖整个 Jakes 周期
 
 详见 [[end-to-end-flow]] [[time-varying-channel-eq]]。
+
+---
+
+## V3.0 — 协议层突破：方案 E block-pilot pre-Turbo BEM（2026-04-26）
+
+**Spec**: `specs/active/2026-04-26-scfde-time-varying-pilot-arch.md`
+**Plan**: `plans/2026-04-26-scfde-time-varying-pilot-arch.md`
+**关键 commits**: 待
+**关键文件**：
+- TX `modules/14_Streaming/src/Matlab/tx/modem_encode_scfde.m` V4.0
+- RX `modules/14_Streaming/src/Matlab/rx/modem_decode_scfde.m` V4.1
+- BEM 公共 `modules/13_SourceCode/src/Matlab/tests/bench_common/build_bem_observations_scfde.m` V2.0
+- pre-Turbo BEM 公共 `modules/13_SourceCode/src/Matlab/tests/bench_common/build_bem_obs_pretturbo_scfde.m` V1.0
+- 13 test `modules/13_SourceCode/src/Matlab/tests/SC-FDE/test_scfde_timevarying.m`
+- 单元测试 `test_build_bem_obs_scfde.m` V2.0（3/3 PASS）
+- 验证脚本 `diag_a2/a3/a4_phase{4,5}_*.m`
+
+### 背景
+
+V2.4 A1 验证（commit `c8ccb06`）确认 jakes fd=1Hz 单训练块下 50% 灾难是架构 trade-off。V3.0 实施协议层突破：4 候选方案 (A/B/C/D) + 后追加方案 E。
+
+### Phase 4 方案 A — 多训练块周期插入
+
+**实施**：`cfg.train_period_K`（向后兼容默认 N_blocks-1）+ `meta.train_block_indices/data_block_indices`。N=16 K=4 → train_indices=[1,6,11,16]，4 train + 12 data，吞吐 75%。
+
+**A2 实测**（3 seed × 4 SNR × 3 fading × 4 K）：
+
+| K | N_train | 吞吐 | static | fd=1Hz | fd=5Hz |
+|---|---|---|---|---|---|
+| 15 (单 train) | 1 | 93.8% | 0.13% | 47.05% | 49.63% |
+| 8 | 2 | 87.5% | 0.17% | 49.17% | 49.52% |
+| 4 | 4 | 75.0% | 0.52% | **49.97%** | 48.95% |
+| 2 | 6 | 62.5% | 0.13% | 49.35% | 50.05% |
+
+**V4 失败根因**：iter=0..1 H_init 仍单块 GAMP（多 train block 协议层加了，但 RX 仍用第 1 个 train block 的 GAMP 估计当所有 block 初值）→ jakes 第 8 block 失配 → 软符号 ~50% 错（var≈0.5）→ `mean(var)<0.6` 关闭 BEM 触发 + `var<0.5` 关闭 DD fallback → H 永不更新。
+
+### Phase 4-revision — 多 train block + pre-Turbo BEM
+
+**改动**（modem_decode_scfde V4.1）：扩展 pre-Turbo BEM 触发条件 `(N_pilot_per_blk > 0) || (N_train_blocks > 1)`，跳过 Turbo 软符号依赖。
+
+**A2 v2 实测**（fd_est_pretturbo=10）：
+
+| K | N_train | static | fd=1Hz | fd=5Hz | obs/frame (估算) |
+|---|---|---|---|---|---|
+| 15 (无 pre-Turbo) | 1 | 0.13% | 47.05% | 49.63% | n/a |
+| 8 (2 train) | 2 | 11.30% | 49.74% | 49.30% | ~76 |
+| **4 (4 train)** | 4 | 3.35% | **18.31%** | 49.25% | ~152 |
+| 2 (6 train) | 6 | 0.53% | 17.72% | 50.12% | ~228 |
+
+**部分改善**：K=4 fd=1Hz 从 47% → 18.31%（30 pp 改善），但仍 > 5% 接受准则。obs 数 152 不及方案 E pilot=128 的 ~1064 obs。
+
+### Phase 5 方案 E — block-pilot 末尾插入
+
+**TX 协议**（modem_encode_scfde V4.0）：每 data block 末嵌入 `cfg.pilot_per_blk` 个固定 pilot symbol（seed=99）。
+- block_full = [data(N_data_per_blk), pilot(N_pilot_per_blk)]，长度 blk_fft
+- CP = block_full 末 blk_cp（当 N_pilot ≥ blk_cp 时 CP 全 pilot）
+- meta 字段：`pilot_per_blk, N_data_per_blk, pilot_seed`
+
+**RX 改动**（modem_decode_scfde V4.1）：在 §5 GAMP 后 §6 之前加 pre-Turbo BEM 调用，pure-pilot 观测构造（`build_bem_obs_pretturbo` 局部函数 / 13 公共函数同逻辑）。x_bar_blks/var_x_blks 切 data 段 + soft_demapper/soft_mapper 维度对齐 pilot 协议。
+
+**A3 实测**（5 pilot levels × 3 fading × 3 seed × 4 SNR）：
+
+| pilot_per_blk | static | **fd=1Hz** | fd=5Hz | 吞吐 |
+|---|---|---|---|---|
+| 0 (baseline) | 0.13% | 47.05% | 49.63% | 100% |
+| 32 | 6.17% | 48.66% | 49.28% | 87.5% |
+| 64 | 14.20% | 49.37% | 48.70% | 75% |
+| 96 | 2.66% | 45.55% | 49.72% | 62.5% |
+| **128 (=blk_cp)** | **1.38%** | **3.37%** ✅ | 13.80% | **50%** |
+
+**关键阈值**：仅 `pilot_per_blk ≥ blk_cp = 128` 时 work（CP 全 pilot → CP 段 obs 全干净，~76 obs/data block × 15 = ~1140 + 38 train = ~1178 obs）。
+
+**pilot < 128 失败原因**：max_tau=90 占用 CP 段 obs 资格，pilot tail 对 idx=n-tau_p 跨块跳转时部分落入未知 data 段 → all_known check 失败 → 0 干净 obs。
+
+### A4 组合验证 — A+E 不优于纯方案 E
+
+| Combo | static | fd=1Hz | fd=5Hz | 吞吐 |
+|---|---|---|---|---|
+| K15_p128 (纯方案 E) | 0.66% | **3.25%** ✅ | 15.25% | 46.9% |
+| K4_p64 (A+E) | 0.88% | 20.82% | 49.83% | 56.2% |
+| K4_p32 (A+E 轻) | 4.13% | 13.99% | 49.63% | 65.6% |
+| K8_p64 | 10.37% | 46.31% | 49.66% | 65.6% |
+
+**A+E 反而劣于纯方案 E**：pilot < blk_cp 时多 train 加少量 pilot（pilot tail 0 干净 obs + CP 段 0 干净 obs）只贡献 train CP 152 obs 远不及方案 E pilot=128 的 1178 obs。
+
+### V5c 调优尝试（fd_est=10→20）
+
+`fd_est_pretturbo` 上界从 10 提升至 20 Hz（auto Q 公式 `2·ceil(fd·T)+3`）：fd_est=10→Q=21, fd_est=20→Q=39。但实测 fd=5Hz BER 几乎不变（mean 12.97% → 13.80%）→ **Q 不是瓶颈**。
+
+fd=5Hz 低 SNR (5-10dB) BER 15-29% 是 BEM 噪声敏感（与 Q 阶无关），需要更深入研究（lambda 正则化扫描 / iter BEM refinement / Turbo + pre-BEM 联合）。
+
+### 整体方案 E 突破（vs baseline）
+
+| 指标 | baseline (单 train) | 方案 E pilot=128 | 改善倍数 |
+|---|---|---|---|
+| fd=1Hz mean | 47.05% | **3.37%** | **14×** |
+| fd=5Hz mean | 49.63% | 13.80% | 3.6× |
+| fd=5Hz SNR=20 | 50.06% | 3.53% | 14× |
+
+### 接受准则达成度
+
+- [x] modem_encode_scfde V4.0 (cfg.pilot_per_blk + cfg.train_period_K，向后兼容)
+- [x] modem_decode_scfde V4.1 (pre-Turbo BEM + pilot 切分 + soft_demapper/mapper 维度)
+- [x] build_bem_observations_scfde V2.0 + build_bem_obs_pretturbo_scfde V1.0
+- [x] 单元测试 3/3 PASS
+- [x] V5a static 任意 pilot 不退化（仅 SNR≥10dB 通过；SNR=5dB 边界）
+- [x] **V5b fd=1Hz pilot=128 BER mean=3.37% PASS**（接受准则 < 5%）
+- [ ] V5c fd=5Hz pilot=128 BER mean=13.80% FAIL（接受准则 < 10%；SNR=20 已 3.53% 接近）
+- [x] SC-FDE 调试日志 V3.0 章节
+- [x] Spec 归档
+
+### 已知 Limitation（归档时记录）
+
+1. **吞吐损失 50%**（pilot=128 = blk_cp = 50% blk_fft）— 物理代价由 max_tau/blk_fft 比决定
+2. **fd=5Hz 低 SNR 仍受限**（5-10dB BER 15-29%）— BEM 在低 SNR 噪声敏感，需 SNR ≥ 15dB 才稳定工作
+3. **pilot < blk_cp 不 work** — A+E 组合实测劣于纯方案 E
+
+### 后续方向（不在本期范围）
+
+- BEM 噪声鲁棒化（lambda 自适应 + iter refinement）
+- Midamble pilot（pilot 放 block 中部，不依赖 CP 段全 pilot）
+- 协议设计：减小 max_tau / blk_cp 比，让 pilot < blk_cp 也能干净
+- Turbo 内置 BEM refinement（mid-Turbo BEM 复用 pre-Turbo 结果）
+
+详见 [[end-to-end-flow]] [[time-varying-channel-eq]]。

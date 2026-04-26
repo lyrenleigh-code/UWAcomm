@@ -565,3 +565,11 @@ L484-487 + L590-596 用 `all_cp_data(1:10)` 做相关挑 sps 相位（oracle 泄
   与 13 移植 V3 数据差 < 0.2 pp（fd=1Hz：50.02 vs 50.18）→ **不是 13 移植 bug，是架构层 trade-off**。14 production 的 `mean(var)<0.6` 门控同样被 jakes 第 8 block 失配触发的 ~50% 软符号错误关闭 → H 永不更新 → BER ~50%。
   **决策**：走 spec 路线 1（commit Phase 3b.2 + 重写 V3b 准则为 limitation + 推广 3b.4 + 归档）。要恢复 Phase 1 水平需开新 spec 做协议层改动（多训练块/导频 superimposed/超训练块）。
   详见 [[modules/13_SourceCode/SC-FDE调试日志]] V2.4。
+
+44. **SC-FDE Phase 5 方案 E block-pilot pre-Turbo BEM 突破 fd=1Hz 50% 灾难 (2026-04-26)**：
+  spec `archive/2026-04-26-scfde-time-varying-pilot-arch.md`。立 Phase 4 (方案 A 多 train block) → Phase 4-revision (pre-Turbo BEM) → Phase 5 (方案 E block-pilot 末插) → A+E 组合 验证。**最优配置**：K=15 (单 train) + pilot_per_blk=128 (=blk_cp)，吞吐损失 50%，**fd=1Hz mean BER 47.05%→3.37%（改善 14×），fd=5Hz mean 49.63%→13.80%（SNR=20 3.53%）**。
+  **协议核心**：每 data block 末嵌入 pilot_per_blk 个固定 pilot symbol（seed=99），当 pilot_per_blk ≥ blk_cp 时 CP 全 pilot → CP 段 + pilot tail 段全干净 BEM 观测（~76 obs/data block × 15 + 38 train CP = ~1178 obs / 帧）→ pre-Turbo BEM (modem_decode_scfde V4.1) 直接构造时变 H_tv 替代单块 GAMP H_init → 跳过软符号-BEM 鸡蛋耦合。
+  **关键阈值**：仅 `pilot_per_blk ≥ blk_cp = 128` 时 work（max_tau=90 占用 CP 段 obs 资格，pilot < blk_cp 时 obs 几乎全被 lookup all_known check 否决）。A+E 组合实测劣于纯方案 E（K=4+pilot=64 fd=1Hz 20.82% 远不及 K=15+pilot=128 3.25%）。
+  **失败方案**：Phase 4 (方案 A 多 train block 但 RX 用单块 GAMP H_init) fd=1Hz K=4 49.97% FAIL；Phase 4-revision (4 train + pre-Turbo BEM) fd=1Hz K=4 18.31% 部分改善但未达 < 5%（obs 数 152 远不及方案 E 1178）；fd_est_pretturbo 10→20 几乎无效（auto Q 不是瓶颈）。
+  **已知 limitation**：吞吐损失 50%（物理代价由 max_tau/blk_fft 比决定）；fd=5Hz 低 SNR (5-10dB) BEM 噪声敏感（mean 13.80% > 10% V5c 准则，需 SNR≥15dB 稳定工作）；pilot < blk_cp 不 work。
+  详见 [[modules/13_SourceCode/SC-FDE调试日志]] V3.0。
