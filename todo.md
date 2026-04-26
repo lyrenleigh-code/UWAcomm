@@ -9,14 +9,14 @@
 
 ---
 
-## 开发量统计（2026-04-19）
+## 开发量统计（2026-04-26）
 
 | 指标 | 数值 |
 |------|------|
-| MATLAB 函数文件 | 266 个 |
-| 代码总行数 | 39,821 行 |
-| 文档文件 (md+html) | 40+ 个 |
-| Git 提交数 | 226 次 |
+| MATLAB 函数文件 | 378 个（含 tests/diag） |
+| 代码总行数 | 59,579 行 |
+| 文档文件 (md+html) | 60+ 个 |
+| Git 提交数 | 295 次 |
 | README 文档总行数 | ~6000 行（含算法推导+断言表+LaTeX 公式） |
 | 模块数 | 14 个（13 算法模块 + 1 流式仿真框架） |
 
@@ -49,11 +49,11 @@
 
 | 体制 | 版本 | 状态 | 备注 |
 |------|------|------|------|
-| SC-FDE | V4.0 + V2.1.0（14/rx） | ✅ | 两级分离架构；convergence 三选一判据 + est_snr 修复 |
+| SC-FDE | V4.1（14/rx）+ V4.0（14/tx） | ✅ | Phase 4+5 协议层突破：cfg.pilot_per_blk=128 → fd=1Hz 47%→3.37% (14×)；pre-Turbo BEM；jakes 时变 limitation 已突破（吞吐损失 50%） |
 | OFDM | V4.3 + est_snr 修复 | ✅ | OMP + nv_post + 跳过 CP + 空子载波 CFO + DD-BEM；去 sps 减法 |
-| SC-TDE | V5.2 | ✅ | 时变跳过训练精估+nv_post 兜底 |
+| SC-TDE | V5.6 | ✅ | V5.4 post-CFO fix + V5.5 fd=1Hz iter=0 + V5.6 HFM-signature calibration 4/5 PASS |
 | OTFS | V2.0 | ✅ | 通带+离散 Doppler（含分数）0%@10dB+，Rician 混合 K=5~20 |
-| DSSS | V1.0 | ✅ | Rake(MRC)+DBPSK+DCD，96.8bps，static 0%@-15dB+ |
+| DSSS | V1.2 | ✅ | Rake(MRC)+DBPSK+DCD，96.8bps，static 0%@-15dB+；α=+1e-2 43%→0% post-CFO 修 |
 | FH-MFSK | V1.0 | ✅ | 8-FSK+16 位跳频+能量检测，750bps，唯一全信道可工作 |
 
 ---
