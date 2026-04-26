@@ -30,6 +30,7 @@ addpath(fullfile(proj_root, '08_Sync', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '09_Waveform', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '10_DopplerProc', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '13_SourceCode', 'src', 'Matlab', 'common'));
+addpath(fullfile(proj_root, '13_SourceCode', 'src', 'Matlab', 'tests', 'bench_common'));
 
 constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
 bits2qpsk = @(b) constellation(bi2de(reshape(b(1:floor(length(b)/2)*2),2,[]).','left-msb')+1);
@@ -644,79 +645,37 @@ for fi = 1:size(fading_cfgs,1)
         nv_eq = max(noise_var, 1e-10);
         eff_delays = mod(sym_delays - sync_offset_sym, blk_fft);
 
-        if strcmpi(ftype, 'static')
-            % GAMP估计（用训练块 CP 段，2026-04-24 Phase 2 形式清洁化）
-            %   原 tx_blk1 = all_cp_data(1:sym_per_block) 内容等价 train_cp_rx
-            %   （因 all_cp_data(1:sym_per_block)=train_cp=train_cp_rx），显式改用 RX 本地重建
-            usable = blk_cp;
-            T_mat = zeros(usable, L_h);
-            tx_blk1 = train_cp_rx;   % 本地重建训练块（非 oracle）
-            for col = 1:L_h
-                for row = col:usable, T_mat(row, col) = tx_blk1(row - col + 1); end
-            end
-            y_train = rx_sym_all(1:usable).';
-            % Phase A 2026-04-23: 默认 V1.4 GAMP（divergence guard + LS Tikhonov fallback）
-            % toggle use_omp_static=true 走 OMP（K_sparse=6 真实径数）— 实验残留：
-            %   实测 OMP 在 SNR=10 边界 case 反而比 GAMP+LS 略差（+1e-2 灾难率 6.7%→10%）
-            %   保留为 toggle 便于复现实验，不作默认
-            if tog.use_omp_static
-                [h_gamp_vec, ~, ~] = ch_est_omp(y_train, T_mat, L_h, K_sparse, nv_eq);
-            else
-                [h_gamp_vec, ~] = ch_est_gamp(y_train, T_mat, L_h, 50, nv_eq);
-            end
-            h_td_est = zeros(1, blk_fft);
-            for p = 1:K_sparse
-                if sym_delays(p)+1 <= L_h
-                    h_td_est(eff_delays(p)+1) = h_gamp_vec(sym_delays(p)+1);
-                end
-            end
-            H_est_blocks = cell(1, N_blocks);
-            for bi = 1:N_blocks
-                H_est_blocks{bi} = fft(h_td_est) .* phase_ramp_frac;
-            end
+        % [Phase 3b.2 重构 2026-04-25] 公共 fallback：GAMP 静态估计（训练块 CP 段）
+        %   - static 路径：终值（信道恒定，BEM 不必要）
+        %   - 时变路径：iter=0..1 临时初值，titer=2 起在 Turbo loop 内由
+        %               build_bem_observations_scfde + ch_est_bem 重估（去 oracle 判决反馈）
+        % 原 else 时变 BEM 用 oracle all_cp_data 构造观测，已删除
+        % Spec: specs/active/2026-04-24-scfde-bem-decision-feedback-arch.md
+        usable = blk_cp;
+        T_mat = zeros(usable, L_h);
+        tx_blk1 = train_cp_rx;   % 本地重建训练块（非 oracle）
+        for col = 1:L_h
+            for row = col:usable, T_mat(row, col) = tx_blk1(row - col + 1); end
+        end
+        y_train = rx_sym_all(1:usable).';
+        % Phase A 2026-04-23: 默认 V1.4 GAMP（divergence guard + LS Tikhonov fallback）
+        % toggle use_omp_static=true 走 OMP（K_sparse=6 真实径数）— 实验残留：
+        %   实测 OMP 在 SNR=10 边界 case 反而比 GAMP+LS 略差（+1e-2 灾难率 6.7%→10%）
+        %   保留为 toggle 便于复现实验，不作默认
+        if tog.use_omp_static
+            [h_gamp_vec, ~, ~] = ch_est_omp(y_train, T_mat, L_h, K_sparse, nv_eq);
         else
-            % BEM(DCT)跨块估计（每块CP段作为导频）
-            % ⚠ Oracle 泄漏（bi>=2）: x_vec(pp)=all_cp_data(idx) 是 TX data 符号
-            % 2026-04-24 Phase 3 单 block 观测尝试证伪（BEM 需跨块时间分散观测拟合
-            % Jakes 时变；fd=1Hz 单训练块观测 37 个 → BER 0%→~50%）。保留 oracle 作
-            % benchmark baseline，真去 oracle 需 Turbo 判决反馈两阶段方案：
-            %   Phase 3b spec: 2026-04-24-scfde-bem-decision-feedback-arch
-            %   参考: 14_Streaming/rx/modem_decode_scfde.m::build_bem_observations
-            obs_y = []; obs_x = []; obs_n = [];
-            for bi = 1:N_blocks
-                blk_start = (bi-1)*sym_per_block;
-                for kk = max(sym_delays)+1 : blk_cp
-                    n = blk_start + kk;
-                    x_vec = zeros(1, K_sparse);
-                    for pp = 1:K_sparse
-                        idx = n - sym_delays(pp);
-                        if idx >= 1 && idx <= N_total_sym
-                            x_vec(pp) = all_cp_data(idx);  % ⚠ Phase 3b TODO: 替换判决反馈
-                        end
-                    end
-                    if any(x_vec ~= 0) && n <= length(rx_sym_all)
-                        obs_y(end+1) = rx_sym_all(n);
-                        obs_x = [obs_x; x_vec];
-                        obs_n(end+1) = n;
-                    end
-                end
+            [h_gamp_vec, ~] = ch_est_gamp(y_train, T_mat, L_h, 50, nv_eq);
+        end
+        h_td_est = zeros(1, blk_fft);
+        for p = 1:K_sparse
+            if sym_delays(p)+1 <= L_h
+                h_td_est(eff_delays(p)+1) = h_gamp_vec(sym_delays(p)+1);
             end
-            bem_opts = struct('Q_mode', 'auto', 'lambda_scale', 1.0);
-            if ~isempty(tog.force_bem_q)  % 【H8 toggle】强制 BEM 阶数
-                bem_opts.Q_mode = tog.force_bem_q;
-            end
-            [h_tv_bem, ~, bem_info] = ch_est_bem(obs_y(:), obs_x, obs_n(:), N_total_sym, ...
-                sym_delays, fd_hz, sym_rate, nv_eq, 'dct', bem_opts);
-            H_est_blocks = cell(1, N_blocks);
-            for bi = 1:N_blocks
-                blk_mid = (bi-1)*sym_per_block + round(sym_per_block/2);
-                blk_mid = max(1, min(blk_mid, N_total_sym));
-                h_td_est = zeros(1, blk_fft);
-                for p = 1:K_sparse
-                    h_td_est(eff_delays(p)+1) = h_tv_bem(p, blk_mid);
-                end
-                H_est_blocks{bi} = fft(h_td_est) .* phase_ramp_frac;
-            end
+        end
+        H_est_blocks = cell(1, N_blocks);
+        for bi = 1:N_blocks
+            H_est_blocks{bi} = fft(h_td_est) .* phase_ramp_frac;
         end
         if si == 1, H_est_blocks_save{fi} = H_est_blocks{1}; end
 
@@ -767,6 +726,29 @@ for fi = 1:size(fading_cfgs,1)
         bits_decoded = [];
 
         for titer = 1:turbo_iter
+            % 【Phase 3b.2 2026-04-25】iter=2 入口：用 titer=1 反馈的 x_bar_blks
+            % （Turbo 第一轮软符号）调 build_bem_observations_scfde + ch_est_bem
+            % 跨块重估时变信道，覆盖 H_cur_blocks（仅时变 & 非 oracle 模式）
+            % Spec: specs/active/2026-04-24-scfde-bem-decision-feedback-arch.md
+            if titer == 2 && ~strcmpi(ftype, 'static') && ~tog.oracle_h
+                [obs_y_b, obs_x_b, obs_n_b] = build_bem_observations_scfde( ...
+                    rx_sym_all, train_cp_rx, x_bar_blks, blk_cp, blk_fft, ...
+                    sym_per_block, N_blocks, N_total_sym, sym_delays, K_sparse);
+                bem_opts = struct('Q_mode', 'auto', 'lambda_scale', 1.0);
+                if ~isempty(tog.force_bem_q), bem_opts.Q_mode = tog.force_bem_q; end
+                [h_tv_bem, ~, ~] = ch_est_bem(obs_y_b(:), obs_x_b, obs_n_b(:), ...
+                    N_total_sym, sym_delays, fd_hz, sym_rate, nv_eq, 'dct', bem_opts);
+                for bi = 1:N_blocks
+                    blk_mid = (bi-1)*sym_per_block + round(sym_per_block/2);
+                    blk_mid = max(1, min(blk_mid, N_total_sym));
+                    h_td_est_bem = zeros(1, blk_fft);
+                    for p = 1:K_sparse
+                        h_td_est_bem(eff_delays(p)+1) = h_tv_bem(p, blk_mid);
+                    end
+                    H_cur_blocks{bi} = fft(h_td_est_bem) .* phase_ramp_frac;
+                end
+            end
+
             % 1. Per-block LMMSE-IC → LLR（只对 data block）
             LLR_all = zeros(1, M_total);
             for data_bi = 1:N_data_blocks

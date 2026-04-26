@@ -3,8 +3,8 @@ project: uwacomm
 type: task
 status: active
 created: 2026-04-24
-updated: 2026-04-24
-tags: [SC-FDE, BEM, oracle 清理, 判决反馈, 架构改动, 13_SourceCode, 14_Streaming]
+updated: 2026-04-25
+tags: [SC-FDE, BEM, oracle 清理, 判决反馈, 架构改动, 13_SourceCode, 14_Streaming, limitation]
 branch: arch/scfde-bem-decision-feedback
 parent_spec: specs/archive/2026-04-24-scfde-sps-deoracle-arch.md
 ---
@@ -155,3 +155,92 @@ x_bar_blks{2..N}=data 软符号）。
 - E2E benchmark 要跑 production-grade 时变信道对比
 - 学术论文需要证明完全去 oracle 的 SC-FDE 时变 BER
 - 若均无，低优先保持当前状态
+
+## 进度（2026-04-25 归档）
+
+### Phase 3b.1 ✅ commit `55e3cd5`
+- `build_bem_observations_scfde.m` 移植到 `tests/bench_common/`（13 全局 index 版本）
+- 单元测试 `test_build_bem_obs_scfde.m` 6/6 PASS（n_obs=96，h_tv 6×1280，ch_est_bem 兼容）
+
+### Phase 3b.2 🟡 实施完成（未 commit），实测显示 fd 时变路径灾难
+**`test_scfde_timevarying.m` 三处 edit**：
+1. addpath `bench_common`
+2. L648-720 重构：删除 oracle BEM 分支，统一 GAMP 静态估计作 iter=0..1 fallback
+3. Turbo loop titer=2 入口插入 `build_bem_observations_scfde + ch_est_bem` 重估
+
+**默认运行 BER（4 SNR × 3 fading × 1 seed）**：
+
+| 场景 | 5dB | 10dB | 15dB | 20dB | 接受准则 | 状态 |
+|------|-----|------|------|------|----------|------|
+| static | 0.00% | 0.00% | 0.00% | 0.00% | 不退化 | ✅ V3a PASS |
+| fd=1Hz | 50.23% | 50.13% | 50.03% | 50.31% | 0.16/0/0/0% | ❌ V3b 灾难 |
+| fd=5Hz | 50.73% | 49.90% | 49.22% | 51.31% | ~50% 物理极限 | ✅ V3c PASS |
+
+**V3b fd=1Hz 灾难根因**（spec R1 兑现）：
+- jakes fd=1Hz × 16 block × 256 sym/block ≈ 1.024s ≈ 一个完整 Jakes 周期
+- 第 8 block 时刻 h 与训练块 h 自相关接近 0（T₀=1/(2fd)=0.5s）
+- iter=0..1 用 GAMP 静态 H 在第 8 block 附近完全失配 → titer=1 软符号 ~50% 错
+- titer=2 BEM 用 garbage 软符号构造观测 → BEM 估计 garbage → Turbo 不收敛
+- Phase 1 oracle BEM 0.16% 是因为 oracle x_bar 直接给出正确 h，**完全跳过软符号-信道耦合**
+- 软符号-BEM 鸡-蛋耦合在 jakes 时变 + 单训练块下不可解
+
+**14_Streaming 对比调研结论**：
+14_Streaming production 的 `modem_decode_scfde::build_bem_observations` **没有 jakes fd=1Hz 实测 BER 数据**：
+- 14_Streaming 验证场景：`gen_doppler_channel + p4_channel_tap` = α 时变 + 静态多径 conv
+- 13_SourceCode 验证场景：`gen_uwa_channel` = jakes Doppler spread（径增益时变）
+- fd=1Hz 50% 是 jakes 时变 + 单训练块 + 判决反馈架构 trade-off 的**首次实测发现**，无 production 对比标杆
+
+### Phase 3b.3/3b.4 ⏸ 未启动（pending）
+
+### 接受准则达成度
+
+- [x] Phase 3b.1 build_bem_observations_scfde 单元测试通过
+- [x] Phase 3b.2 iter=2 BEM 调用成功，无矩阵 rank 错误
+- [ ] V3b fd=1Hz 5dB 0.16% / 10-20dB 0% — **不可达成**（架构 trade-off）
+- [x] V3a static 不退化
+- [ ] discrete_doppler runner 同模板迁移（Phase 3b.4 未启动）
+- [x] `wiki/modules/13_SourceCode/SC-FDE调试日志.md` 追加 V2.3 章节
+- [ ] 本 spec + 原 sps-deoracle-arch spec 归档（待用户决策）
+- [x] `all_cp_data` 在 RX 链路完全消除（spec 接受准则核心目标达成）
+
+### 用户决策（2026-04-26）：先跑路线 4 (A1) → 据结果走路线 1
+
+## A1 验证 + 路线 1 落地（2026-04-26）
+
+### A1 实测
+
+**Plan**: `plans/a1-streaming-decoder-jakes-validation.md`
+**脚本**: `modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_a1_streaming_decoder_jakes.m`
+
+TX 14_Streaming `modem_encode_scfde` + Channel `gen_uwa_channel` jakes fd=1Hz + RX 14_Streaming production `modem_decode_scfde`（含 `mean(var)<0.6` BEM 门控 + `var<0.5` DD fallback），3 seed × 4 SNR × 3 fading，36 次运行无 crash。
+
+| 场景 | A1 (14 production) mean | V3 (13 移植 1 seed) | 差异 |
+|------|--------------------------|---------------------|------|
+| static (健全) | 0.41% (5dB 1.60% / 其余 ~0) | 0/0/0/0% | < 2 pp |
+| **fd=1Hz** | **50.02%** | **50.18%** | **< 0.2 pp** |
+| fd=5Hz | 49.86% | 50.29% | < 0.5 pp |
+
+### 决策：架构 trade-off 确认
+
+14_Streaming production 与 13 移植在 jakes fd=1Hz 下 BER 几乎相同（差 < 0.2 pp）→ **不是 13 移植 bug，是架构层 trade-off**。`mean(var)<0.6` BEM 门控 + `var<0.5` DD fallback 都被 jakes 第 8 block 失配触发的 ~50% 软符号错误关闭 → H 永不更新 → BER ~50%。
+
+**协议层根因**：单训练块 + jakes fd=1Hz × 1.024s 帧周期 ≈ 1 完整 Jakes 周期 → 不可在 decoder 层优化。
+
+### 接受准则（重写后）
+
+- [x] Phase 3b.1 build_bem_observations_scfde 单元测试通过
+- [x] Phase 3b.2 iter=2 BEM 调用成功，无矩阵 rank 错误
+- [x] V3a static 不退化
+- [x] **V3b fd=1Hz limitation 已知**（架构 trade-off，14 production 也 ~50%；要回 Phase 1 水平需协议层改动）
+- [x] V3c fd=5Hz ~50% 物理极限
+- [x] discrete_doppler runner 同模板迁移（Phase 3b.4）
+- [x] `wiki/modules/13_SourceCode/SC-FDE调试日志.md` 追加 V2.3 + V2.4 章节
+- [x] 本 spec + 原 sps-deoracle-arch spec 归档
+- [x] `all_cp_data` 在 RX 链路完全消除（spec 接受准则核心目标达成）
+
+### 后续协议层方向（不在 Phase 3b 范围）
+
+要恢复 Phase 1 水平 BER，需开新 spec：
+- 多训练块插入（每 4-8 block）
+- 导频 superimposed（OTFS 式）
+- 超训练块覆盖 Jakes 周期

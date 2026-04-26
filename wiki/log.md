@@ -1,7 +1,42 @@
 # Wiki 操作日志
 
+## 2026-04-26
+
+- **SC-FDE Phase 3b.2 路线 4 (A1) 验证 + 路线 1 落地**
+  - Plan: `plans/a1-streaming-decoder-jakes-validation.md`
+  - A1 脚本: `modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_a1_streaming_decoder_jakes.m`
+  - A1 实测（3 seed × 4 SNR × 3 fading，14_Streaming production `modem_decode_scfde` × `gen_uwa_channel` jakes）：
+    - static 健全 0.41% mean（5dB 1.60% / 其余 ~0，无 LFM preamble 缺失 ~3dB sync gain）
+    - **fd=1Hz mean=50.02%（与 13 移植 50.18% 差 < 0.2 pp）**
+    - fd=5Hz mean=49.86%
+  - **决策**：架构 trade-off 确认（不是 13 移植 bug）→ 走路线 1
+  - SC-FDE 调试日志追加 V2.4 章节（A1 数据 + 决策 + 后续协议层方向）
+  - conclusions.md 加 #43（A1 验证落地）
+  - spec `2026-04-24-scfde-bem-decision-feedback-arch.md` 接受准则重写为 "limitation 已知" + 待归档
+  - Phase 3b.4 推广: `test_scfde_discrete_doppler.m` 同模板迁移（待）
+  - Spec 归档：active → archive（待）
+
 ## 2026-04-25
 
+- **SC-FDE Phase 3b.2 BEM 判决反馈去 oracle 实施（归档）**
+  - Spec: `specs/active/2026-04-24-scfde-bem-decision-feedback-arch.md`（更新加 "进度（2026-04-25 归档）" 章节 + 接受准则达成度 + 4 路线决策待用户）
+  - Plan: `plans/2026-04-24-scfde-bem-decision-feedback-arch.md`
+  - Phase 3b.1 ✅（commit `55e3cd5`）：`build_bem_observations_scfde.m` + 单测 6/6 PASS
+  - Phase 3b.2 🟡 实施完成未 commit：`test_scfde_timevarying.m` 3 处 edit
+    1. addpath `bench_common`
+    2. L648-720 重构：删除 `else` 时变 BEM 分支（含 `all_cp_data` oracle），统一用 GAMP 静态估计作 iter=0..1 公共 fallback
+    3. Turbo loop titer=2 入口插入 `build_bem_observations_scfde + ch_est_bem` 重估 `H_cur_blocks`（`~static && ~tog.oracle_h`）
+  - 默认运行 BER（4 SNR × 3 fading × 1 seed）：
+    - static 0/0/0/0% V3a ✅ PASS — `all_cp_data` 在 RX 链路完全消除（spec 接受准则核心目标达成）
+    - **fd=1Hz 50.23/50.13/50.03/50.31% V3b ❌ 灾难**（接受准则 0.16/0/0/0% 不可达成）
+    - fd=5Hz ~50% V3c ✅ 物理极限
+  - V3b 灾难根因：jakes fd=1Hz × 16 block ≈ 1.024s = 一个完整 Jakes 周期；第 8 block h 与训练块 h 自相关 ≈ 0（T₀=0.5s）；iter=0..1 用静态 H 完全失配 → titer=1 软符号 ~50% 错 → titer=2 BEM garbage → Turbo 不收敛（**软符号-BEM 鸡蛋耦合，spec R1 兑现**）
+  - 14_Streaming production 调研：**没在 jakes fd=1Hz 验证过 BER**（用 gen_doppler_channel α 时变 + 静态多径 conv，与 13 jakes Doppler spread 不同），无 reference 标杆
+  - SC-FDE 调试日志追加 V2.3 章节（含 4 路线决策候选）
+  - conclusions.md 加 #42（jakes 时变 + 单训练块 + 判决反馈架构 trade-off）
+  - todo.md Phase 3b 行更新为"3b.1 ✅ + 3b.2 ⚠ 待决策"
+  - Phase 3b.3 V3d/V3a 多 seed 未跑；Phase 3b.4 ⏸ 未启动
+  - 待用户决策路线：A 接受 limitation / B 回滚 / C 改 fallback（预期无效）/ D 自定义 14_Streaming jakes 验证
 - **SC-TDE fd=1Hz V5.6 HFM-signature bias calibration（V5.5 续做）**
   - Path A（HFM Doppler-invariance）证伪：fd=1Hz HFM mean 偏差 (-1) 比 LFM (-0.38) 大；HFM 非 invariant
   - Path E pivot：HFM dtau_diff = -1 在 fd=1Hz Jakes 是 deterministic 指纹（std=0；fd=0=0；fd=5∈{-123,-42}）→ 触发 fd-specific calibration

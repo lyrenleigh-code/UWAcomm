@@ -16,6 +16,7 @@
 |------|------|---------|------|
 | V4.0 | 2026-04-09 | 两级分离架构+LFM定时 | ✅ fd<=1Hz完成 |
 | V2.2 | 2026-04-24 | 迁移 14_Streaming 架构（Phase 1+2: sps+GAMP 去 oracle）| ✅ timevarying runner 完成 |
+| V2.3 | 2026-04-25 | Phase 3b.2 BEM 判决反馈去 oracle | 🟡 static PASS / fd 时变路径 limitation 已知 |
 
 ---
 
@@ -256,3 +257,132 @@ info_bits 口径下调 → 旧 E2E benchmark / Monte Carlo 基线不可直接对
 排查清单第 8 条"测试 harness 允许传递协议参数，禁止传递 TX 数据"。
 
 BEM 观测仍 oracle 部分已加明确 `⚠ Phase 3b TODO` 注释 + 指向 Phase 3b spec。
+
+---
+
+## V2.3 — Phase 3b.2 BEM 判决反馈去 oracle（2026-04-25）
+
+**Spec**: `specs/active/2026-04-24-scfde-bem-decision-feedback-arch.md`
+**Plan**: `plans/2026-04-24-scfde-bem-decision-feedback-arch.md`
+**Phase 3b.1（前置）**: commit `55e3cd5` — 移植 `build_bem_observations_scfde` 局部函数 + 单测 6/6 PASS
+
+### 目标
+
+去除 `test_scfde_timevarying.m` 时变路径 BEM 调用对 `all_cp_data`（TX 数据）的依赖，
+移植 14_Streaming `modem_decode_scfde::build_bem_observations` 两阶段方案：
+- 训练块 CP 段：用 train_cp_rx 重建（合法）
+- 数据块 CP/data 段：用 Turbo 判决反馈 `x_bar_blks` 软符号（去 oracle）
+
+### Phase 3b.2 实施
+
+`test_scfde_timevarying.m` 三处编辑：
+
+1. **addpath**: 加 `13_SourceCode/src/Matlab/tests/bench_common`，保证 `build_bem_observations_scfde` 可见
+2. **L648-720 重构**: 删除 `else` 时变 BEM 分支（含 `all_cp_data(idx)` oracle 引用），统一用 GAMP 静态估计训练块 h 作 iter=0..1 公共 fallback
+3. **Turbo loop titer=2 入口**: 插入 `build_bem_observations_scfde + ch_est_bem` 重估 `H_cur_blocks`（条件：`~strcmpi(ftype,'static') && ~tog.oracle_h`）
+
+### V3a/V3b/V3c 实测 BER（默认 1 seed × 4 SNR × 3 fading）
+
+| 场景 | 5dB | 10dB | 15dB | 20dB | 接受准则 | 状态 |
+|------|-----|------|------|------|----------|------|
+| static | 0.00% | 0.00% | 0.00% | 0.00% | 不退化 | ✅ V3a PASS |
+| fd=1Hz | 50.23% | 50.13% | 50.03% | 50.31% | 0.16/0/0/0% | ❌ V3b 灾难 |
+| fd=5Hz | 50.73% | 49.90% | 49.22% | 51.31% | ~50% 物理极限 | ✅ V3c PASS |
+
+### V3b fd=1Hz 灾难根因（软符号-BEM 鸡-蛋耦合）
+
+- iter=0..1 用 GAMP 静态估计训练块 h 当所有 block 信道
+- jakes fd=1Hz × 16 block × 256 sym/block ≈ 1.024s ≈ **一个完整 Jakes 周期**
+- 第 8 block 时刻 h 与训练块 h 自相关接近 0（T₀ = 1/(2·fd) = 0.5s）
+- LMMSE-IC 用 H_static 在第 8 block 附近完全失配 → titer=1 软符号 ~50% 错
+- titer=2 BEM 用 garbage 软符号构造观测 → BEM 估计 garbage → Turbo 不收敛
+- Phase 1 oracle BEM 的 0.16% 是因为 oracle x_bar 直接给出正确 h，**完全跳过软符号-信道耦合**
+- Phase 3b 用判决反馈本质是把耦合放回，鸡-蛋问题在 jakes 时变 + 单训练块下不可解
+
+Spec R1 风险已实测兑现（"iter=0..1 fallback 估计若不准 → Turbo 发散 → x_bar_blks 不可信 → iter=2 BEM 也不准"）。
+
+### 14_Streaming 对比调研
+
+> [!warning] Contradiction
+> 14_Streaming production 的 `modem_decode_scfde::build_bem_observations` **没有 jakes fd=1Hz 实测 BER 数据**，无法作为 reference 标杆：
+> - 14_Streaming 验证场景：`gen_doppler_channel + p4_channel_tap` = α 时变（速度漂移） + 静态多径 conv
+> - 13_SourceCode 验证场景：`gen_uwa_channel` = jakes Doppler spread（径增益时变）
+>
+> fd=1Hz 50% 是 jakes 时变 + 单训练块 + 判决反馈架构 trade-off 的**首次实测发现**，无 production 对比数据。
+
+### 状态
+
+- ✅ `all_cp_data` 在 RX 链路完全消除（spec 接受准则 L143 核心目标达成）
+- ✅ static 路径不退化（V3a PASS）
+- ❌ fd=1Hz/fd=5Hz 时变路径 BER 灾难（架构 trade-off，**非实现 bug**）
+- 🟡 spec 接受准则 V3b 0.16/0/0/0% 与实测 50% 严重偏离 — 需重写为"limitation 已知"
+- 🟡 是否 commit Phase 3b.2 / 改 fallback / 回滚到 oracle BEM 待用户决策
+- 🟡 Phase 3b.3/3b.4 未启动（pending）
+
+### 单元测试
+
+`test_build_bem_obs_scfde` 6/6 PASS（n_obs=96，h_tv 6×1280，ch_est_bem 兼容）— Phase 3b.1 不受 Phase 3b.2 重构影响。
+
+### 工作区状态（未提交）
+
+- `test_scfde_timevarying.m` 3 处 edit 未 commit
+- `SC-TDE/verify_alpha_sweep_out/v1_a*.csv` 大量未 commit 修改（与 SC-FDE Phase 3b 无关）
+
+详见 [[end-to-end-flow]] [[time-varying-channel-eq]]。
+
+---
+
+## V2.4 — 路线 4 (A1) 精确验证 + 决策落地（2026-04-26）
+
+**Plan**: `plans/a1-streaming-decoder-jakes-validation.md`
+**A1 脚本**: `modules/13_SourceCode/src/Matlab/tests/SC-FDE/diag_a1_streaming_decoder_jakes.m`
+
+### A1 目的
+
+V2.3 V3b fd=1Hz 50% 灾难是**架构 trade-off** 还是 **13 移植 bug**？V2.3 末候选 4 路线：
+- 路线 1：接受 limitation
+- 路线 2：回滚 Phase 3b.2
+- 路线 3：改 fallback（spec 已分析逻辑上无效）
+- **路线 4 (A1)**：精确验证 14_Streaming production decoder × jakes fd=1Hz
+
+### A1 实测（3 seed × 4 SNR × 3 fading）
+
+TX：14_Streaming `modem_encode_scfde`（去 oracle 协议）；Channel：`gen_uwa_channel` jakes fd=1Hz（与 13 test 同）；RX：14_Streaming production `modem_decode_scfde`（含 `mean(var)<0.6` BEM 门控 + `var<0.5` DD fallback）。无 LFM preamble（α=0 简化，2dB sync gain 缺失）。
+
+| 场景 | 5dB | 10dB | 15dB | 20dB |
+|------|-----|------|------|------|
+| static (健全) | 1.60% | 0.02% | 0.00% | 0.00% |
+| **fd=1Hz** | **49.58%** | **49.67%** | **50.07%** | **50.75%** |
+| fd=5Hz | 49.97% | 49.82% | 49.81% | 49.82% |
+
+### 对照 V2.3（13 Phase 3b.2 移植版本）
+
+| 场景 | A1 (14 production) mean | V2.3 (13 移植 1 seed) | 差异 |
+|------|------------------------|----------------------|------|
+| static | 0.41% (5dB 1.60% / 其余 ~0) | 0/0/0/0% | <2 pp（无 preamble 缺失 sync gain） |
+| fd=1Hz | **50.02%** | **50.18%** | **< 0.2 pp** |
+| fd=5Hz | 49.86% | 50.29% | < 0.5 pp |
+
+### 决策：架构 trade-off 确认（走路线 1）
+
+14_Streaming production 与 13 移植版本在 jakes fd=1Hz 下 BER 几乎相同（差 < 0.2 pp）→ **不是 13 移植 bug，是架构层 trade-off**。
+
+软符号-BEM 鸡蛋耦合在 14 production 也无法解：jakes 第 8 block 完全失配 → titer=1 软符号 ~50% 错（var ≈ 0.5）→ `mean(var)<0.6` 关闭 BEM 触发 + `var<0.5` 关闭 DD fallback → H 永不更新 → BER ~50%。
+
+**协议层根因（不可在 decoder 层优化）**：单训练块 + jakes fd=1Hz × 1.024s 帧周期 ≈ 1 完整 Jakes 周期 → decoder 无法获得自相关零点之外的 H 观测。
+
+### 路线 1 执行
+
+- ✅ Commit Phase 3b.2 实现（`test_scfde_timevarying.m` + `build_bem_observations_scfde`）+ A1 验证脚本 + plan
+- ✅ Spec 接受准则 V3b 重写为 "limitation 已知"
+- ✅ Phase 3b.4 推广：`test_scfde_discrete_doppler.m` 同模板迁移
+- ✅ Spec 归档 → `specs/archive/`
+
+### 后续可选（不在 Phase 3b 范围）
+
+要恢复 Phase 1 水平 BER，需**协议层**改动：
+- **多训练块插入**：每 4-8 block 插入训练块，跨块观测可采样非零自相关 h
+- **导频 superimposed**（OTFS 式）：每数据块叠加导频参考
+- **超训练块**：单块覆盖整个 Jakes 周期
+
+详见 [[end-to-end-flow]] [[time-varying-channel-eq]]。

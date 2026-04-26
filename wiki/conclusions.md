@@ -544,3 +544,24 @@ L484-487 + L590-596 用 `all_cp_data(1:10)` 做相关挑 sps 相位（oracle 泄
   SC-TDE 时域 DFE 无此免疫，所以同 bug 下 15/15 全灾难。
   横向审计待办：spec `2026-04-24-cfo-postcomp-cross-scheme-audit.md`（DSSS 热/OFDM 温/FH-MFSK,OTFS 冷）。
   详见 [[SC-TDE调试日志]] V5.3（RCA）+ V5.4（fix + plan C 证伪）。
+
+42. **SC-FDE Phase 3b.2 jakes 时变去 oracle 软符号-BEM 鸡蛋耦合 limitation (2026-04-25)**：
+  Phase 3b.2 实测 — `test_scfde_timevarying.m` 删除 oracle BEM 后用 GAMP 静态估计作 iter=0..1 fallback、Turbo titer=2 用判决反馈 `x_bar_blks` 调 `build_bem_observations_scfde + ch_est_bem` 重估，得：
+  - static 0/0/0/0% V3a ✅ PASS（all_cp_data 在 RX 链路完全消除）
+  - **fd=1Hz 50.23/50.13/50.03/50.31% V3b ❌**（接受准则 0.16/0/0/0% 不可达成）
+  - fd=5Hz ~50% V3c ✅ 物理极限
+  **根因**：jakes fd=1Hz × 16 block × 256 sym/block ≈ 1.024s ≈ 一个完整 Jakes 周期；第 8 block 时刻 h 与训练块 h 自相关 ≈ 0（T₀=1/(2fd)=0.5s）；iter=0..1 用静态 H 在第 8 block 完全失配 → titer=1 软符号 ~50% 错 → titer=2 BEM 用 garbage 软符号构造观测 → BEM 估计 garbage → Turbo 不收敛。
+  **Phase 1 oracle BEM 0.16% 不可复现**，因为 oracle x_bar 直接给出正确 h，**完全跳过软符号-信道耦合**；Phase 3b 用判决反馈本质是把耦合放回。
+  **14_Streaming production 没在 jakes fd=1Hz 验证过 BER**（用 `gen_doppler_channel` α 时变 + 静态多径 conv，与 13 用 `gen_uwa_channel` jakes Doppler spread 不同），无 reference 标杆。
+  **结论**：jakes 时变 + 单训练块 + 判决反馈架构是 trade-off 而非可优化 bug；要恢复 Phase 1 水平需协议层改动（多训练块插入或导频 superimposed）。
+  spec `active/2026-04-24-scfde-bem-decision-feedback-arch.md` 接受准则 V3b 0.16/0/0/0% 不可达成已记入 spec。
+  详见 [[modules/13_SourceCode/SC-FDE调试日志]] V2.3。
+
+43. **SC-FDE Phase 3b.2 路线 4 (A1) 验证：14_Streaming production decoder × jakes fd=1Hz 也 50% (2026-04-26)**：
+  V2.3 末 4 路线候选中跑路线 4 (A1) — 自定义脚本 `diag_a1_streaming_decoder_jakes.m` 跑 14_Streaming production `modem_decode_scfde`（含 `mean(var)<0.6` BEM 门控 + `var<0.5` DD fallback）× `gen_uwa_channel` jakes fd=1Hz，3 seed × 4 SNR × 3 fading：
+  - static (健全): 5dB 1.60% / 10-20dB ~0%（无 LFM preamble 缺失 sync gain 解释 5dB 偏离）
+  - **fd=1Hz: 49.58 / 49.67 / 50.07 / 50.75 mean=50.02%**
+  - fd=5Hz: 49.86% mean
+  与 13 移植 V3 数据差 < 0.2 pp（fd=1Hz：50.02 vs 50.18）→ **不是 13 移植 bug，是架构层 trade-off**。14 production 的 `mean(var)<0.6` 门控同样被 jakes 第 8 block 失配触发的 ~50% 软符号错误关闭 → H 永不更新 → BER ~50%。
+  **决策**：走 spec 路线 1（commit Phase 3b.2 + 重写 V3b 准则为 limitation + 推广 3b.4 + 归档）。要恢复 Phase 1 水平需开新 spec 做协议层改动（多训练块/导频 superimposed/超训练块）。
+  详见 [[modules/13_SourceCode/SC-FDE调试日志]] V2.4。
