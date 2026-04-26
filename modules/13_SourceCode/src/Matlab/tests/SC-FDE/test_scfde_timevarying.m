@@ -165,7 +165,27 @@ for fi = 1:size(fading_cfgs,1)
     % === 2026-04-24 迁移 14_Streaming 架构（spec scfde-sps-deoracle-arch）===
     % Block 1 = 训练块（seed=77，RX 本地重建）；Blocks 2..N = 数据块
     % info_bits / M_total 口径按 data block 计算，旧 BER 基线作废
-    N_data_blocks = N_blocks - 1;
+    %
+    % === 2026-04-26 Phase 4 多训练块协议（spec time-varying-pilot-arch）===
+    % bench_train_period_K 控制周期插入：
+    %   K=N_blocks-1 (默认) → 单训练块（向后兼容 V2.0）
+    %   K=4 → 每 4 个 data block 后插一个 train block，N_train≈N_blocks/(K+1)+1 均匀分布
+    if exist('bench_train_period_K','var') && ~isempty(bench_train_period_K)
+        K_train = bench_train_period_K;
+    else
+        K_train = N_blocks - 1;   % 默认单训练块
+    end
+    if K_train >= N_blocks - 1
+        N_train_blocks = 1;
+        train_block_indices = 1;
+    else
+        N_train_blocks = floor(N_blocks / (K_train + 1)) + 1;
+        train_block_indices = round(linspace(1, N_blocks, N_train_blocks));
+        train_block_indices = unique(train_block_indices);
+        N_train_blocks = length(train_block_indices);
+    end
+    data_block_indices = setdiff(1:N_blocks, train_block_indices);
+    N_data_blocks = length(data_block_indices);
     M_per_blk = 2*blk_fft;
     M_total = M_per_blk * N_data_blocks;  % 只对 data block 编码
     N_info = M_total/n_code - mem;
@@ -189,9 +209,13 @@ for fi = 1:size(fading_cfgs,1)
     sym_all = bits2qpsk(inter_all);
 
     all_cp_data = zeros(1, N_blocks * sym_per_block);
-    all_cp_data(1:sym_per_block) = train_cp;       % Block 1: training
+    % Phase 4：多训练块按 train_block_indices 分布
+    for ti = 1:N_train_blocks
+        bi = train_block_indices(ti);
+        all_cp_data((bi-1)*sym_per_block+1:bi*sym_per_block) = train_cp;
+    end
     for data_bi = 1:N_data_blocks
-        bi = data_bi + 1;                          % 全局 block index (2..N)
+        bi = data_block_indices(data_bi);          % 全局 block index
         data_sym = sym_all((data_bi-1)*blk_fft+1:data_bi*blk_fft);
         x_cp = [data_sym(end-blk_cp+1:end), data_sym];
         all_cp_data((bi-1)*sym_per_block+1:bi*sym_per_block) = x_cp;
@@ -714,14 +738,17 @@ for fi = 1:size(fading_cfgs,1)
 
         % 8. 跨块Turbo均衡: LMMSE-IC ⇌ BCJR + DD信道重估计
         % 2026-04-24 架构改动：Block 1 = training（已知 train_sym，不进 LLR/decoder）
-        %                      data_bi ∈ 1..N_data_blocks 对应全局 bi=data_bi+1
+        %                      data_bi ∈ 1..N_data_blocks 对应全局 bi=data_block_indices(data_bi)
         turbo_iter = 6;
         x_bar_blks = cell(1,N_blocks);
         var_x_blks = ones(1,N_blocks);
         H_cur_blocks = H_est_blocks;
         for bi=1:N_blocks, x_bar_blks{bi}=zeros(1,blk_fft); end
-        x_bar_blks{1} = train_sym;        % 训练块符号已知（RX 重建）
-        var_x_blks(1) = 1e-6;             % 训练块方差极小
+        % Phase 4：所有 train block 位置都填 train_sym（RX 重建）
+        for ti = 1:N_train_blocks
+            x_bar_blks{train_block_indices(ti)} = train_sym;
+            var_x_blks(train_block_indices(ti)) = 1e-6;
+        end
         La_dec_info = [];
         bits_decoded = [];
 
@@ -731,9 +758,15 @@ for fi = 1:size(fading_cfgs,1)
             % 跨块重估时变信道，覆盖 H_cur_blocks（仅时变 & 非 oracle 模式）
             % Spec: specs/active/2026-04-24-scfde-bem-decision-feedback-arch.md
             if titer == 2 && ~strcmpi(ftype, 'static') && ~tog.oracle_h
+                % Phase 4：BEM 调 V2.0 接口（多训练块），x_bar_blks_data data-only
+                x_bar_blks_data = cell(1, N_data_blocks);
+                for di = 1:N_data_blocks
+                    x_bar_blks_data{di} = x_bar_blks{data_block_indices(di)};
+                end
                 [obs_y_b, obs_x_b, obs_n_b] = build_bem_observations_scfde( ...
-                    rx_sym_all, train_cp_rx, x_bar_blks, blk_cp, blk_fft, ...
-                    sym_per_block, N_blocks, N_total_sym, sym_delays, K_sparse);
+                    rx_sym_all, train_cp_rx, x_bar_blks_data, blk_cp, blk_fft, ...
+                    sym_per_block, N_total_sym, sym_delays, K_sparse, ...
+                    train_block_indices, data_block_indices);
                 bem_opts = struct('Q_mode', 'auto', 'lambda_scale', 1.0);
                 if ~isempty(tog.force_bem_q), bem_opts.Q_mode = tog.force_bem_q; end
                 [h_tv_bem, ~, ~] = ch_est_bem(obs_y_b(:), obs_x_b, obs_n_b(:), ...
@@ -752,7 +785,7 @@ for fi = 1:size(fading_cfgs,1)
             % 1. Per-block LMMSE-IC → LLR（只对 data block）
             LLR_all = zeros(1, M_total);
             for data_bi = 1:N_data_blocks
-                bi = data_bi + 1;             % 全局 block index (2..N)
+                bi = data_block_indices(data_bi);   % Phase 4：全局 block index from indices
                 [x_tilde,mu,nv_tilde] = eq_mmse_ic_fde(Y_freq_blocks{bi}, ...
                     H_cur_blocks{bi}, x_bar_blks{bi}, var_x_blks(bi), nv_eq);
                 Le_eq_blk = soft_demapper(x_tilde, mu, nv_tilde, zeros(1,M_per_blk), 'qpsk');
@@ -775,7 +808,7 @@ for fi = 1:size(fading_cfgs,1)
                     Lpost_inter=Lpost_inter(1:M_total);
                 end
                 for data_bi = 1:N_data_blocks
-                    bi = data_bi + 1;
+                    bi = data_block_indices(data_bi);   % Phase 4：从 indices 取全局
                     coded_blk = Lpost_inter((data_bi-1)*M_per_blk+1:data_bi*M_per_blk);
                     [x_bar_blks{bi}, var_x_raw] = soft_mapper(coded_blk, 'qpsk');
                     var_x_blks(bi) = max(var_x_raw, nv_eq);
