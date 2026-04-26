@@ -1,2 +1,2 @@
-timestamp,matlab_ver,stage,scheme,profile,fd_hz,doppler_rate,snr_db,seed,ber_coded,ber_uncoded,nmse_db,sync_tau_err,frame_detected,turbo_final_iter,runtime_s,alpha_est
-2026-04-23T21:02:01,25.2.0.315,verify_v1,SC-TDE,custom6,0,0.03,10,4,0.500501,NaN,NaN,NaN,1,10,NaN,0.0313498
+timestamp,matlab_ver,stage,scheme,profile,fd_hz,doppler_rate,snr_db,seed,ber_coded,ber_uncoded,nmse_db,sync_tau_err,frame_detected,turbo_final_iter,runtime_s,alpha_est,alpha_lfm_raw,alpha_lfm_iter,alpha_lfm_scan,diag_tau_up_int,diag_tau_dn_int,diag_tau_up_frac,diag_tau_dn_frac,diag_snr_up,diag_snr_dn,diag_dtau_resid_s
+2026-04-25T12:34:03,25.2.0.315,verify_v1,SC-TDE,custom6,0,0.03,10,4,0.500501,NaN,NaN,NaN,1,10,NaN,0.0313498,0.0122809,0.0293498,0.0313498,8714,11939,0.387898,0.24034,13.0673,19.4016,-0.000982241
