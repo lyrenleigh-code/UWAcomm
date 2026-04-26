@@ -1,9 +1,10 @@
 ---
 project: uwacomm
 type: task
-status: active
+status: archived
 created: 2026-04-24
-updated: 2026-04-25
+updated: 2026-04-26
+archived: 2026-04-26
 tags: [SC-FDE, BEM, oracle 清理, 判决反馈, 架构改动, 13_SourceCode, 14_Streaming, limitation]
 branch: arch/scfde-bem-decision-feedback
 parent_spec: specs/archive/2026-04-24-scfde-sps-deoracle-arch.md
@@ -233,10 +234,18 @@ TX 14_Streaming `modem_encode_scfde` + Channel `gen_uwa_channel` jakes fd=1Hz + 
 - [x] V3a static 不退化
 - [x] **V3b fd=1Hz limitation 已知**（架构 trade-off，14 production 也 ~50%；要回 Phase 1 水平需协议层改动）
 - [x] V3c fd=5Hz ~50% 物理极限
-- [x] discrete_doppler runner 同模板迁移（Phase 3b.4）
+- [x] **Phase 3b.4 决定不推广** discrete_doppler runner（理由见下方"Phase 3b.4 决议"）
 - [x] `wiki/modules/13_SourceCode/SC-FDE调试日志.md` 追加 V2.3 + V2.4 章节
 - [x] 本 spec + 原 sps-deoracle-arch spec 归档
-- [x] `all_cp_data` 在 RX 链路完全消除（spec 接受准则核心目标达成）
+- [x] `all_cp_data` 在 RX 链路完全消除（test_scfde_timevarying.m 范围内核心目标达成）
+
+### Phase 3b.4 决议（不推广）
+
+`test_scfde_discrete_doppler.m` file header L11-18 已声明 OFFLINE ORACLE BASELINE，CLAUDE.md §2 白名单允许 benchmark baseline 保留 oracle 作算法对比基准。
+
+A1 已证：14_Streaming production decoder 在 jakes 时变下也 ~50% — 推广到 discrete_doppler 会重现同样灾难（discrete_doppler 同样依赖单训练块 + 时变信道）。推广无技术收益，反而失去 oracle 对比基准。
+
+更新 `test_scfde_discrete_doppler.m` file header L17 注释，明确"决定不迁移（2026-04-26 Phase 3b.4 决议，A1 验证证迁移会重现灾难）"。
 
 ### 后续协议层方向（不在 Phase 3b 范围）
 

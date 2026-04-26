@@ -375,7 +375,7 @@ TX：14_Streaming `modem_encode_scfde`（去 oracle 协议）；Channel：`gen_u
 
 - ✅ Commit Phase 3b.2 实现（`test_scfde_timevarying.m` + `build_bem_observations_scfde`）+ A1 验证脚本 + plan
 - ✅ Spec 接受准则 V3b 重写为 "limitation 已知"
-- ✅ Phase 3b.4 推广：`test_scfde_discrete_doppler.m` 同模板迁移
+- ✅ **Phase 3b.4 决定不推广** `test_scfde_discrete_doppler.m`（OFFLINE ORACLE BASELINE，A1 证迁移会重现 50%）
 - ✅ Spec 归档 → `specs/archive/`
 
 ### 后续可选（不在 Phase 3b 范围）

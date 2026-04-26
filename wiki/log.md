@@ -12,9 +12,9 @@
   - **决策**：架构 trade-off 确认（不是 13 移植 bug）→ 走路线 1
   - SC-FDE 调试日志追加 V2.4 章节（A1 数据 + 决策 + 后续协议层方向）
   - conclusions.md 加 #43（A1 验证落地）
-  - spec `2026-04-24-scfde-bem-decision-feedback-arch.md` 接受准则重写为 "limitation 已知" + 待归档
-  - Phase 3b.4 推广: `test_scfde_discrete_doppler.m` 同模板迁移（待）
-  - Spec 归档：active → archive（待）
+  - spec `2026-04-24-scfde-bem-decision-feedback-arch.md` 接受准则重写为 "limitation 已知" + status archived
+  - **Phase 3b.4 决议：不推广** `test_scfde_discrete_doppler.m`（OFFLINE ORACLE BASELINE，A1 证迁移会重现 50% 灾难，反而失去 oracle 对比基准）；file header L11-23 注释更新指向 A1 结论
+  - Spec 归档：active → archive（commit `c8ccb06` 之后，本日 commit）
 
 ## 2026-04-25
 

@@ -8,13 +8,19 @@
 % 版本: V1.1.0 — 加 benchmark_mode 注入（spec 2026-04-19-e2e-timevarying-baseline）
 % 目的: 验证SC-FDE在离散Doppler/Rician混合信道下是否显著优于Jakes连续谱
 %
-% ⚠ OFFLINE ORACLE BASELINE（2026-04-24 audit 声明）
+% ⚠ OFFLINE ORACLE BASELINE（2026-04-24 audit 声明 / 2026-04-26 Phase 3b.4 决议）
 %   本脚本保留 oracle 参考（sps/GAMP/BEM 观测矩阵均用 all_cp_data），用于离散
 %   Doppler/Rician 信道对比基准。非 production path，不在 E2E benchmark 主路径
 %   （benchmark_e2e_baseline.m 只调 timevarying runner）。
 %   Production 去 oracle 版本: 14_Streaming/rx/modem_decode_scfde.m
-%   架构迁移版本: test_scfde_timevarying.m V2.2（Phase 1+2，commit 2026-04-24）
-%   若未来需要 discrete_doppler 迁移架构 → 合并到 Phase 3b 独立 spec
+%   架构迁移版本: test_scfde_timevarying.m V2.2+ (Phase 1/2/3b.2，commit c8ccb06)
+%
+%   Phase 3b.4 决议（2026-04-26）：决定**不迁移** discrete_doppler 架构。
+%   A1 验证（diag_a1_streaming_decoder_jakes.m）证 14_Streaming production
+%   decoder 在 jakes fd=1Hz 也 ~50%（架构 trade-off，非实现 bug）。
+%   discrete_doppler 同样单训练块 + 时变信道 → 迁移会重现 50% 灾难，
+%   反而失去 oracle baseline 对比基准。
+%   后续若需协议层改动（多训练块/导频 superimposed/超训练块）→ 开新 spec。
 %   CLAUDE.md §2 白名单允许 benchmark baseline 保留 oracle 作算法对比基准。
 
 %% ========== Benchmark mode 注入（2026-04-19） ========== %%
