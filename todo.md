@@ -39,7 +39,7 @@
 | 11 阵列预处理 | `11_ArrayProc/` | 8 | ✅ |
 | 12 Turbo 迭代调度 | `12_IterativeProc/` | 7 | ✅ 5 均衡器 + La_dec_info 反馈修复 |
 | 13 端到端仿真 | `13_SourceCode/` | 27 | 🔶 6 体制 E2E 完成；rx_otfs oracle 已标注但未重写 |
-| 14 流式仿真框架 | `14_Streaming/` | 58 | ✅ P1-P3 完成 + 真同步 + 深色科技风 UI + 8 tab 可视化 |
+| 14 流式仿真框架 | `14_Streaming/` | 70+ | ✅ P1-P3 完成 + P4 scheme routing 4/4 PASS（2026-04-27 移植 codex）+ 真同步 + 深色科技风 UI + 8 tab 可视化 |
 
 ---
 
@@ -137,9 +137,10 @@
 | **OTFS 通带 2D 脉冲整形 Phase 4** | Phase 2 完成 | 端到端 BER 验证待做；spec `2026-04-13-otfs-pulse-shaping.md` |
 | **OTFS PAPR 专项降低** | 待做 | 需 SLM/PTS/削峰等专用技术 |
 | **OTFS 扩散 pilot** | 待做 | spec `2026-04-14-otfs-spread-pilot.md` |
-| **14_Streaming P4** | 待 P3 真同步验收 | 帧头 FH-MFSK + payload 按 scheme 分发 |
-| **14_Streaming P5** | 待 P4 | TX/Channel/RX 三进程并发 |
-| **14_Streaming P6** | 待 P5 | 物理层 AMC（link quality → scheme 自适应）；`amc/` 目录已占位 |
+| ~~**14_Streaming P4 scheme routing**~~ | ✅ 2026-04-27 | spec `active/2026-04-15-streaming-p4-scheme-routing.md`（codex completed）；commit `ef0ed49` 移植 codex 8 文件（common 4 + tx/rx_stream_p4 + channel_simulator_frame + test_p4_scheme_routing）；test 4/4 PASS（mixed-scheme "FHMFSKSCFDEOFDMSCTDEDSSSOTFS" 6 schemes CRC 全 1 + dispatch all 6 + payload CRC fail missing frame + header fail skip）；不动 modem_encode/decode_scfde（保留 claude Phase 4+5）；P4 demo UI 17 文件之前已 done |
+| **14_Streaming P5（三进程并发）** | 待启动 | TX/Channel/RX 三进程并发；codex 已做 rx_daemon_p5/channel_daemon_p5/p5_channel_preset 可借鉴；spec `active/2026-04-15-streaming-p5-concurrent.md` |
+| **14_Streaming P6（AMC）** | 待 P5 | 物理层 AMC（link quality → scheme 自适应）；`amc/` 目录已占位 |
+| **14_Streaming P4 真多普勒** | 待启动 | spec `active/2026-04-22-p4-real-doppler-fork.md`（codex 实施）；从 P3 fork 接 gen_doppler_channel V1.0（时变 α(t) + 多径）；P4 demo UI 已存在但未接 real Doppler |
 
 ### 🟢 低优先（技术债）
 
