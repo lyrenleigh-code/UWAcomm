@@ -52,7 +52,7 @@
 | SC-FDE | V4.1（14/rx）+ V4.0（14/tx） | ✅ | Phase 4+5 协议层突破：cfg.pilot_per_blk=128 → fd=1Hz 47%→3.37% (14×)；pre-Turbo BEM；jakes 时变 limitation 已突破（吞吐损失 50%） |
 | OFDM | V4.3 + est_snr 修复 | ✅ | OMP + nv_post + 跳过 CP + 空子载波 CFO + DD-BEM；去 sps 减法 |
 | SC-TDE | V5.6 | ✅ | V5.4 post-CFO fix + V5.5 fd=1Hz iter=0 + V5.6 HFM-signature calibration 4/5 PASS |
-| OTFS | V2.0 | ✅ | 通带+离散 Doppler（含分数）0%@10dB+，Rician 混合 K=5~20 |
+| OTFS | V5.1 (test_otfs_timevarying) + real (rx_otfs_real) | ✅ + jakes5Hz limitation | 2026-04-27 重启：移植 codex rx_chain 真重写 + spread-pilot + SLM/clip PAPR；5/6 fading SNR≥10dB 全 0%；**jakes5Hz 33-44% 灾难（连续谱物理 limitation，需协议层改动）**；spread-pilot PAPR 16.8→8.9dB |
 | DSSS | V1.2 | ✅ | Rake(MRC)+DBPSK+DCD，96.8bps，static 0%@-15dB+；α=+1e-2 43%→0% post-CFO 修 |
 | FH-MFSK | V1.0 | ✅ | 8-FSK+16 位跳频+能量检测，750bps，唯一全信道可工作 |
 

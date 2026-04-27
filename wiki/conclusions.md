@@ -579,3 +579,11 @@ L484-487 + L590-596 用 `all_cp_data(1:10)` 做相关挑 sps 相位（oracle 泄
   类比 SC-FDE Phase I+J（archive，~10% 灾难率，4 诊断脚本未锁定根因，归档为 known limitation）。SC-TDE 6.7% 比 SC-FDE 10% 更轻。
   **决策**：接受 known limitation 跳过完整 5 层 ablation 调研（Channel 极性 / BCJR 固定点 / Frame timing / CFO 边界 / Soft demap）。如未来场景要求 < 1% seed 灾难率重启 spec。
   **类似机制可借鉴**：estimator-外灾难调研模板（5 层 ablation 设计）适用于其他体制 / 其他 fd 场景。
+
+46. **OTFS real 模式重启验证 + jakes5Hz 连续谱时变 limitation (2026-04-27)**：
+  借鉴 UWAcomm-codex 已 completed 的 3 项 OTFS spec 移植到 claude 分支：rx_chain.rx_otfs 真重写（commit `9e338a1`）+ 扩散 pilot superimposed + SLM/clip PAPR（commit `c9c0601`）。test_multicarrier 24/24 PASS；main_sim_single 6 体制全 0%；test_otfs_timevarying 默认 impulse pilot 实测：
+  - **5/6 fading（static / disc-5Hz / hyb-K{5,10,20}）SNR≥10dB BER 全 0%** — 与 codex 报告"static/disc-5Hz × SNR=10/15/20 coded BER 全 0%"实测一致，validates codex 实施正确
+  - **jakes5Hz SNR={10,15,20} BER 33.23-35.16% 灾难**（impulse pilot），superimposed 更差 42.72-44.23%
+  - **superimposed 优势：PAPR 16.8→8.9dB，数据率 +10%（5357→5902bps），但 BER 不优于 impulse**（弱 K=5/10 hybrid 下轻微退化）
+  **OTFS jakes5Hz 灾难性质**：连续谱时变 + 单 pilot/frame 协议的物理 limitation（与 SC-FDE jakes fd=1Hz 50% 灾难同根因），decoder 层不可解，需协议层改动（如多 pilot 块周期插入，类比 SC-FDE Phase 5 方案 A/E）。
+  **接受 known limitation 归档**（类比 SC-FDE Phase 4+5 已有协议层突破先例可未来重启）。

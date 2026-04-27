@@ -2,6 +2,15 @@
 
 ## 2026-04-27
 
+- **OTFS 工作重启 + e2e 实测（codex 借鉴移植）**
+  - commits `9e338a1` (rx_chain.rx_otfs 真重写 5/6 体制 PASS) + `c9c0601` (扩散 pilot superimposed + SLM/clip PAPR 24/24 PASS)
+  - main_sim_single 6 体制全 0%（OTFS N_info=1857）
+  - test_multicarrier 24/24 PASS（4.4 OTFS PAPR impulse 16.8dB / superimposed 8.9dB）
+  - test_otfs_timevarying impulse 实测：5/6 fading（static / disc-5Hz / hyb-K{5,10,20}）SNR≥10dB BER 全 0%；**jakes5Hz 33-35% 灾难**（连续谱物理 limitation，类比 SC-FDE jakes fd=1Hz 50% 灾难）
+  - superimposed pilot 实测：PAPR + 数据率优势确认（8.9dB / +10% 数据率），但 BER 不优于 impulse；jakes5Hz 更差（42-44%）
+  - feedback memory：feedback_uwacomm_skip_otfs.md 撤销 2026-04-21 skip 决策 → OTFS 重启
+  - conclusions.md 加 #46（OTFS jakes5Hz limitation）
+
 - **SC-TDE fd=1Hz estimator-外灾难 spec 归档为 known limitation**
   - spec `archive/2026-04-27-sctde-fd1hz-estimator-external-disaster.md`（born archived）
   - s15 SNR=20 oracle α 仍 BER=8.90% 灾难率 6.7%（= oracle 上界），与 estimator 解耦
