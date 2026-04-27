@@ -16,10 +16,17 @@ end
 use_oracle = false;
 eq_type = 'lmmse';
 uamp_inner = 5;
+otfs_pulse_type = 'rect';
+otfs_cp_window = 'none';
+otfs_slm_candidates = 1;
+otfs_slm_seed = 0;
+otfs_clip_papr_db = Inf;
+otfs_clip_method = 'clip';
 passband_mode = true;  % true=通带仿真, false=基带仿真
 pilot_mode = 'impulse';   % 'impulse'=A冲激, 'sequence'=B ZC, 'superimposed'=C叠加
                           % 2026-04-21 回滚：sequence 在 SNR=10dB 下 BER=28-32%（regression）
                           % 详见 wiki/modules/13_SourceCode/OTFS调试日志.md
+otfs_superimposed_pilot_power = 0.2;
 
 fprintf('========================================\n');
 if passband_mode
@@ -49,6 +56,28 @@ delay_bins = [0, 1, 3, 5, 8];
 delays_s = delay_bins / sym_rate;
 gains_raw = [1, 0.5*exp(1j*0.5), 0.3*exp(1j*1.2), 0.2*exp(1j*2.0), 0.1*exp(1j*0.8)];
 
+if benchmark_mode
+    if ~exist('bench_channel_profile','var') || isempty(bench_channel_profile)
+        bench_channel_profile = 'custom6';
+    end
+    if ~strcmpi(bench_channel_profile, 'custom6')
+        bench_dir = fullfile(fileparts(fileparts(mfilename('fullpath'))), 'bench_common');
+        addpath(bench_dir);
+        profile_seed = 42;
+        if exist('bench_seed','var') && ~isempty(bench_seed)
+            profile_seed = bench_seed;
+        end
+        [delay_bins, gains_raw] = bench_profile_taps(bench_channel_profile, delay_bins, gains_raw, 'integer', profile_seed);
+        delays_s = delay_bins / sym_rate;
+    end
+    if exist('bench_otfs_pilot_mode','var') && ~isempty(bench_otfs_pilot_mode)
+        pilot_mode = bench_otfs_pilot_mode;
+    end
+    if exist('bench_otfs_superimposed_power','var') && ~isempty(bench_otfs_superimposed_power)
+        otfs_superimposed_pilot_power = bench_otfs_superimposed_power;
+    end
+end
+
 % OTFS参数
 N = 32;          % 多普勒格点
 M = 64;          % 时延格点
@@ -72,8 +101,9 @@ switch pilot_mode
     case 'sequence'  % B: ZC 序列 pilot
         pilot_config = struct('mode','sequence', 'seq_type','zc', 'seq_root',1, ...
             'guard_k',4, 'guard_l',max(delay_bins)+2, 'pilot_value',1);
-    case 'superimposed'  % C: 叠加 pilot
-        pilot_config = struct('mode','superimposed', 'pilot_power',0.2);
+    case 'superimposed'  % C: 叠加/扩散 pilot
+        pilot_config = struct('mode','superimposed', 'pilot_power',otfs_superimposed_pilot_power, ...
+            'guard_k',4, 'guard_l',max(delay_bins)+2);
     otherwise
         error('不支持的 pilot_mode: %s', pilot_mode);
 end
@@ -138,12 +168,42 @@ if benchmark_mode
     if ~exist('bench_scheme_name','var') || isempty(bench_scheme_name)
         bench_scheme_name = 'OTFS';
     end
+    if exist('bench_otfs_pulse_type','var') && ~isempty(bench_otfs_pulse_type)
+        otfs_pulse_type = bench_otfs_pulse_type;
+    end
+    if exist('bench_otfs_cp_window','var') && ~isempty(bench_otfs_cp_window)
+        otfs_cp_window = bench_otfs_cp_window;
+    end
+    if exist('bench_otfs_slm_candidates','var') && ~isempty(bench_otfs_slm_candidates)
+        otfs_slm_candidates = bench_otfs_slm_candidates;
+    end
+    if exist('bench_otfs_slm_seed','var') && ~isempty(bench_otfs_slm_seed)
+        otfs_slm_seed = bench_otfs_slm_seed;
+    end
+    if exist('bench_otfs_clip_papr_db','var') && ~isempty(bench_otfs_clip_papr_db)
+        otfs_clip_papr_db = bench_otfs_clip_papr_db;
+    end
+    if exist('bench_otfs_clip_method','var') && ~isempty(bench_otfs_clip_method)
+        otfs_clip_method = bench_otfs_clip_method;
+    end
     fprintf('[BENCHMARK] snr_list=%s, fading rows=%d, profile=%s, seed=%d, stage=%s\n', ...
             mat2str(snr_list), size(fading_cfgs,1), ...
             bench_channel_profile, bench_seed, bench_stage);
 end
 
 fprintf('OTFS: N=%d x M=%d, CP=%d, df=%.1fHz, fs_bb=%dHz\n', N, M, cp_len, subcarrier_spacing, sym_rate);
+fprintf('Pilot: %s', pilot_mode);
+if strcmp(pilot_mode, 'superimposed')
+    fprintf(' (power=%.3f)', otfs_superimposed_pilot_power);
+end
+fprintf('\n');
+fprintf('Pulse: %s, CP window: %s\n', otfs_pulse_type, otfs_cp_window);
+fprintf('SLM candidates: %d, seed=%d\n', otfs_slm_candidates, otfs_slm_seed);
+if isfinite(otfs_clip_papr_db)
+    fprintf('PAPR clip: target=%.1fdB, method=%s\n', otfs_clip_papr_db, otfs_clip_method);
+else
+    fprintf('PAPR clip: off\n');
+end
 if passband_mode
     fprintf('通带: sps=%d, fs_pb=%dHz, fc=%dHz\n', sps, fs_pb, fc);
 end
@@ -159,7 +219,7 @@ fprintf('--- Loopback验证 ---\n');
 rng(999);
 test_data = constellation(randi(4,1,N_data_slots));
 [dd_test,~,~,~] = otfs_pilot_embed(test_data, N, M, pilot_config);
-[sig_test,~] = otfs_modulate(dd_test, N, M, cp_len, 'dft');
+[sig_test,~] = otfs_modulate(dd_test, N, M, cp_len, 'dft', otfs_pulse_type, otfs_cp_window);
 [dd_recv,~] = otfs_demodulate(sig_test, N, M, cp_len, 'dft');
 err_loopback = max(abs(dd_test(:) - dd_recv(:)));
 fprintf('  mod->demod 误差: %.2e %s\n\n', err_loopback, ...
@@ -169,6 +229,15 @@ fprintf('  mod->demod 误差: %.2e %s\n\n', err_loopback, ...
 ber_matrix = zeros(size(fading_cfgs,1), length(snr_list));
 ber_unc_matrix = zeros(size(fading_cfgs,1), length(snr_list));
 ber_turbo_trace = cell(size(fading_cfgs,1), length(snr_list));
+nmse_matrix = NaN(size(fading_cfgs,1), length(snr_list));
+sync_tau_err_matrix = NaN(size(fading_cfgs,1), length(snr_list));
+runtime_matrix = NaN(size(fading_cfgs,1), length(snr_list));
+slm_papr_before = NaN(size(fading_cfgs,1), 1);
+slm_papr_after = NaN(size(fading_cfgs,1), 1);
+slm_selected = NaN(size(fading_cfgs,1), 1);
+clip_papr_before = NaN(size(fading_cfgs,1), 1);
+clip_papr_after = NaN(size(fading_cfgs,1), 1);
+clip_ratio_matrix = zeros(size(fading_cfgs,1), 1);
 % 保存每配置的真实/估计DD信道（最高SNR时）用于可视化
 ch_diag = struct('h_true',{}, 'h_est',{}, 'path_info',{});
 
@@ -190,7 +259,16 @@ for fi = 1:size(fading_cfgs,1)
     data_sym = constellation(bi2de(reshape(interleaved,2,[]).','left-msb')+1);
 
     [dd_frame, pilot_info, guard_mask, ~] = otfs_pilot_embed(data_sym, N, M, pilot_config);
-    [otfs_signal, ~] = otfs_modulate(dd_frame, N, M, cp_len, 'dft');
+    [dd_frame, otfs_signal, slm_info] = otfs_slm_select(dd_frame, data_indices, N, M, cp_len, ...
+        'dft', otfs_pulse_type, otfs_cp_window, otfs_slm_candidates, otfs_slm_seed + fi);
+    slm_papr_before(fi) = slm_info.papr_before_db;
+    slm_papr_after(fi) = slm_info.papr_after_db;
+    slm_selected(fi) = slm_info.selected;
+    clip_papr_before(fi) = papr_calculate(otfs_signal);
+    if isfinite(otfs_clip_papr_db)
+        [otfs_signal, clip_ratio_matrix(fi)] = papr_clip(otfs_signal, otfs_clip_papr_db, otfs_clip_method);
+    end
+    clip_papr_after(fi) = papr_calculate(otfs_signal);
 
     N_sig = length(otfs_signal);
 
@@ -226,15 +304,35 @@ for fi = 1:size(fading_cfgs,1)
 
     % === Pilot-only信道探测(基带) ===
     dd_pilot_only = zeros(N, M);
-    dd_pilot_only(pilot_info.positions(1,1), pilot_info.positions(1,2)) = pilot_info.values(1);
-    [sig_po, ~] = otfs_modulate(dd_pilot_only, N, M, cp_len, 'dft');
+    switch pilot_mode
+        case 'impulse'
+            dd_pilot_only(pilot_info.positions(1,1), pilot_info.positions(1,2)) = pilot_info.values(1);
+        case 'sequence'
+            for pc_po = 1:size(pilot_info.positions, 1)
+                dd_pilot_only(pilot_info.positions(pc_po,1), pilot_info.positions(pc_po,2)) = pilot_info.values(pc_po);
+            end
+        case 'superimposed'
+            dd_pilot_only = pilot_info.pilot_pattern;
+    end
+    [sig_po, ~] = otfs_modulate(dd_pilot_only, N, M, cp_len, 'dft', otfs_pulse_type, otfs_cp_window);
     rx_po = apply_channel(sig_po, delay_bins, gains_raw, ftype, fparams, sym_rate, fc);
     [Y_dd_po, ~] = otfs_demodulate(rx_po, N, M, cp_len, 'dft');
-    ch_diag(fi).h_true = Y_dd_po / pilot_info.values(1);
+    switch pilot_mode
+        case 'impulse'
+            ch_diag(fi).h_true = Y_dd_po / pilot_info.values(1);
+        case 'sequence'
+            [h_po, ~] = ch_est_otfs_zc(Y_dd_po, pilot_info, N, M);
+            ch_diag(fi).h_true = h_po;
+        case 'superimposed'
+            [h_po, ~] = ch_est_otfs_superimposed(Y_dd_po, pilot_info, N, M, ...
+                struct('iter',1, 'guard_k',4, 'guard_l',max(delay_bins)+2));
+            ch_diag(fi).h_true = h_po;
+    end
 
     fprintf('%-9s|', fname);
 
     for si = 1:length(snr_list)
+        pt_timer = tic;
         snr_db = snr_list(si);
         rng(300+fi*1000+si*100);
 
@@ -244,6 +342,7 @@ for fi = 1:size(fading_cfgs,1)
             frame_rx_noisy = frame_rx_pb + sqrt(noise_pwr) * randn(size(frame_rx_pb));
             % 使用 frame_parse_otfs V2.0: 两级同步+多普勒补偿+基带提取
             [rx_noisy, sync_info] = frame_parse_otfs(frame_rx_noisy, info);
+            sync_tau_err_matrix(fi,si) = sync_info.tau_fine - info.seg.lfm2_start;
             noise_var = mean(abs(rx_clean).^2) * 10^(-snr_db/10);
             if fi == 1 && si == length(snr_list)
                 vis_frame_rx = frame_rx_noisy;
@@ -322,6 +421,11 @@ for fi = 1:size(fading_cfgs,1)
         end
 
         % 3. 导频贡献去除（按 pilot_mode 分别处理）
+        h_true_grid = ch_diag(fi).h_true;
+        den_nmse = norm(h_true_grid(:))^2;
+        if den_nmse > eps
+            nmse_matrix(fi,si) = 10*log10(norm(h_dd(:) - h_true_grid(:))^2 / den_nmse);
+        end
         Y_dd_eq = Y_dd;
         switch pilot_mode
             case {'impulse', 'sequence'}
@@ -398,6 +502,7 @@ for fi = 1:size(fading_cfgs,1)
 
             % 5b. 提取数据符号 → LLR (用后验方差τ_r，比固定nv_dd更准确)
             x_data_soft = x_mean(data_indices);
+            x_data_soft = x_data_soft(:) .* conj(slm_info.data_phase(:));
             nv_llr = max(eq_info.nv_post, 1e-8);
             LLR_eq = zeros(1, M_coded);
             for k=1:N_data_slots
@@ -431,13 +536,14 @@ for fi = 1:size(fading_cfgs,1)
                 prior_var = var_x * ones(N, M);
                 n_fill = min(length(x_bar), N_data_slots);
                 for i_d = 1:n_fill
-                    prior_mean(data_indices(i_d)) = x_bar(i_d);
+                    prior_mean(data_indices(i_d)) = x_bar(i_d) * slm_info.data_phase(i_d);
                 end
             end
         end
 
         % uncoded BER
         x_data_hard = x_hat(data_indices);
+        x_data_hard = x_data_hard(:) .* conj(slm_info.data_phase(:));
         bits_hard = zeros(1, N_data_slots*2);
         for k=1:N_data_slots
             bits_hard(2*k-1) = real(x_data_hard(k)) < 0;
@@ -449,6 +555,7 @@ for fi = 1:size(fading_cfgs,1)
         ber_matrix(fi,si) = ber;
         ber_unc_matrix(fi,si) = ber_unc;
         ber_turbo_trace{fi,si} = ber_trace;
+        runtime_matrix(fi,si) = toc(pt_timer);
         fprintf(' %6.2f%%', ber*100);
     end
     fprintf('  (p=%d)\n', path_info.num_paths);
@@ -469,9 +576,22 @@ if benchmark_mode
     for fi_b = 1:size(fading_cfgs,1)
         for si_b = 1:length(snr_list)
             row = bench_init_row(bench_stage, bench_scheme_name);
-            row.profile          = bench_channel_profile;
             % OTFS fading_cfgs 第 3 列是向量/struct/标量，记录名称到 profile
-            row.profile          = sprintf('%s|%s', bench_channel_profile, fading_cfgs{fi_b,1});
+            slm_tag = sprintf('|slm=%d|sel=%d|slm_papr=%.2f->%.2f', ...
+                otfs_slm_candidates, slm_selected(fi_b), slm_papr_before(fi_b), slm_papr_after(fi_b));
+            if isfinite(otfs_clip_papr_db)
+                clip_tag = sprintf('|clip=%.1f/%s|txpapr=%.2f->%.2f|clipr=%.4f', ...
+                    otfs_clip_papr_db, otfs_clip_method, clip_papr_before(fi_b), ...
+                    clip_papr_after(fi_b), clip_ratio_matrix(fi_b));
+            else
+                clip_tag = sprintf('|clip=off|txpapr=%.2f', clip_papr_after(fi_b));
+            end
+            pilot_tag = sprintf('|pilot=%s', pilot_mode);
+            if strcmp(pilot_mode, 'superimposed')
+                pilot_tag = sprintf('%s:%.3f', pilot_tag, otfs_superimposed_pilot_power);
+            end
+            row.profile          = sprintf('%s|%s%s|pulse=%s|cpwin=%s%s%s', ...
+                bench_channel_profile, fading_cfgs{fi_b,1}, pilot_tag, otfs_pulse_type, otfs_cp_window, slm_tag, clip_tag);
             fd_val = NaN;
             if strcmp(fading_cfgs{fi_b, 2}, 'jakes') && isnumeric(fading_cfgs{fi_b,3})
                 fd_val = fading_cfgs{fi_b,3};
@@ -482,11 +602,11 @@ if benchmark_mode
             row.seed             = bench_seed;
             row.ber_coded        = ber_matrix(fi_b, si_b);
             row.ber_uncoded      = ber_unc_matrix(fi_b, si_b);
-            row.nmse_db          = NaN;
-            row.sync_tau_err     = NaN;
+            row.nmse_db          = nmse_matrix(fi_b, si_b);
+            row.sync_tau_err     = sync_tau_err_matrix(fi_b, si_b);
             row.frame_detected   = 1;
-            row.turbo_final_iter = NaN;
-            row.runtime_s        = NaN;
+            row.turbo_final_iter = num_turbo;
+            row.runtime_s        = runtime_matrix(fi_b, si_b);
             bench_append_csv(bench_csv_path, row);
         end
     end

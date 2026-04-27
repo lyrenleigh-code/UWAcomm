@@ -6,7 +6,7 @@ function benchmark_e2e_baseline(stage, varargin)
 %   stage - 'A1' | 'A2' | 'A3' | 'B' | 'C' | 'D'
 %   可选 name-value：
 %     'schemes',  {...}    限制体制子集（默认 grid.schemes）
-%     'profiles', {...}    限制 profile 子集（默认 {'custom6'}；exponential 需 runner 改造后启用）
+%     'profiles', {...}    限制 profile 子集（默认 grid.profiles）
 %     'csv_path', char     覆盖默认 CSV 输出（默认 tests/bench_results/e2e_baseline_<stage>.csv）
 %     'dry_run',  logical  true 则仅打印 combo 计划不实跑（默认 false）
 %     'continue_on_error', logical  单点失败不中断（默认 true）
@@ -18,8 +18,7 @@ function benchmark_e2e_baseline(stage, varargin)
 %   - fading_cfgs 构造见 bench_build_fading_cfgs.m（各体制列数不同）
 %   - A2 自动跳过 OTFS（DD 框架不支持固定 α）
 %   - B × OTFS 仍使用 test_otfs_timevarying.m runner（其支持 discrete/hybrid）
-%   - 默认 profiles={'custom6'}：runner 实际不切换信道模型，exponential 记录为 meta 但数据等同 custom6
-%     计划在后续 spec 扩展 runner 内部 bench_channel_profile→ch_params 切换
+%   - 默认 profiles 使用 bench_grids.m；exponential 会切换 runner 内部信道 tap
 
 %% 1. 参数解析
 p = inputParser;
@@ -31,8 +30,20 @@ p.addParameter('dry_run', false, @islogical);
 p.addParameter('continue_on_error', true, @islogical);
 p.addParameter('max_combos', Inf, @(x) isnumeric(x) && x > 0);
 p.addParameter('snr_list', [], @isnumeric);
+p.addParameter('otfs_slm_candidates', [], @isnumeric);
+p.addParameter('otfs_slm_seed', [], @isnumeric);
+p.addParameter('otfs_clip_papr_db', [], @isnumeric);
+p.addParameter('otfs_clip_method', 'clip', @ischar);
+p.addParameter('otfs_pilot_mode', '', @ischar);
+p.addParameter('otfs_superimposed_power', [], @isnumeric);
 p.parse(stage, varargin{:});
 stage = upper(p.Results.stage);
+otfs_opts = struct('slm_candidates', p.Results.otfs_slm_candidates, ...
+                   'slm_seed', p.Results.otfs_slm_seed, ...
+                   'clip_papr_db', p.Results.otfs_clip_papr_db, ...
+                   'clip_method', p.Results.otfs_clip_method, ...
+                   'pilot_mode', p.Results.otfs_pilot_mode, ...
+                   'superimposed_power', p.Results.otfs_superimposed_power);
 
 %% 2. 路径与依赖
 this_dir = fileparts(mfilename('fullpath'));
@@ -49,11 +60,13 @@ if ~isempty(p.Results.schemes)
     schemes = p.Results.schemes;
 end
 
-% 默认 profiles 仅 custom6（runner 未根据 bench_channel_profile 切换 ch_params）
+% 默认 profiles 使用 grid.profiles；显式 profiles 可进一步限制 profile 子集
 if ~isempty(p.Results.profiles)
     profiles = p.Results.profiles;
 elseif strcmp(stage, 'B')
     profiles = {};  % B 阶段 profile 由 channel_tag 代替
+elseif isfield(grid, 'profiles')
+    profiles = grid.profiles;
 else
     profiles = {'custom6'};
 end
@@ -139,7 +152,7 @@ for k = 1:total_pts
 
     try
         bench_run_single(stage, c.scheme, c.profile, c.snr_list, ...
-                         c.fading_cfgs, c.seed, csv_path, c.runner_path);
+                         c.fading_cfgs, c.seed, csv_path, c.runner_path, otfs_opts);
         pass_cnt = pass_cnt + 1;
         fprintf('         ✓ pass (%.1fs)\n', toc(t0));
     catch ME

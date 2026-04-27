@@ -457,6 +457,71 @@ catch e
     fail_count = fail_count + 1;
 end
 
+%% 4.3 OTFS SLM data-phase PAPR selection
+try
+    rng(43);
+    N_slm = 8; M_slm = 32; cp_slm = 8;
+    pilot_cfg_slm = struct('mode','impulse', 'pilot_k',4, 'pilot_l',16, ...
+        'guard_k',2, 'guard_l',4, 'pilot_value',1);
+    [~,~,~,data_idx_slm] = otfs_pilot_embed(zeros(1,1), N_slm, M_slm, pilot_cfg_slm);
+    data_slm = constellation_p(randi(4, 1, length(data_idx_slm)));
+    [dd_slm0, ~, ~, ~] = otfs_pilot_embed(data_slm, N_slm, M_slm, pilot_cfg_slm);
+    [sig_slm0, ~] = otfs_modulate(dd_slm0, N_slm, M_slm, cp_slm, 'dft', 'rect', 'none');
+    papr_slm0 = papr_calculate(sig_slm0);
+
+    [~, sig_slm_best, info_slm] = otfs_slm_select(dd_slm0, data_idx_slm, N_slm, M_slm, cp_slm, ...
+        'dft', 'rect', 'none', 16, 1);
+    papr_slm_best = papr_calculate(sig_slm_best);
+    assert(abs(info_slm.papr_before_db - papr_slm0) < 1e-10, 'SLM baseline PAPR mismatch');
+    assert(papr_slm_best <= papr_slm0 + 1e-12, 'SLM should not exceed baseline PAPR');
+    assert(info_slm.papr_reduction_db > 0.5, 'SLM should reduce PAPR for this deterministic frame');
+
+    [dd_slm_rx, ~] = otfs_demodulate(sig_slm_best, N_slm, M_slm, cp_slm, 'dft');
+    data_slm_rx = dd_slm_rx(data_idx_slm) .* conj(info_slm.data_phase(:));
+    err_slm = max(abs(data_slm_rx(:) - data_slm(:)));
+    assert(err_slm < 1e-8, sprintf('SLM loopback correction error %.2e too large', err_slm));
+
+    fprintf('[通过] 4.3 OTFS SLM | PAPR %.1f->%.1fdB, candidate=%d, err=%.2e\n', ...
+        papr_slm0, papr_slm_best, info_slm.selected, err_slm);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 4.3 OTFS SLM | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
+%% 4.4 OTFS superimposed spread-pilot PAPR
+try
+    rng(44);
+    N_sp = 32; M_sp = 64; cp_sp = 32;
+    delay_bins_sp = [0, 1, 3, 5, 8];
+
+    cfg_imp_sp = struct('mode','impulse', 'guard_k',4, ...
+        'guard_l',max(delay_bins_sp)+2, 'pilot_value',1);
+    [~,~,~,data_idx_imp_sp] = otfs_pilot_embed(zeros(1,1), N_sp, M_sp, cfg_imp_sp);
+    cfg_imp_sp.pilot_value = sqrt(length(data_idx_imp_sp));
+    data_imp_sp = constellation_p(randi(4, 1, length(data_idx_imp_sp)));
+    [dd_imp_sp, ~, ~, ~] = otfs_pilot_embed(data_imp_sp, N_sp, M_sp, cfg_imp_sp);
+    [sig_imp_sp, ~] = otfs_modulate(dd_imp_sp, N_sp, M_sp, cp_sp, 'dft', 'rect', 'none');
+    papr_imp_sp = papr_calculate(sig_imp_sp);
+
+    cfg_sup_sp = struct('mode','superimposed', 'pilot_power',0.1);
+    [~,~,~,data_idx_sup_sp] = otfs_pilot_embed(zeros(1,1), N_sp, M_sp, cfg_sup_sp);
+    data_sup_sp = constellation_p(randi(4, 1, length(data_idx_sup_sp)));
+    [dd_sup_sp, ~, ~, ~] = otfs_pilot_embed(data_sup_sp, N_sp, M_sp, cfg_sup_sp);
+    [sig_sup_sp, ~] = otfs_modulate(dd_sup_sp, N_sp, M_sp, cp_sp, 'dft', 'rect', 'none');
+    papr_sup_sp = papr_calculate(sig_sup_sp);
+
+    assert(papr_sup_sp <= 10.0, 'Spread pilot PAPR should stay under 10dB for this deterministic frame');
+    assert(papr_imp_sp - papr_sup_sp > 5.0, 'Spread pilot should reduce PAPR by more than 5dB vs impulse');
+
+    fprintf('[通过] 4.4 OTFS spread pilot PAPR | impulse=%.1fdB, superimposed=%.1fdB\n', ...
+        papr_imp_sp, papr_sup_sp);
+    pass_count = pass_count + 1;
+catch e
+    fprintf('[失败] 4.4 OTFS spread pilot PAPR | %s\n', e.message);
+    fail_count = fail_count + 1;
+end
+
 %% ==================== 五、可视化 ==================== %%
 fprintf('\n--- 5. 可视化 ---\n\n');
 
@@ -575,12 +640,13 @@ try
     try scfde_add_cp([], 128); catch; caught=caught+1; end
     try scfde_remove_cp([], 128, 32); catch; caught=caught+1; end
     try otfs_modulate([], 8, 32); catch; caught=caught+1; end
+    try otfs_slm_select([], [], 8, 32, 8, 'dft', 'rect', 'none', 2, 1); catch; caught=caught+1; end
     try papr_calculate([]); catch; caught=caught+1; end
     try papr_clip([]); catch; caught=caught+1; end
 
-    assert(caught == 9, '部分函数未对空输入报错');
+    assert(caught == 10, '部分函数未对空输入报错');
 
-    fprintf('[通过] 6.1 空输入拒绝 | 9个函数均正确报错\n');
+    fprintf('[通过] 6.1 空输入拒绝 | 10个函数均正确报错\n');
     pass_count = pass_count + 1;
 catch e
     fprintf('[失败] 6.1 空输入 | %s\n', e.message);
