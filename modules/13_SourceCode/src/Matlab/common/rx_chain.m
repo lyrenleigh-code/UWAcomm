@@ -17,7 +17,11 @@ function [bits_out, rx_info] = rx_chain(rx_signal, params, tx_info, ch_info)
 proj_root = fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath'))))));
 addpath(fullfile(proj_root, '02_ChannelCoding', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '03_Interleaving', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '06_MultiCarrier', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '07_ChannelEstEq', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '08_Sync', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '09_Waveform', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '10_DopplerProc', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '12_IterativeProc', 'src', 'Matlab'));
 
 rx_info.scheme = params.scheme;
@@ -25,8 +29,10 @@ noise_var = ch_info.noise_var;
 if noise_var == 0, noise_var = 1e-10; end
 
 %% ========== 通带→基带（下变频+匹配滤波+定时+下采样） ========== %%
-if isfield(tx_info, 'is_passband') && tx_info.is_passband
-    addpath(fullfile(proj_root, '09_Waveform', 'src', 'Matlab'));
+is_real_otfs = strcmpi(params.scheme, 'OTFS') && ...
+    isfield(params, 'rx') && isfield(params.rx, 'otfs_mode') && ...
+    strcmpi(params.rx.otfs_mode, 'real');
+if isfield(tx_info, 'is_passband') && tx_info.is_passband && ~is_real_otfs
     sps = params.waveform.sps;
     span = params.waveform.span;
 
@@ -386,21 +392,158 @@ end
 %% rx_otfs_real — 真实接收链路（无 oracle）
 %% 参考 test_otfs_timevarying.m 的完整路径
 %% ============================================================
-function bits_out = rx_otfs_real(rx_signal, params, tx_info, ch_info) %#ok<INUSD>
-% 真实 OTFS 接收：rx_signal 应为通带实信号（非占位）
-% 前提：main_sim_single 已开启真实 passband 生成 + 信道施加
-%
-% 处理链：
-%   1. downconvert → bb_rx（复基带）
-%   2. otfs_demodulate → Y_dd (N×M)
-%   3. ch_est_otfs_dd → h_dd / path_info（从导频估计）
-%   4. guard 区能量 → noise_var
-%   5. turbo_equalizer_otfs
-%
-% 实现状态：骨架占位，详细逻辑待 main_sim_single 改造完成后填充
-% （独立 spec: 2026-04-13-otfs-sync-architecture.md 落地）
-    error('rx_otfs_real:not_implemented', ...
-        ['rx_otfs_real 未实现。 当前 main_sim_single 的 OTFS 模式仍走 DD 域 oracle。\n' ...
-         '生产用户请直接参考 test_otfs_timevarying.m 的完整通带接收链路。\n' ...
-         '本函数将在 spec 2026-04-13-otfs-sync-architecture 落地时填充。']);
+function bits_out = rx_otfs_real(rx_signal, params, tx_info, ch_info)
+    N = params.tx.N_doppler;
+    M = params.tx.M_delay;
+    cp_len = params.tx.cp_len;
+
+    if ~isfield(tx_info, 'frame_info')
+        error('rx_otfs_real:missing_frame_info', ...
+            'tx_info.frame_info is required for real OTFS frame parsing.');
+    end
+    if ~isfield(tx_info, 'otfs_pilot_info') || ~isfield(tx_info, 'otfs_data_indices')
+        error('rx_otfs_real:missing_pilot_info', ...
+            'Real OTFS requires tx_info.otfs_pilot_info and tx_info.otfs_data_indices.');
+    end
+
+    [otfs_bb, ~] = frame_parse_otfs(rx_signal, tx_info.frame_info);
+    [Y_dd, ~] = otfs_demodulate(otfs_bb, N, M, cp_len, 'dft');
+
+    pilot_info = tx_info.otfs_pilot_info;
+    data_indices = tx_info.otfs_data_indices(:).';
+    if isfield(tx_info, 'otfs_guard_mask')
+        guard_mask = tx_info.otfs_guard_mask;
+    else
+        guard_mask = true(N, M);
+        guard_mask(data_indices) = false;
+    end
+
+    pilot_mode = 'impulse';
+    if isfield(pilot_info, 'mode') && ~isempty(pilot_info.mode)
+        pilot_mode = lower(pilot_info.mode);
+    end
+    if isfield(params.tx, 'pilot_config')
+        pilot_config = params.tx.pilot_config;
+    else
+        pilot_config = struct('guard_k',4, 'guard_l',10);
+    end
+
+    switch pilot_mode
+        case 'impulse'
+            [h_dd, path_info] = ch_est_otfs_dd(Y_dd, pilot_info, N, M);
+        case 'sequence'
+            [h_dd, path_info] = ch_est_otfs_zc(Y_dd, pilot_info, N, M);
+        case 'superimposed'
+            [h_dd, path_info] = ch_est_otfs_superimposed(Y_dd, pilot_info, N, M, ...
+                struct('iter',3, 'guard_k',4, 'guard_l',10));
+        otherwise
+            error('rx_otfs_real:unsupported_pilot', ...
+                'Unsupported OTFS pilot mode: %s', pilot_mode);
+    end
+
+    nv_dd = max(ch_info.noise_var, 1e-8);
+    if strcmp(pilot_mode, 'impulse') && isfield(pilot_config, 'guard_k') && ...
+            isfield(pilot_config, 'guard_l') && ~isempty(pilot_info.positions)
+        pk_pos = pilot_info.positions(1,1);
+        pl_pos = pilot_info.positions(1,2);
+        detected_dl = unique(path_info.delay_idx);
+        noise_mask = false(N, M);
+        for dk_n = -pilot_config.guard_k:pilot_config.guard_k
+            for dl_n = 0:pilot_config.guard_l
+                if ~ismember(dl_n, detected_dl)
+                    kk_n = mod(pk_pos-1+dk_n, N)+1;
+                    ll_n = mod(pl_pos-1+dl_n, M)+1;
+                    noise_mask(kk_n, ll_n) = true;
+                end
+            end
+        end
+        if any(noise_mask(:))
+            nv_dd = max(mean(abs(Y_dd(noise_mask)).^2), 1e-8);
+        end
+    end
+
+    Y_dd_eq = Y_dd;
+    switch pilot_mode
+        case {'impulse', 'sequence'}
+            for pp = 1:path_info.num_paths
+                dl_p = path_info.delay_idx(pp);
+                dk_p = path_info.doppler_idx(pp);
+                for pc_i = 1:size(pilot_info.positions, 1)
+                    pk_c = pilot_info.positions(pc_i, 1);
+                    pl_c = pilot_info.positions(pc_i, 2);
+                    pv_c = pilot_info.values(min(pc_i, numel(pilot_info.values)));
+                    kk_r = mod(pk_c-1+dk_p, N)+1;
+                    ll_r = mod(pl_c-1+dl_p, M)+1;
+                    Y_dd_eq(kk_r, ll_r) = Y_dd_eq(kk_r, ll_r) - path_info.gain(pp) * pv_c;
+                end
+            end
+        case 'superimposed'
+            h_origin = zeros(N, M);
+            for pp = 1:path_info.num_paths
+                kk_o = mod(path_info.doppler_idx(pp), N) + 1;
+                ll_o = mod(path_info.delay_idx(pp), M) + 1;
+                h_origin(kk_o, ll_o) = path_info.gain(pp);
+            end
+            Y_dd_eq = Y_dd - ifft2(fft2(pilot_info.pilot_pattern) .* fft2(h_origin));
+    end
+
+    constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
+    M_coded = length(tx_info.interleaved);
+    N_data_slots = length(data_indices);
+    num_turbo = max(1, params.rx.turbo_iter);
+    eq_type = 'lmmse';
+    if isfield(params.rx, 'eq_type') && ~isempty(params.rx.eq_type)
+        eq_type = lower(params.rx.eq_type);
+    end
+    uamp_inner = 5;
+    if isfield(params.rx, 'uamp_inner') && ~isempty(params.rx.uamp_inner)
+        uamp_inner = params.rx.uamp_inner;
+    end
+
+    prior_mean = [];
+    prior_var = [];
+    bits_out = zeros(1, params.N_info);
+    for turbo_iter = 1:num_turbo
+        if strcmp(eq_type, 'uamp')
+            [~, ~, x_mean, eq_info] = eq_otfs_uamp(Y_dd_eq, h_dd, path_info, N, M, ...
+                nv_dd, uamp_inner, constellation, prior_mean, prior_var);
+        else
+            [~, ~, x_mean, eq_info] = eq_otfs_lmmse(Y_dd_eq, h_dd, path_info, N, M, ...
+                nv_dd, 1, constellation, prior_mean, prior_var);
+        end
+
+        x_data_soft = x_mean(data_indices);
+        nv_llr = max(eq_info.nv_post, 1e-8);
+        LLR_eq = zeros(1, M_coded);
+        n_llr_sym = min(N_data_slots, floor(M_coded / 2));
+        for k = 1:n_llr_sym
+            LLR_eq(2*k-1) = -2*sqrt(2)*real(x_data_soft(k)) / nv_llr;
+            LLR_eq(2*k)   = -2*sqrt(2)*imag(x_data_soft(k)) / nv_llr;
+        end
+        LLR_eq = max(min(LLR_eq, 30), -30);
+
+        LLR_coded = random_deinterleave(LLR_eq, tx_info.perm);
+        [~, Lp_info, Lp_coded] = siso_decode_conv(LLR_coded, [], ...
+            params.codec.gen_polys, params.codec.constraint_len, params.codec.decode_mode);
+        bits_out = double(Lp_info > 0);
+
+        if turbo_iter < num_turbo
+            Lp_coded_inter = random_interleave(Lp_coded, params.codec.interleave_seed);
+            if length(Lp_coded_inter) < M_coded
+                Lp_coded_pad = zeros(1, M_coded);
+                Lp_coded_pad(1:length(Lp_coded_inter)) = Lp_coded_inter;
+                Lp_coded_inter = Lp_coded_pad;
+            else
+                Lp_coded_inter = Lp_coded_inter(1:M_coded);
+            end
+            [x_bar, var_x] = soft_mapper(Lp_coded_inter, 'qpsk');
+            var_x = max(var_x, nv_dd);
+            prior_mean = zeros(N, M);
+            prior_var = var_x * ones(N, M);
+            n_fill = min(length(x_bar), N_data_slots);
+            prior_mean(data_indices(1:n_fill)) = x_bar(1:n_fill);
+            prior_var(guard_mask) = var_x;
+        end
+    end
+    return;
 end

@@ -20,6 +20,9 @@ function [tx_signal, tx_info] = tx_chain(params)
 proj_root = fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath'))))));
 addpath(fullfile(proj_root, '02_ChannelCoding', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '03_Interleaving', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '06_MultiCarrier', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '08_Sync', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '09_Waveform', 'src', 'Matlab'));
 
 constellation = [1+1j, 1-1j, -1+1j, -1-1j] / sqrt(2);
 bits2qpsk = @(b) constellation(bi2de(reshape(b(1:floor(length(b)/2)*2),2,[]).','left-msb')+1);
@@ -42,7 +45,13 @@ switch upper(params.scheme)
             M_coded = params.mod.bits_per_sym * params.tx.N_data_sc;
         end
     case 'OTFS'
-        M_coded = params.mod.bits_per_sym * params.tx.N_doppler * params.tx.M_delay;
+        otfs_real_mode = isfield(params, 'rx') && isfield(params.rx, 'otfs_mode') && ...
+            strcmpi(params.rx.otfs_mode, 'real');
+        if otfs_real_mode && isfield(params.tx, 'N_data_slots')
+            M_coded = params.mod.bits_per_sym * params.tx.N_data_slots;
+        else
+            M_coded = params.mod.bits_per_sym * params.tx.N_doppler * params.tx.M_delay;
+        end
     otherwise
         M_coded = length(coded_bits);
 end
@@ -98,27 +107,42 @@ switch upper(params.scheme)
         tx_info.tx_data_only = x_block;
 
     case 'OTFS'
-        % OTFS：DD域数据→ISFFT→时域+CP→通带
+        % OTFS：DD域数据→ISFFT→时域+CP
         N = params.tx.N_doppler;
         M = params.tx.M_delay;
-        n_dd = N * M;
-        dd_vec = zeros(1, n_dd);
-        dd_vec(1:min(length(symbols), n_dd)) = symbols(1:min(length(symbols), n_dd));
-        dd_data = reshape(dd_vec, M, N).';  % NxM
+        cp_len = params.tx.cp_len;
+        otfs_real_mode = isfield(params, 'rx') && isfield(params.rx, 'otfs_mode') && ...
+            strcmpi(params.rx.otfs_mode, 'real');
 
-        % ISFFT: DD→TF→时域
-        X_tf = fft(dd_data, N, 1);
-        x_time = reshape(ifft(X_tf, M, 2).', 1, []);
-        if isfield(params.tx, 'cp_len') && params.tx.cp_len > 0
-            cp = x_time(end-params.tx.cp_len+1:end);
-            tx_signal = [cp, x_time];
+        if otfs_real_mode
+            if isfield(params.tx, 'pilot_config')
+                pilot_config = params.tx.pilot_config;
+            else
+                pilot_config = struct('mode','impulse', 'guard_k',4, 'guard_l',10, ...
+                    'pilot_value',1);
+                [~,~,~,tmp_data_idx] = otfs_pilot_embed(zeros(1,1), N, M, pilot_config);
+                pilot_config.pilot_value = sqrt(length(tmp_data_idx));
+            end
+            [dd_data, pilot_info, guard_mask, data_indices] = ...
+                otfs_pilot_embed(symbols, N, M, pilot_config);
+            [tx_signal, otfs_mod_info] = otfs_modulate(dd_data, N, M, cp_len, 'dft');
+            tx_info.otfs_pilot_info = pilot_info;
+            tx_info.otfs_guard_mask = guard_mask;
+            tx_info.otfs_data_indices = data_indices;
+            tx_info.otfs_mod_info = otfs_mod_info;
         else
-            tx_signal = x_time;
+            n_dd = N * M;
+            dd_vec = zeros(1, n_dd);
+            dd_vec(1:min(length(symbols), n_dd)) = symbols(1:min(length(symbols), n_dd));
+            dd_data = reshape(dd_vec, M, N).';  % NxM
+            [tx_signal, otfs_mod_info] = otfs_modulate(dd_data, N, M, cp_len, 'dft');
+            tx_info.dd_vec = dd_vec;
+            tx_info.otfs_mod_info = otfs_mod_info;
         end
+
         tx_info.training = [];
-        tx_info.tx_data_only = x_time;
+        tx_info.tx_data_only = tx_signal;
         tx_info.dd_data = dd_data;
-        tx_info.dd_vec = dd_vec;
 
     case 'DSSS'
         % BPSK扩频
@@ -169,11 +193,32 @@ tx_info.perm = perm;
 tx_info.baseband_signal = tx_signal;  % 保存复基带信号
 
 %% ========== 7. 脉冲成形 + 上变频（生成通带实信号） ========== %%
-addpath(fullfile(proj_root, '09_Waveform', 'src', 'Matlab'));
 if strcmpi(params.scheme, 'OTFS')
-    % OTFS：DD域直接处理（信道在rx_chain中以DD域circshift施加）
-    tx_info.is_passband = false;
-    tx_info.otfs_dd_mode = true;
+    otfs_real_mode = isfield(params, 'rx') && isfield(params.rx, 'otfs_mode') && ...
+        strcmpi(params.rx.otfs_mode, 'real');
+    if otfs_real_mode
+        frame_p = struct('N',params.tx.N_doppler, ...
+            'M',params.tx.M_delay, ...
+            'cp_len',params.tx.cp_len, ...
+            'sps',params.waveform.sps, ...
+            'fs_bb',params.sym_rate, ...
+            'fc',params.fc, ...
+            'bw',params.sym_rate * 1.3, ...
+            'T_hfm',0.05, ...
+            'T_lfm',0.02, ...
+            'guard_ms',5, ...
+            'sync_gain',0.7);
+        [passband, frame_info] = frame_assemble_otfs(tx_signal, frame_p);
+        tx_signal = passband;
+        tx_info.passband_signal = passband;
+        tx_info.frame_info = frame_info;
+        tx_info.is_passband = true;
+        tx_info.otfs_dd_mode = false;
+    else
+        % Legacy oracle baseline: DD-domain channel is applied in rx_chain.
+        tx_info.is_passband = false;
+        tx_info.otfs_dd_mode = true;
+    end
 elseif true
     % 其他体制：RRC脉冲成形+上变频
 

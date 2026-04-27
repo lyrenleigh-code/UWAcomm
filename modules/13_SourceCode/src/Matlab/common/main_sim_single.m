@@ -10,7 +10,9 @@ fprintf('========================================\n\n');
 proj_root = fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath'))))));
 addpath(fullfile(proj_root, '02_ChannelCoding', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '03_Interleaving', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '06_MultiCarrier', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '07_ChannelEstEq', 'src', 'Matlab'));
+addpath(fullfile(proj_root, '08_Sync', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '12_IterativeProc', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '09_Waveform', 'src', 'Matlab'));
 addpath(fullfile(proj_root, '10_DopplerProc', 'src', 'Matlab'));
@@ -49,7 +51,7 @@ for si = 1:length(schemes)
                 'gains_init', params.channel.gains / sqrt(sum(abs(params.channel.gains).^2)), ...
                 'noise_var', 0, 'fs', params.channel.fs, 'fading_type', 'static');
         else
-            % 其他体制：信道在通带施加
+            % 真实通带路径：OTFS real 与其他体制统一经过 gen_uwa_channel
             [rx_signal, ch_info] = gen_uwa_channel(tx_signal, params.channel);
         end
         ch_info_list{si} = ch_info;

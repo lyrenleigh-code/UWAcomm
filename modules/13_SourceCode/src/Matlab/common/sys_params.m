@@ -22,6 +22,8 @@ function params = sys_params(scheme, snr_db)
 if nargin < 2 || isempty(snr_db), snr_db = 10; end
 if nargin < 1 || isempty(scheme), scheme = 'SC-FDE'; end
 
+proj_root = fileparts(fileparts(fileparts(fileparts(fileparts(mfilename('fullpath'))))));
+
 %% ========== 公共参数 ========== %%
 params.scheme = upper(scheme);
 params.snr_db = snr_db;
@@ -106,16 +108,29 @@ switch upper(scheme)
         params.mod.bits_per_sym = 1;
 
     case 'OTFS'
-        params.tx.N_doppler = 16;        % 多普勒格点
+        addpath(fullfile(proj_root, '06_MultiCarrier', 'src', 'Matlab'));
+
+        params.tx.N_doppler = 32;        % 多普勒格点
         params.tx.M_delay = 64;          % 时延格点（MP复杂度O(P·NM)，大格点收敛慢）
         params.tx.use_cp = true;
         params.tx.cp_len = 32;
-        N_dd = params.tx.N_doppler * params.tx.M_delay;
-        M_coded = 2 * N_dd;
+        params.tx.pilot_mode = 'impulse';
+        params.tx.pilot_config = struct('mode','impulse', ...
+            'guard_k',4, ...
+            'guard_l',max(params.channel.sym_delays)+2, ...
+            'pilot_value',1);
+        [~,~,~,otfs_data_indices] = otfs_pilot_embed(zeros(1,1), ...
+            params.tx.N_doppler, params.tx.M_delay, params.tx.pilot_config);
+        params.tx.N_data_slots = length(otfs_data_indices);
+        params.tx.pilot_config.pilot_value = sqrt(params.tx.N_data_slots);
+
+        M_coded = params.mod.bits_per_sym * params.tx.N_data_slots;
         params.N_info = M_coded / 2 - (params.codec.constraint_len - 1);
-        params.rx.eq_type = 'mp';
+        params.rx.otfs_mode = 'real';
+        params.rx.eq_type = 'lmmse';
         params.rx.mp_iters = 20;
-        params.rx.turbo_iter = 6;
+        params.rx.uamp_inner = 5;
+        params.rx.turbo_iter = 3;
         % OTFS不加RRC脉冲成形（ISFFT自然带限），使用公共SNR
 
     case 'FH-MFSK'
