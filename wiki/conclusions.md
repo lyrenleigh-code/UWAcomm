@@ -573,3 +573,9 @@ L484-487 + L590-596 用 `all_cp_data(1:10)` 做相关挑 sps 相位（oracle 泄
   **失败方案**：Phase 4 (方案 A 多 train block 但 RX 用单块 GAMP H_init) fd=1Hz K=4 49.97% FAIL；Phase 4-revision (4 train + pre-Turbo BEM) fd=1Hz K=4 18.31% 部分改善但未达 < 5%（obs 数 152 远不及方案 E 1178）；fd_est_pretturbo 10→20 几乎无效（auto Q 不是瓶颈）。
   **已知 limitation**：吞吐损失 50%（物理代价由 max_tau/blk_fft 比决定）；fd=5Hz 低 SNR (5-10dB) BEM 噪声敏感（mean 13.80% > 10% V5c 准则，需 SNR≥15dB 稳定工作）；pilot < blk_cp 不 work。
   详见 [[modules/13_SourceCode/SC-FDE调试日志]] V3.0。
+
+45. **SC-TDE fd=1Hz s15 oracle 8.90% 灾难归档为 known limitation (2026-04-27)**：
+  spec `archive/2026-04-27-sctde-fd1hz-estimator-external-disaster.md`（born archived）。V5.6 4/5 PASS 后残余 estimator-外灾难：seed=15 × fd=1Hz × SNR=20 × oracle α 仍 BER=8.90%，灾难率 1/15=6.7% = oracle 上界。**与 estimator 偏差解耦**（H4 实验 oracle α 已确认）。
+  类比 SC-FDE Phase I+J（archive，~10% 灾难率，4 诊断脚本未锁定根因，归档为 known limitation）。SC-TDE 6.7% 比 SC-FDE 10% 更轻。
+  **决策**：接受 known limitation 跳过完整 5 层 ablation 调研（Channel 极性 / BCJR 固定点 / Frame timing / CFO 边界 / Soft demap）。如未来场景要求 < 1% seed 灾难率重启 spec。
+  **类似机制可借鉴**：estimator-外灾难调研模板（5 层 ablation 设计）适用于其他体制 / 其他 fd 场景。

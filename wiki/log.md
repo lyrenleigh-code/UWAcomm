@@ -1,5 +1,20 @@
 # Wiki 操作日志
 
+## 2026-04-27
+
+- **SC-TDE fd=1Hz estimator-外灾难 spec 归档为 known limitation**
+  - spec `archive/2026-04-27-sctde-fd1hz-estimator-external-disaster.md`（born archived）
+  - s15 SNR=20 oracle α 仍 BER=8.90% 灾难率 6.7%（= oracle 上界），与 estimator 解耦
+  - 类比 SC-FDE Phase I+J 归档先例（~10% 灾难率），SC-TDE 6.7% 更轻
+  - 5 层 ablation 设计（Channel/BCJR/Timing/CFO/Demap）保留供未来重启
+  - conclusions.md 加 #45
+  - todo.md L109/L110 候选 spec 行改为 ~~删除线~~ 已归档
+
+- **L0 deterministic α bias 校正待办跳过**
+  - V5.6 HFM-signature calibration 已在 fd=1Hz 缩减 L0 bias 8.4×（1.52e-5→1.80e-6），主要场景已解决
+  - fd=0 BER 已 0%、fd=5 物理极限，剩余场景边际收益低
+  - 不立 spec；todo.md L109 改为 ~~删除线~~
+
 ## 2026-04-26
 
 - **SC-TDE fd=1Hz α estimator fix spec 归档（4/5 PASS）**
