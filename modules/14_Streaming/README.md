@@ -1,7 +1,8 @@
 # 14_Streaming — 流式通信仿真框架
 
-> **状态**：骨架阶段（2026-04-15），Phase 1 实施中
+> **状态**：P1-P4 完成（2026-05-01），P5 三进程并发 + P6 AMC 待启动
 > **Master Spec**：`specs/active/2026-04-15-streaming-framework-master.md`
+> **里程碑**：P1 (FH-MFSK loopback) → P2 (流式帧检测) → P3 (统一 modem API + 6 体制 + 深色 UI + 真同步) → P4 (scheme routing + 真多普勒 + Jakes + α refinement + bypass=ON 路径修复)
 
 ## 目的
 
