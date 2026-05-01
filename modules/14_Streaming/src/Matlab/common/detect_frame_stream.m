@@ -78,11 +78,17 @@ end
 det.search_abs_lo = search_abs_lo;
 det.search_abs_hi = search_abs_hi;
 
-%% 4. 提取 passband 段 → downconvert 到基带
-rx_pb_seg = fifo(search_abs_lo : search_abs_hi);
+%% 4. 提取段 → 若是 passband real 则下变频；若已是 complex baseband（bypass_rf=ON 路径）直接用
+% 2026-04-30 fix: 之前无脑 downconvert，bypass_rf=ON 把 complex baseband 当 passband 处理
+%                 → 模板对不上 → fs_pos 错位 → 所有 scheme 复基带模式解错
+rx_seg = fifo(search_abs_lo : search_abs_hi);
 bw_bb = max(bw * 1.2, 2000);  % 基带带宽足够包住前导码
-[bb_raw, ~] = downconvert(rx_pb_seg, fs, fc, bw_bb);
-bb_raw = bb_raw(:).';
+if isreal(rx_seg)
+    [bb_raw, ~] = downconvert(rx_seg, fs, fc, bw_bb);
+    bb_raw = bb_raw(:).';
+else
+    bb_raw = rx_seg(:).';   % 已是 complex baseband，跳过下变频
+end
 
 %% 5. 生成 HFM+ / HFM- 基带模板
 t_pre = (0:N_pre-1) / fs;

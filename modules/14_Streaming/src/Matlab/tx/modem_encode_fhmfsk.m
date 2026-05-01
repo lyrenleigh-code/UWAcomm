@@ -68,5 +68,6 @@ meta.N_pad           = N_pad;
 meta.samples_per_sym = cfg.samples_per_sym;
 meta.hop_pattern     = hop_pattern;
 meta.N_info          = N_info;
+meta.N_shaped        = N_samples;   % 2026-04-30: 与其他 5 体制 meta 对齐，供 P4 UI 通带路径切 body_bb_rx
 
 end
