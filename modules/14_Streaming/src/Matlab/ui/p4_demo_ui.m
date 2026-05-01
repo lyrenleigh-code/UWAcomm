@@ -33,6 +33,8 @@ addpath(fullfile(modules_root, '08_Sync',          'src', 'Matlab'));
 addpath(fullfile(modules_root, '09_Waveform',      'src', 'Matlab'));
 addpath(fullfile(modules_root, '10_DopplerProc',   'src', 'Matlab'));
 addpath(fullfile(modules_root, '12_IterativeProc', 'src', 'Matlab'));
+% 2026-04-28：加 13_SourceCode/common 供 gen_uwa_channel（Jakes 衰落信道，本 spec 接通 fading_dd 控件）
+addpath(fullfile(modules_root, '13_SourceCode',    'src', 'Matlab', 'common'));
 
 %% ---- 全局状态 ----
 app = struct();
@@ -861,10 +863,14 @@ function on_transmit()
         end
 
         % --- 应用参数 ---
+        % V2.0 (2026-04-28)：加 fading_type/fd_hz 透传，让 UI 衰落选项真正影响
+        % sys.{scheme}.fading_type / fd_hz（V1.0 hardcode static/0 修复）
         ui_vals = struct( ...
-            'blk_fft',    parse_lead_int(app.blk_dd.Value), ...
-            'turbo_iter', app.iter_edit.Value, ...
-            'payload',    parse_lead_int(app.pl_dd.Value) );
+            'blk_fft',     parse_lead_int(app.blk_dd.Value), ...
+            'turbo_iter',  app.iter_edit.Value, ...
+            'payload',     parse_lead_int(app.pl_dd.Value), ...
+            'fading_type', app.fading_dd.Value, ...
+            'fd_hz',       app.jakes_fd_edit.Value );
         [N_info, app.sys] = p4_apply_scheme_params(sch, app.sys, ui_vals);
 
         % --- 信源：文本 -> bits ---
@@ -892,42 +898,90 @@ function on_transmit()
         [frame_bb, frame_meta] = assemble_physical_frame(body_bb, app.sys);
         body_offset = length(frame_bb) - length(body_bb);  % 前导码占用样本数
 
-        % --- 基带信道（P4 V1.2：严格对齐 P3 顺序 conv→resample→phase）---
-        % P3 物理模型：多径延时在原 fs 时间轴做 conv，然后整体 Doppler 重采样+载波相位。
-        % 若先 resample 再 per-path 延时叠加（gen_doppler_channel 原结构），则各 path 的
-        % 延时偏差不同（≈ 1/(1+α) - α·τ_p/(1+α) 样本），RX channel est 每 tap 错位 →
-        % turbo 追不上。诊断：diag_p3_vs_p4_frame_results.txt 6径 α=2e-3 RMS=0.43。
-        %
-        % 故本版在 p4 层拆两步：
-        %   1) conv(frame_bb, h_tap)  — 多径（静态信道属性，与运动无关）
-        %   2) gen_doppler_channel(single-path) — 时间伸缩 + α(t) 时变 + fc 相位
+        % --- 基带信道（V2.0 2026-04-28：fading_dd 接通分发）---
+        % static 路径：现有 P4 V1.2（多径 conv → gen_doppler_channel α(t) + 静态多径）
+        % jakes 路径：gen_uwa_channel（Jakes 多径衰落 + bulk Doppler，13/common）
         [h_tap, paths, ch_label] = p4_channel_tap(sch, app.sys, app.preset_dd.Value);
         dop_hz  = app.doppler_edit.Value;
         alpha_b = dop_hz / app.sys.fc;                 % 物理 α = v/c
-        % P4 Step S2: 从 UI 读取时变多普勒参数
-        tv = struct( ...
-            'enable',     logical(app.tv_enable_cb.Value) && ~strcmp(app.tv_model_dd.Value, 'constant'), ...
-            'model',      app.tv_model_dd.Value, ...
-            'drift_rate', app.tv_drift_edit.Value * 1e-6, ...
-            'jitter_std', app.tv_jitter_edit.Value * 1e-6 );
-        % Step 1: 多径 conv（原 fs 时间轴，与 P3 一致）
-        frame_mp = conv(frame_bb, h_tap);
-        frame_mp = frame_mp(1:length(frame_bb));
-        % Step 2: 对多径输出做 Doppler（用单径 {0,1} 让 gen_doppler_channel 只负责时间伸缩+相位）
-        paths_single = struct('delays', 0, 'gains', 1);
-        [frame_ch_raw, ch_info] = gen_doppler_channel( ...
-            frame_mp, app.sys.fs, alpha_b, paths_single, Inf, tv, app.sys.fc);
         L_bb = length(frame_bb);
-        if length(frame_ch_raw) >= L_bb
-            frame_ch = frame_ch_raw(1:L_bb);
+
+        fading_str = app.fading_dd.Value;
+        if startsWith(fading_str, 'static')
+            %% ===== 静态多径路径（保留现有架构）=====
+            % P3 物理模型：多径延时在原 fs 时间轴做 conv，然后整体 Doppler 重采样+载波相位。
+            % 若先 resample 再 per-path 延时叠加（gen_doppler_channel 原结构），则各 path 的
+            % 延时偏差不同（≈ 1/(1+α) - α·τ_p/(1+α) 样本），RX channel est 每 tap 错位 →
+            % turbo 追不上。诊断：diag_p3_vs_p4_frame_results.txt 6径 α=2e-3 RMS=0.43。
+            % 故本版在 p4 层拆两步：
+            %   1) conv(frame_bb, h_tap)  — 多径（静态信道属性，与运动无关）
+            %   2) gen_doppler_channel(single-path) — 时间伸缩 + α(t) 时变 + fc 相位
+            % P4 Step S2: 从 UI 读取时变多普勒参数
+            tv = struct( ...
+                'enable',     logical(app.tv_enable_cb.Value) && ~strcmp(app.tv_model_dd.Value, 'constant'), ...
+                'model',      app.tv_model_dd.Value, ...
+                'drift_rate', app.tv_drift_edit.Value * 1e-6, ...
+                'jitter_std', app.tv_jitter_edit.Value * 1e-6 );
+            % Step 1: 多径 conv（原 fs 时间轴，与 P3 一致）
+            frame_mp = conv(frame_bb, h_tap);
+            frame_mp = frame_mp(1:length(frame_bb));
+            % Step 2: 对多径输出做 Doppler（用单径 {0,1} 让 gen_doppler_channel 只负责时间伸缩+相位）
+            paths_single = struct('delays', 0, 'gains', 1);
+            [frame_ch_raw, ch_info] = gen_doppler_channel( ...
+                frame_mp, app.sys.fs, alpha_b, paths_single, Inf, tv, app.sys.fc);
+            % 长度对齐：α<0（时间扩展）保留全长供 RX 处理多余尾部；其他截断/补零
+            % （2026-04-28 修：对齐 codex worktree 的长度策略）
+            if length(frame_ch_raw) < L_bb
+                frame_ch = [frame_ch_raw, zeros(1, L_bb - length(frame_ch_raw))];
+            elseif alpha_b < 0
+                frame_ch = frame_ch_raw;
+            else
+                frame_ch = frame_ch_raw(1:L_bb);
+            end
+            app.tx_alpha_true = ch_info.alpha_true(1:min(L_bb, length(ch_info.alpha_true)));
+            if tv.enable
+                ch_label = sprintf('%s | α_base=%.2e | %s', ch_label, alpha_b, tv.model);
+            elseif abs(dop_hz) > 1e-3
+                ch_label = sprintf('%s | Doppler %+gHz (α=%.2e, constant)', ch_label, dop_hz, alpha_b);
+            end
         else
-            frame_ch = [frame_ch_raw, zeros(1, L_bb - length(frame_ch_raw))];
-        end
-        app.tx_alpha_true = ch_info.alpha_true(1:min(L_bb, length(ch_info.alpha_true)));
-        if tv.enable
-            ch_label = sprintf('%s | α_base=%.2e | %s', ch_label, alpha_b, tv.model);
-        elseif abs(dop_hz) > 1e-3
-            ch_label = sprintf('%s | Doppler %+gHz (α=%.2e, constant)', ch_label, dop_hz, alpha_b);
+            %% ===== Jakes 衰落路径（V2.0 接通 fading_dd）=====
+            % 调 13_SourceCode/common/gen_uwa_channel —— Jakes 时变多径 + bulk Doppler 一体
+            % - doppler_rate = alpha_b（来自 dop_hz，物理上 TX/RX 相对运动）
+            % - fading_fd_hz = jakes_fd_edit（散射体多径 Jakes 谱带宽，物理独立）
+            % - tv 模型在此路径被忽略（gen_uwa_channel 不接受 tv struct，需 follow-up）
+            if strcmp(fading_str, 'slow (Jakes 慢衰落)')
+                fading_type_ch = 'slow';
+            else
+                fading_type_ch = 'fast';
+            end
+            fd_jakes = app.jakes_fd_edit.Value;
+            ch_params = struct( ...
+                'fs',            app.sys.fs, ...
+                'num_paths',     length(paths.delays), ...
+                'delay_profile', 'custom', ...
+                'delays_s',      paths.delays, ...
+                'gains',         paths.gains, ...
+                'doppler_rate',  alpha_b, ...
+                'fading_type',   fading_type_ch, ...
+                'fading_fd_hz',  fd_jakes, ...
+                'snr_db',        Inf, ...     % 噪声在 UI 端单独加（与 static 路径一致）
+                'seed',          randi([1 1e6]) );
+            [frame_ch_raw, ch_info] = gen_uwa_channel(frame_bb, ch_params);
+            if length(frame_ch_raw) >= L_bb
+                frame_ch = frame_ch_raw(1:L_bb);
+            else
+                frame_ch = [frame_ch_raw, zeros(1, L_bb - length(frame_ch_raw))];
+            end
+            % alpha_true 序列：bulk α 常数（Jakes 多径时变独立显示在 ch_label）
+            app.tx_alpha_true = alpha_b * ones(1, L_bb);
+            ch_label = sprintf('%s | Jakes %s fd=%.1fHz | α=%.2e', ...
+                ch_label, fading_type_ch, fd_jakes, alpha_b);
+            % tv 模型在 Jakes 模式下被忽略 → 警告
+            tv_active = logical(app.tv_enable_cb.Value) && ~strcmp(app.tv_model_dd.Value, 'constant');
+            if tv_active
+                append_log('[!] tv 模型在 Jakes 模式下被忽略（gen_uwa_channel 不支持组合）');
+            end
         end
 
         snr_db = app.snr_edit.Value;
@@ -1182,6 +1236,11 @@ function update_scope()
 end
 
 function try_decode_frame()
+    % 2026-04-30 fix: 整体 try/catch wrap — 防止主路径异常 leak app.tx_pending=true
+    % 触发自动循环发送的根因：detect / resample / downconvert / render 任一抛异常
+    % → on_tick 顶层 catch 仅 log → tx_pending 永真 → 下个 tick 继续在 fifo 噪声里
+    % false-positive 找峰 → 反复解码错帧。
+    try
     if ~app.tx_pending, return; end
     if ~isfield(app.tx_meta_pending, 'frame_pb_samples'), return; end
     fn = app.tx_meta_pending.frame_pb_samples;
@@ -1215,22 +1274,24 @@ function try_decode_frame()
         sync_det.peak_ratio, sync_det.confidence, alpha_est_rx, alpha_conf));
 
     rx_seg = app.fifo(fs_pos : fs_pos + fn - 1);
+    rx_seg_raw = rx_seg;             % 2026-04-28：保留未补偿副本供 α refinement 用
     sch = app.tx_meta_pending.scheme;
     meta = app.tx_meta_pending;
     body_offset = meta.body_offset;  % 前导码样本数
 
     % P4.1: α 反补偿（基带或 passband 都适用）
-    % detect_frame_stream 的 alpha_est 与 comp_resample_spline 的符号约定一致
-    % （"正 = 压缩"）→ 补偿直接传 -alpha_est 做反向重采样
+    % comp_resample_spline V7+ 约定：正 alpha 直接补偿接收端压缩。
+    % detect_frame_stream 的 alpha_est 同样为"正 = 压缩"，因此直接传 alpha_est。
+    % （2026-04-28 修：原代码 -alpha_est 是 V6 之前的废弃约定，对齐 codex worktree）
     if abs(alpha_est_rx) > 1e-6 && alpha_conf > 0.3
-        rx_seg_comp = comp_resample_spline(rx_seg, -alpha_est_rx, app.sys.fs, 'fast');
+        rx_seg_comp = comp_resample_spline(rx_seg, alpha_est_rx, app.sys.fs, 'fast');
         % 截/补到 fn 长度，保持下游处理兼容
         if length(rx_seg_comp) >= fn
             rx_seg = rx_seg_comp(1:fn);
         else
             rx_seg = [rx_seg_comp, zeros(1, fn-length(rx_seg_comp))];
         end
-        append_log(sprintf('[α-COMP] 反补偿 α=%+.3e 后解码', -alpha_est_rx));
+        append_log(sprintf('[α-COMP] 反补偿 α=%+.3e 后解码', alpha_est_rx));
     end
 
     if app.bypass_rf
@@ -1257,6 +1318,10 @@ function try_decode_frame()
             end
         end
         app.last_decode_at = fs_pos;
+        % 2026-04-30 fix A: modem_decode 异常时清 tx_pending，避免下个 tick 在 fifo 残段反复 false-positive 触发
+        app.tx_pending = false;
+        app.tx_signal  = [];
+        set_status('解码异常，等待下一帧', 'warning');
         return;
     end
     app.last_info = info;
@@ -1269,6 +1334,26 @@ function try_decode_frame()
     n = min(length(bits_out), length(app.last_bits_in));
     n_err = sum(bits_out(1:n) ~= app.last_bits_in(1:n));
     ber = n_err / n;
+
+    % 2026-04-28 移植 codex：α refinement —— BER 高时在 ±2e-5 邻域扫 11 候选 α 重解码
+    if p4_should_refine_alpha(info, alpha_est_rx, alpha_conf)
+        score_before = p4_decode_score(info);
+        best = p4_refine_alpha_decode(rx_seg_raw, fn, sch, meta, ...
+            body_offset, alpha_est_rx);
+        if best.ok && best.score < score_before
+            ber_before = ber;
+            rx_seg = best.rx_seg;
+            body_bb_rx = best.body_bb_rx;
+            bits_out = best.bits_out;
+            info = best.info;
+            [ber, n_err, n] = p4_ber(bits_out, app.last_bits_in);
+            app.last_body_bb_rx = body_bb_rx;
+            app.last_info = info;
+            app.last_bits_out = bits_out;
+            append_log(sprintf('[α-REFINE] α %.3e -> %.3e, score %.3e -> %.3e, BER %.2f%% -> %.2f%%', ...
+                alpha_est_rx, best.alpha, score_before, best.score, ber_before*100, ber*100));
+        end
+    end
 
     % 保存帧数据到历史 + 获取 passband 段
     pb_seg = app.fifo(fs_pos : fs_pos + fn - 1);
@@ -1309,6 +1394,19 @@ function try_decode_frame()
     app.tx_pending = false;
     app.tx_signal  = [];
     set_status('RX 监听中（等待下一帧）', 'busy');
+    catch ME
+        % 2026-04-30 fix B: try_decode_frame 主路径异常 → 清 tx_pending 防 leak
+        % 否则下个 tick 在 fifo 噪声残段 false-positive 找峰 → 反复触发自动发
+        append_log(sprintf('[DEC-OUTER-ERR] %s', ME.message));
+        if ~isempty(ME.stack)
+            for si = 1:min(3, length(ME.stack))
+                append_log(sprintf('  @ %s L%d', ME.stack(si).name, ME.stack(si).line));
+            end
+        end
+        app.tx_pending = false;
+        app.tx_signal  = [];
+        set_status('解码主路径异常', 'warning');
+    end
 end
 
 function refresh_history_dropdown()
@@ -1432,6 +1530,95 @@ function append_log(msg)
     if length(cur) > 120, cur = cur(end-100:end); end
     app.log_area.Value = cur;
     try, scroll(app.log_area, 'bottom'); catch, end
+end
+
+% ========================================================================
+% α refinement helpers (2026-04-28 移植自 UWAcomm-codex worktree)
+% ------------------------------------------------------------------------
+% 目的：当 detect_frame_stream 估出的 alpha_est 精度不足导致首次解码 BER 偏高时，
+% 在 alpha_est ± 2e-5 邻域扫 11 个候选 α 重解码，取 estimated_ber 最低者。
+% ========================================================================
+
+function tf = p4_should_refine_alpha(info, alpha_est, alpha_conf)
+% 判断是否触发 refinement：α 估计有效 + 解码评分非完美
+    if abs(alpha_est) <= 1e-6 || alpha_conf <= 0.3
+        tf = false;
+        return;
+    end
+    score = p4_decode_score(info);
+    tf = isfinite(score) && score > 1e-6;
+end
+
+function best = p4_refine_alpha_decode(rx_seg_raw, fn, sch, meta, body_offset, alpha0)
+% 在 alpha0 ± 2e-5 范围扫 11 候选 α，每个候选重做 comp_resample + downconvert + modem_decode
+% 输出：best.{ok, score, alpha, rx_seg, body_bb_rx, bits_out, info}
+    offsets = [-2e-5 -1.5e-5 -1e-5 -5e-6 -2e-6 0 2e-6 5e-6 1e-5 1.5e-5 2e-5];
+    candidates = unique(alpha0 + offsets, 'stable');
+    best = struct('ok', false, 'score', Inf, 'alpha', alpha0, ...
+        'rx_seg', [], 'body_bb_rx', [], 'bits_out', [], 'info', struct());
+    for kk = 1:length(candidates)
+        a = candidates(kk);
+        try
+            rx_try = comp_resample_spline(rx_seg_raw, a, app.sys.fs, 'fast');
+            if length(rx_try) >= fn
+                rx_try = rx_try(1:fn);
+            else
+                rx_try = [rx_try, zeros(1, fn-length(rx_try))];
+            end
+            body_try = p4_extract_body_for_decode(rx_try, sch, meta, body_offset);
+            [bits_try, info_try] = modem_decode(body_try, sch, app.sys, meta);
+            score = p4_decode_score(info_try);
+            if score < best.score
+                best.ok = true;
+                best.score = score;
+                best.alpha = a;
+                best.rx_seg = rx_try;
+                best.body_bb_rx = body_try;
+                best.bits_out = bits_try;
+                best.info = info_try;
+            end
+        catch
+            % 单个候选失败不影响整体扫描
+        end
+    end
+end
+
+function body_bb_rx = p4_extract_body_for_decode(rx_seg, sch, meta, body_offset)
+% 从 rx_seg 提取 body 段供 decoder 使用（与主链路 RX 切片逻辑一致）
+    if app.bypass_rf
+        body_bb_rx = rx_seg(body_offset+1 : end);
+    else
+        bb_use = p4_downconv_bw(sch, app.sys);
+        [full_bb_rx, ~] = downconvert(rx_seg, app.sys.fs, app.sys.fc, bb_use);
+        body_bb_rx = full_bb_rx(body_offset+1 : min(body_offset+meta.N_shaped, length(full_bb_rx)));
+    end
+end
+
+function score = p4_decode_score(info)
+% 解码评分：estimated_ber 优先，缺失则用 -estimated_snr 替代
+    score = NaN;
+    if isfield(info, 'estimated_ber') && ~isempty(info.estimated_ber)
+        score = info.estimated_ber;
+    end
+    if isnan(score)
+        if isfield(info, 'estimated_snr') && ~isempty(info.estimated_snr) && ~isnan(info.estimated_snr)
+            score = -info.estimated_snr;
+        else
+            score = Inf;
+        end
+    end
+end
+
+function [ber, n_err, n] = p4_ber(bits_out, bits_ref)
+% 比对 bits_out 与 bits_ref 取 BER
+    n = min(length(bits_out), length(bits_ref));
+    if n <= 0
+        n_err = NaN;
+        ber = NaN;
+    else
+        n_err = sum(bits_out(1:n) ~= bits_ref(1:n));
+        ber = n_err / n;
+    end
 end
 
 end

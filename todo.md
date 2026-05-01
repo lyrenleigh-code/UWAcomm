@@ -141,6 +141,12 @@
 | **14_Streaming P5（三进程并发）** | 待启动 | TX/Channel/RX 三进程并发；codex 已做 rx_daemon_p5/channel_daemon_p5/p5_channel_preset 可借鉴；spec `active/2026-04-15-streaming-p5-concurrent.md` |
 | **14_Streaming P6（AMC）** | 待 P5 | 物理层 AMC（link quality → scheme 自适应）；`amc/` 目录已占位 |
 | **14_Streaming P4 真多普勒** | 待启动 | spec `active/2026-04-22-p4-real-doppler-fork.md`（codex 实施）；从 P3 fork 接 gen_doppler_channel V1.0（时变 α(t) + 多径）；P4 demo UI 已存在但未接 real Doppler |
+| **P4 UI ↔ 算法对齐 + Jakes + 恒定多普勒（待 codex 等价验收）** | 2026-04-28 待验 | spec `active/2026-04-28-p4-ui-algo-alignment.md` + `2026-04-28-p4-jakes-channel-integration.md`；3 段：(1) `apply_scheme_params V2.0` 5 体制透传 fading_type/fd_hz + SC-FDE pilot_per_blk/train_period_K 字段通道；(2) `fading_dd` 接通 `gen_uwa_channel` 路径分发；(3) RX α 补偿 V6→V7 `+alpha_est_rx` + 移植 codex `α refinement`（5 nested helper 在 BER>2% 时 ±2e-5 11 候选扫描）+ 长度对齐 α<0 不截断；待用户 P4 UI 实测 BER 验证；4 mod + 6 untracked 未 commit |
+| **P4 UI follow-up：解耦 SC-FDE blk_cp/blk_fft + 加 pilot 控件**（V4.0 自动激活）| 待启动 | 当前 UI `blk_cp = blk_fft = 128` 让 V4.0 突破不能激活；解耦后 SC-FDE jakes fd=1Hz 可达 3.37%（runner 数据） |
+| **P4 UI follow-up：暴露 oracle toggle**（runner 等价模式）| 待启动 | UI 加调试 checkbox，allow 透传 fading_type/sym_delays/noise_var 等 oracle 参数到 modem_decode；让用户能看到算法上界 |
+| **P4 UI follow-up：runner ↔ UI 等价性单元测试** | 待启动 | 固定 seed AWGN+静态，验证 13_SourceCode runner 与 14_Streaming UI 两条路径 BER 等价；定位中间环节差异 |
+| **P4 UI follow-up：tv 模型 + Jakes 组合** | 待启动 | 当前 jakes 模式下 tv 控件被忽略；`gen_uwa_channel` 不接受 tv struct，需写 jakes wrapper 或扩展 gen_uwa_channel |
+| **AMC 移植到 14_Streaming claude**（codex 已有 1800+ 行 P6 phase）| 待 P5 | codex 完整 AMC：mode_selector / p4_default_amc_opts / amc_state / amc_btn / streaming_apply_modem_params / p4_clear_profile_overrides；待 P5 三进程完成后再考虑 |
 
 ### 🟢 低优先（技术债）
 

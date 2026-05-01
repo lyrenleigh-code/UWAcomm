@@ -1,5 +1,35 @@
 # Wiki 操作日志
 
+## 2026-04-28
+
+- **P4 恒定多普勒对齐 codex（RX α 补偿符号 + α refinement 移植）**
+  - 用户实测 P4 UI dop_hz=N + static 不解码，对比 codex 找差异
+  - 根因 1：claude `p4_demo_ui.m:1276` `comp_resample_spline(rx_seg, -alpha_est_rx, ...)` 是 V6 废弃约定（058cee7 P4 fork 时未跟上 V7 修订）；V7+ 头注明说"正 alpha 直接传入即可补偿压缩"。修：去负号
+  - 根因 2：缺 α refinement after decode（codex 关键二级 fix）。`detect_frame_stream` 单次 α 估计精度 σ≈1e-5，BER 仍高时需要在 ±2e-5 邻域扫 11 候选重解码取最佳。移植 codex 的 5 个 nested helper（`p4_should_refine_alpha` / `p4_refine_alpha_decode` / `p4_extract_body_for_decode` / `p4_decode_score` / `p4_ber`）
+  - 长度对齐：channel 段 α<0 不截断（对齐 codex）
+  - 调试日志 `wiki/debug-logs/14_Streaming/流式调试日志.md` 加 2026-04-28 第三条章节
+  - 与 codex 剩余差异：AMC P6 phase（不在本次范围）
+
+- **P4 Jakes 信道接入（fading_dd 控件复活）**
+  - 调研发现 P4 UI 的 `fading_dd` (static/slow Jakes/fast Jakes) + `jakes_fd_edit` 完全死链：`gen_doppler_channel V1.5` 不含 Jakes 衰落多径
+  - spec `active/2026-04-28-p4-jakes-channel-integration.md` + plan `plans/2026-04-28-p4-jakes-channel-integration.md`
+  - `p4_demo_ui.m` channel 段（L900-940）加 fading_dd 分发：
+    - 'static' → 现有 `gen_doppler_channel + p4_channel_tap`（含 tv 模型）
+    - 'slow/fast Jakes' → `gen_uwa_channel`（13/common），独立透传 `doppler_rate=alpha_b` + `fading_fd_hz=jakes_fd_edit`
+  - addpath 加 `13_SourceCode/src/Matlab/common`（gen_uwa_channel 所在）
+  - 新增 `tests/test_p4_jakes_channel_smoke.m`（3 case 底层信道调用，C1 static / C2 slow Jakes / C3 fast Jakes）
+  - 调试日志追加 2026-04-28 第二条章节
+  - **已知 limitation**：tv 模型（drift/jitter/random_walk/sinusoidal）在 Jakes 模式下被忽略（gen_uwa_channel 不接受 tv struct），UI 在 jakes+tv 时打 append_log 警告
+
+- **P4 UI ↔ 算法对齐 V2.0**
+  - 调研发现 P4 UI 前端控件已加 `static / slow Jakes / fast Jakes` + `fd_hz` 输入（058cee7 fork），但后端 `p4_apply_scheme_params V1.0.0` 仍 hardcode `fading_type='static'` + `fd_hz=0`，控件值不透传
+  - spec `active/2026-04-28-p4-ui-algo-alignment.md` + plan `plans/2026-04-28-p4-ui-algo-alignment.md`
+  - `p4_apply_scheme_params V1.0 → V2.0.0`：5 体制（SC-FDE/OFDM/SC-TDE/DSSS/OTFS）透传 `fading_type` / `fd_hz`；SC-FDE 加 `pilot_per_blk` / `train_period_K` 字段透传通道（默认 V1.0 行为，向后兼容）；FH-MFSK 不动（schema 无 `fading_type` 字段）
+  - `p4_demo_ui.m` L864-871 ui_vals 加 2 字段
+  - 新增 `tests/test_p4_ui_alignment_smoke.m`（4 case 字段透传 assert，不跑 modem）
+  - 调试日志追加 `wiki/debug-logs/14_Streaming/流式调试日志.md` 2026-04-28 章节
+  - **已知 limitation**：SC-FDE V4.0 突破不会自动激活（需 `blk_fft=256/blk_cp=128` 实测 setup，当前 UI 默认 `blk_cp=blk_fft`），需 follow-up spec 解耦控件
+
 ## 2026-04-27
 
 - **OTFS 工作重启 + e2e 实测（codex 借鉴移植）**
