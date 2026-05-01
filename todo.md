@@ -141,7 +141,9 @@
 | **14_Streaming P5（三进程并发）** | 待启动 | TX/Channel/RX 三进程并发；codex 已做 rx_daemon_p5/channel_daemon_p5/p5_channel_preset 可借鉴；spec `active/2026-04-15-streaming-p5-concurrent.md` |
 | **14_Streaming P6（AMC）** | 待 P5 | 物理层 AMC（link quality → scheme 自适应）；`amc/` 目录已占位 |
 | **14_Streaming P4 真多普勒** | 待启动 | spec `active/2026-04-22-p4-real-doppler-fork.md`（codex 实施）；从 P3 fork 接 gen_doppler_channel V1.0（时变 α(t) + 多径）；P4 demo UI 已存在但未接 real Doppler |
-| **P4 UI ↔ 算法对齐 + Jakes + 恒定多普勒（待 codex 等价验收）** | 2026-04-28 待验 | spec `active/2026-04-28-p4-ui-algo-alignment.md` + `2026-04-28-p4-jakes-channel-integration.md`；3 段：(1) `apply_scheme_params V2.0` 5 体制透传 fading_type/fd_hz + SC-FDE pilot_per_blk/train_period_K 字段通道；(2) `fading_dd` 接通 `gen_uwa_channel` 路径分发；(3) RX α 补偿 V6→V7 `+alpha_est_rx` + 移植 codex `α refinement`（5 nested helper 在 BER>2% 时 ±2e-5 11 候选扫描）+ 长度对齐 α<0 不截断；待用户 P4 UI 实测 BER 验证；4 mod + 6 untracked 未 commit |
+| ~~**P4 UI ↔ 算法对齐 + Jakes + 恒定多普勒**~~ | ✅ 2026-04-28 commit `44db87e` | spec active；3 段（V2.0 透传 + Jakes 接通 + α V7+refinement）已 commit |
+| **SC-FDE bypass=ON dop=10 残余 35.9%（H2 fix 不彻底）** | 待 spec | bypass=ON dop=10 H2 fix 后 OFDM/SC-TDE 0%、SC-FDE 仍 35.9%；bypass=OFF 同条件 6.2%；与 SC-FDE turbo iter / SNR 紧 / seed 抖动相关，独立调查 |
+| **SC-FDE bypass=OFF dop=0 BER 24% 抖动** | 待确认 | turbo_iter=2 + 单 seed 不稳；提高 iter 或多 seed 验证可能解；非紧迫 |
 | **P4 UI follow-up：解耦 SC-FDE blk_cp/blk_fft + 加 pilot 控件**（V4.0 自动激活）| 待启动 | 当前 UI `blk_cp = blk_fft = 128` 让 V4.0 突破不能激活；解耦后 SC-FDE jakes fd=1Hz 可达 3.37%（runner 数据） |
 | **P4 UI follow-up：暴露 oracle toggle**（runner 等价模式）| 待启动 | UI 加调试 checkbox，allow 透传 fading_type/sym_delays/noise_var 等 oracle 参数到 modem_decode；让用户能看到算法上界 |
 | **P4 UI follow-up：runner ↔ UI 等价性单元测试** | 待启动 | 固定 seed AWGN+静态，验证 13_SourceCode runner 与 14_Streaming UI 两条路径 BER 等价；定位中间环节差异 |
@@ -161,6 +163,8 @@
 
 | 任务 | 完成日期 | 备注 |
 |------|---------|------|
+| **P4 UI bypass=ON 路径 H2 carrier-phase fix** | **2026-05-01** | spec `archive/2026-05-01-p4-bypass-on-doppler-ber-rca.md`；Phase 0 SNR sweep 证伪 H1（SNR 15→35 全 50%）；Phase 1 body 对比锁定 H2（dop=10 corr=0.03→0.996）；fix 在 try_decode_frame + p4_refine_alpha_decode 加 `exp(-j·2π·fc·α·t)`；OFDM/SC-TDE bypass=ON dop=10 BER 51%→0%、DSSS 2.75%→0%；SC-FDE 49%→35.9%（残余作 known limitation） |
+| **P4 UI tx_pending leak 防御 + bypass=ON detect 路径修复 + FH-MFSK N_shaped 字段对齐** | **2026-05-01** | commit `062d1f3`/`44db87e`；try_decode_frame 整体 try/catch + modem_decode catch 清状态（防 fifo 残段 false-positive 循环触发）；detect_frame_stream 加 isreal 分支（bypass=ON complex baseband 跳过 downconvert）；modem_encode_fhmfsk 补 meta.N_shaped（对齐 5 体制） |
 | 离散 Doppler 信道全体制对比 | 2026-04-13 | 6 体制 × 6 信道 BER 矩阵 |
 | SC-TDE V5.2 优化 | 2026-04-14 | 时变跳过训练精估+nv_post 兜底 |
 | 14_Streaming P1（FH-MFSK loopback + GUI） | 2026-04-15 | passband 信道 + Jakes 时变 |

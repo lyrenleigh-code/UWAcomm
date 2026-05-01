@@ -1285,6 +1285,15 @@ function try_decode_frame()
     % （2026-04-28 修：原代码 -alpha_est 是 V6 之前的废弃约定，对齐 codex worktree）
     if abs(alpha_est_rx) > 1e-6 && alpha_conf > 0.3
         rx_seg_comp = comp_resample_spline(rx_seg, alpha_est_rx, app.sys.fs, 'fast');
+        if app.bypass_rf
+            % 2026-05-01 fix: bypass=ON baseband 路径补偿载波相位 exp(-j·2π·fc·α·t)
+            % comp_resample_spline 对 baseband 只反时间伸缩；对 passband 等效同时反载波相位
+            % （因 passband 含 exp(j2πfc t)，scale t 同时 scale 载波相位）。
+            % bypass=ON 残留 fc·α 频偏 → body 整段相位旋转 → BER ~50%。
+            % 验证：diag_p4_bypass_body_compare ON_raw 51.5% → ON_fix 0%（OFDM dop=10）
+            t_rx = (0:length(rx_seg_comp)-1) / app.sys.fs;
+            rx_seg_comp = rx_seg_comp .* exp(-1j * 2*pi * app.sys.fc * alpha_est_rx * t_rx);
+        end
         % 截/补到 fn 长度，保持下游处理兼容
         if length(rx_seg_comp) >= fn
             rx_seg = rx_seg_comp(1:fn);
@@ -1560,6 +1569,11 @@ function best = p4_refine_alpha_decode(rx_seg_raw, fn, sch, meta, body_offset, a
         a = candidates(kk);
         try
             rx_try = comp_resample_spline(rx_seg_raw, a, app.sys.fs, 'fast');
+            if app.bypass_rf
+                % 2026-05-01 fix: 同主路径，bypass=ON 需补偿载波相位
+                t_try = (0:length(rx_try)-1) / app.sys.fs;
+                rx_try = rx_try .* exp(-1j * 2*pi * app.sys.fc * a * t_try);
+            end
             if length(rx_try) >= fn
                 rx_try = rx_try(1:fn);
             else

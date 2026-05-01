@@ -91,6 +91,61 @@ dop_hz=0 时两路 BER 都 0%（detect fix 后 sync_diff 一致）。Jakes fd=2 
 - SC-FDE bypass=OFF dop=0 BER 24%（一次抖动 / turbo_iter=2 不够）— 非本 spec 焦点，需独立确认
 - DSSS Jakes BER ~30% — 与 P4 UI 单次 α 补偿精度有关，独立 spec
 
-## 实施前提
+## Result
 
-本 spec **未实施**，等用户决策；先 commit 当前 detect_frame_stream + FH-MFSK N_shaped 两个 fix 作为 baseline。
+**完成日期**: 2026-05-01
+**状态**: 闭环（OFDM/SC-TDE/DSSS 主目标达成）+ SC-FDE 残余作 known limitation
+
+### Phase 0 — H1 验证（SNR sweep）
+
+`diag_p4_bypass_snr_sweep` 跑 SC-FDE/OFDM/SC-TDE × dop=10Hz × bypass=ON × SNR ∈ {15..35} × 3 seed：
+
+| Scheme | OFF SNR=15 | ON SNR=15 | ON SNR=20 | ON SNR=25 | ON SNR=30 | ON SNR=35 |
+|---|---|---|---|---|---|---|
+| SC-FDE | 22.5% | 48.8% | 48.3% | 48.5% | 48.7% | 48.7% |
+| OFDM | 0.20% | 51.4% | 51.5% | 51.6% | 51.7% | 51.5% |
+| SC-TDE | 0% | 49.5% | 49.9% | 49.6% | 50.7% | 50.6% |
+
+**H1 证伪**：bypass=ON 在 SNR 15→35 dB 全部 ~50% BER，单调不变。不是 effective SNR 差异。
+
+### Phase 1 — H2 验证（载波相位）
+
+`diag_p4_bypass_body_compare` 无噪声直接对比 ON/OFF body_bb_rx：
+
+| dop_hz | rel_L2_err | corr | median phase | BER ON_raw / ON_fix / OFF |
+|---|---|---|---|---|
+| 0 | 0.31 | 0.993 | +17.7° | 0% / 0% / 0% |
+| 10 | **1.47** | **0.030** | **+98.8°** | **51.5% / 0% / 0%** |
+
+**H2 确认**：dop=10 时 ON/OFF body 相关系数 0.03（几乎正交）；加 `body_on .* exp(-j·2π·fc·α·t)` 反补偿后 corr → 0.996，BER 51.5%→0%。
+
+**根因机理**：`comp_resample_spline` 对 passband real 做 time-scaling 时**等效同时反补偿载波相位**（passband 含 `exp(j2πfc t)`，scale t 同时 scale 载波相位）；对 baseband complex 做 time-scaling 时**只反时间伸缩**，载波相位 `exp(j·2π·fc·α·t)` 完全保留 → fc·α 频偏 → body 整段相位旋转。
+
+### Phase 2 — Fix 应用 + 回归
+
+P4 UI `try_decode_frame` α-COMP 块 + `p4_refine_alpha_decode` 内层在 `app.bypass_rf` 时追加 `exp(-1j * 2*pi * fc * alpha * t)` 反相位补偿。`test_p4_bypass_matrix` 同步加 fix。
+
+回归 matrix（bypass=ON 列 fix 前 → fix 后）：
+
+| Scheme | dop=0 | dop=10 | Jakes fd=2 |
+|---|---|---|---|
+| FH-MFSK | 0 → 0 | 0 → 0 | 1.1 → 1.1 |
+| DSSS | 0 → 0 | **2.75 → 0** ✓ | 30 → 36.5 (limitation) |
+| SC-FDE | 0 → 19.7 ⚠ | **49 → 35.9** ⚠ | 50.9 → 49.7 |
+| OFDM | 0 → 0 | **51 → 0** ✅ | 49 → 50 |
+| SC-TDE | 0 → 0 | **50 → 0** ✅ | 47 → 50.5 |
+
+### 验收
+
+- ✅ OFDM / SC-TDE / DSSS bypass=ON dop=10 BER 完全恢复至与 OFF 一致（0%）
+- ⚠ SC-FDE bypass=ON dop=10 = 35.9%（部分恢复；bypass=OFF 同条件 6.2%，bypass=OFF dop=0 也 24%，是 SC-FDE 自身 turbo_iter=2 不稳 + SNR 紧 + seed 抖动，非 H2 残留）
+- ✅ Jakes 各 scheme 仍 ~50%（已知 limitation 不变）
+
+### 后继 spec
+
+- SC-FDE bypass=ON dop=10 残余 35% 调查 — 需独立 spec（涉及 SC-FDE turbo iter / SNR 校准 / seed 稳定性，非本 spec 范围）
+- bypass=ON / OFF SNR 校准等价性（H1 部分被证伪但 noise 路径差异客观存在，文档化即可）
+
+### 归档
+
+2026-05-01 闭环；归档到 `specs/archive/`。

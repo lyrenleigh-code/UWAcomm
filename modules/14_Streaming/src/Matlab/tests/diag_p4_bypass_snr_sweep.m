@@ -1,14 +1,18 @@
-function test_p4_bypass_matrix()
-% TEST_P4_BYPASS_MATRIX  P4 UI bypass=ON detect_frame_stream fix 回归矩阵
+function diag_p4_bypass_snr_sweep()
+% DIAG_P4_BYPASS_SNR_SWEEP  Phase 0: 扫 SNR 验 H1（bypass=ON Doppler BER 灾难是否 effective SNR 差异）
 %
-% 等价模拟 P4 UI on_transmit + try_decode_frame 的核心数据流（脚本化，无 UI）：
-%   modem_encode → assemble_physical_frame → channel(static/jakes) → fifo+noise
-%   → detect_frame_stream → α 反补偿 → body 切片 → modem_decode
+% spec: specs/active/2026-05-01-p4-bypass-on-doppler-ber-rca.md
 %
-% 测试矩阵：5 scheme（OTFS 跳过，路径复杂）× 2 bypass × 3 condition
-% 评估：sync_diff（应 |≤ ~10|）+ BER + α_est_rx
+% 设计：
+%   bypass=ON dop=10Hz × SNR ∈ {15, 20, 25, 30, 35} × {SC-FDE, OFDM, SC-TDE}
+%   bypass=OFF dop=10Hz × SNR ∈ {15}                  作 baseline
 %
-% 用法（CI / batch）：matlab -batch "test_p4_bypass_matrix"
+% 期望（H1 成立）：bypass=ON BER 单调下降，到某 SNR* 与 OFF SNR=15 等价
+%   → 校准 fix 方向 = 提升 ON 路径 effective SNR（lpf 等效）或降 OFF 严格度
+%
+% 期望（H1 不成立 / 部分）：bypass=ON 在 SNR=35 仍高 BER → 转 Phase 1 验 H2 载波相位
+%
+% 用法：matlab -batch "diag_p4_bypass_snr_sweep"
 
 %% 路径
 this_dir       = fileparts(mfilename('fullpath'));
@@ -30,88 +34,92 @@ addpath(fullfile(modules_root, '10_DopplerProc',   'src', 'Matlab'));
 addpath(fullfile(modules_root, '12_IterativeProc', 'src', 'Matlab'));
 addpath(fullfile(modules_root, '13_SourceCode',    'src', 'Matlab', 'common'));
 
-schemes    = {'FH-MFSK','DSSS','SC-FDE','OFDM','SC-TDE'};
-conditions = {
-    struct('name','static dop=0',   'fading','static','dop_hz', 0, 'fd_jakes',0)
-    struct('name','static dop=10',  'fading','static','dop_hz',10, 'fd_jakes',0)
-    struct('name','slow Jakes fd=2','fading','jakes', 'dop_hz', 0, 'fd_jakes',2)
-};
+schemes = {'SC-FDE','OFDM','SC-TDE'};
+SNR_list_ON  = [15 20 25 30 35];
+SNR_OFF      = 15;
 
-SNR_db = 15;
+cd_static_dop10 = struct('name','static dop=10','fading','static','dop_hz',10,'fd_jakes',0);
+preset = '6径 标准水声';
 text   = 'Hello UWAcomm bypass test';
 sys0   = sys_params_default();
 fs = sys0.fs;
 fc = sys0.fc;
 
-% 信道用 p4_channel_tap '6径 标准水声'（与 P4 UI default preset 一致）
-preset = '6径 标准水声';
+% 多 seed 平均（消除单 seed 抖动）
+n_seed = 3;
 
-bypass_modes = [true false];
-fprintf('========== P4 bypass=ON detect fix 回归矩阵 ==========\n');
-fprintf('SNR=%ddB, %d scheme × %d bypass × %d cond\n', SNR_db, length(schemes), 2, length(conditions));
+fprintf('========== Phase 0: bypass=ON SNR sweep (dop=10Hz, %d seeds) ==========\n', n_seed);
+fprintf('spec: 2026-05-01-p4-bypass-on-doppler-ber-rca.md (H1)\n\n');
 
-n_scheme = length(schemes);
-n_cond   = length(conditions);
-BER  = nan(n_scheme, n_cond, 2);   % [scheme, cond, bypass]
-SYNC = nan(n_scheme, n_cond, 2);
-ALPHA = nan(n_scheme, n_cond, 2);
-ERRMSG = cell(n_scheme, n_cond, 2);
+%% bypass=OFF baseline
+fprintf('--- bypass=OFF baseline (SNR=%d) ---\n', SNR_OFF);
+BER_OFF = nan(length(schemes), 1);
+for si = 1:length(schemes)
+    sch = schemes{si};
+    ui_vals = struct('blk_fft',128,'turbo_iter',2,'payload',2048, ...
+        'fading_type','static (恒定)','fd_hz',0);
+    [N_info, sys_p] = p4_apply_scheme_params(sch, sys0, ui_vals);
+    bers = nan(1, n_seed);
+    for ss = 1:n_seed
+        try
+            [bers(ss), ~, ~] = run_one(sch, sys_p, preset, cd_static_dop10, false, SNR_OFF, text, N_info, fs, fc, ss);
+        catch
+            bers(ss) = NaN;
+        end
+    end
+    BER_OFF(si) = mean(bers, 'omitnan');
+    fprintf('  %-8s : BER = %.3f%% (mean of %d seeds)\n', sch, BER_OFF(si)*100, n_seed);
+end
 
-for bi = 1:2
-    is_bp = bypass_modes(bi);
-    fprintf('\n---- bypass_rf = %s ----\n', tern(is_bp, 'ON  (complex baseband)', 'OFF (passband real)'));
-    for si = 1:n_scheme
-        sch = schemes{si};
-        ui_vals = struct('blk_fft',128,'turbo_iter',2,'payload',2048, ...
-            'fading_type','static (恒定)','fd_hz',0);
-        [N_info, sys_p] = p4_apply_scheme_params(sch, sys0, ui_vals);
-        for ci = 1:n_cond
-            cd = conditions{ci};
+%% bypass=ON SNR sweep
+fprintf('\n--- bypass=ON SNR sweep ---\n');
+BER_ON = nan(length(schemes), length(SNR_list_ON));
+for si = 1:length(schemes)
+    sch = schemes{si};
+    ui_vals = struct('blk_fft',128,'turbo_iter',2,'payload',2048, ...
+        'fading_type','static (恒定)','fd_hz',0);
+    [N_info, sys_p] = p4_apply_scheme_params(sch, sys0, ui_vals);
+    fprintf('  %-8s :', sch);
+    for ki = 1:length(SNR_list_ON)
+        snr = SNR_list_ON(ki);
+        bers = nan(1, n_seed);
+        for ss = 1:n_seed
             try
-                [ber, sync_diff, alpha_est] = run_one(sch, sys_p, preset, cd, is_bp, SNR_db, text, N_info, fs, fc);
-                BER(si,ci,bi) = ber;
-                SYNC(si,ci,bi) = sync_diff;
-                ALPHA(si,ci,bi) = alpha_est;
-                mark = tern(isnan(ber), '✗SYNC', tern(ber<0.01,'✓',tern(ber<0.1,'⚠','✗')));
-                fprintf('  %-8s %-18s : BER=%6.3f%% %s sync_diff=%+5d  α=%+.2e\n', ...
-                    sch, cd.name, ber*100, mark, sync_diff, alpha_est);
-            catch ME
-                ERRMSG{si,ci,bi} = ME.message;
-                fprintf('  %-8s %-18s : ERR %s\n', sch, cd.name, ME.message);
+                [bers(ss), ~, ~] = run_one(sch, sys_p, preset, cd_static_dop10, true, snr, text, N_info, fs, fc, ss);
+            catch
+                bers(ss) = NaN;
             end
         end
+        BER_ON(si, ki) = mean(bers, 'omitnan');
+        fprintf(' SNR%2d=%6.3f%%', snr, BER_ON(si, ki)*100);
     end
+    fprintf('\n');
 end
 
-%% 汇总表
-fprintf('\n========== 汇总 BER (%%) ==========\n');
-for bi = 1:2
-    fprintf('\nbypass_rf = %s:\n', tern(bypass_modes(bi),'ON','OFF'));
-    fprintf('  %-10s', 'scheme');
-    for ci = 1:n_cond, fprintf(' %-18s', conditions{ci}.name); end
-    fprintf('\n');
-    for si = 1:n_scheme
-        fprintf('  %-10s', schemes{si});
-        for ci = 1:n_cond
-            if isnan(BER(si,ci,bi))
-                fprintf(' %-18s', 'NaN');
-            else
-                fprintf(' %-18s', sprintf('%.3f%% (sync%+d)', BER(si,ci,bi)*100, SYNC(si,ci,bi)));
-            end
-        end
-        fprintf('\n');
+%% 汇总 + 解读
+fprintf('\n========== 汇总 ==========\n');
+fprintf('  %-8s | OFF SNR=%d | %s\n', 'scheme', SNR_OFF, ...
+    strjoin(arrayfun(@(s) sprintf('ON SNR=%d', s), SNR_list_ON, 'UniformOutput', false), ' | '));
+for si = 1:length(schemes)
+    fprintf('  %-8s | %8.3f%%  | ', schemes{si}, BER_OFF(si)*100);
+    for ki = 1:length(SNR_list_ON)
+        fprintf('%8.3f%% | ', BER_ON(si, ki)*100);
     end
+    fprintf('\n');
 end
-fprintf('\n[KEY 观察]\n');
-fprintf('  · bypass=ON 各 cell sync_diff 应 |≤ ~10|（fix 后）；fix 前 bypass=ON sync_diff 大或 NaN\n');
-fprintf('  · BER=NaN 表示 sync 失败或 decode 异常；详 ERRMSG\n');
-fprintf('  · DSSS 在 dop_hz 下若 BER 仍高，说明 detect fix 之外另有问题（α 精度等）\n');
+
+fprintf('\n[INTERPRETATION]\n');
+fprintf('  - 若 BER_ON 随 SNR 单调下降，且某 SNR* 与 BER_OFF(SNR=%d) 等价：\n', SNR_OFF);
+fprintf('    H1（effective SNR 差异）成立。SNR* - %d ≈ ON/OFF noise 路径增益差\n', SNR_OFF);
+fprintf('  - 若 BER_ON 在 SNR=%d 仍 ≥ 10%%：H1 不足以解释，转 Phase 1 验 H2（载波相位）\n', SNR_list_ON(end));
 
 end
 
 %% =============================================================
-function [ber, sync_diff, alpha_est] = run_one(sch, sys_p, preset, cd, is_bp, SNR_db, text, N_info, fs, fc)
-% 1. info bits
+function [ber, sync_diff, alpha_est] = run_one(sch, sys_p, preset, cd, is_bp, SNR_db, text, N_info, fs, fc, seed)
+if nargin < 11, seed = 1; end
+rng(seed);
+
 bits_raw = text_to_bits(text);
 if length(bits_raw) >= N_info
     info_bits = bits_raw(1:N_info);
@@ -121,11 +129,9 @@ else
     rng(rng_st);
     info_bits = [bits_raw, pad];
 end
-% 2. encode
 [body_bb, meta_tx] = modem_encode(info_bits, sch, sys_p);
 [frame_bb, ~] = assemble_physical_frame(body_bb, sys_p);
 body_offset = length(frame_bb) - length(body_bb);
-% 3. channel — 与 P4 UI on_transmit 等价（p4_channel_tap + 双路 static/jakes）
 [h_tap, paths, ~] = p4_channel_tap(sch, sys_p, preset);
 alpha_b = cd.dop_hz / fc;
 L_bb = length(frame_bb);
@@ -142,11 +148,11 @@ if strcmp(cd.fading,'static')
     else
         frame_ch = frame_ch_raw(1:L_bb);
     end
-else  % jakes
+else
     ch_params = struct('fs',fs,'num_paths',length(paths.delays), ...
         'delay_profile','custom','delays_s',paths.delays,'gains',paths.gains, ...
         'doppler_rate',alpha_b,'fading_type','slow', ...
-        'fading_fd_hz',cd.fd_jakes,'snr_db',Inf,'seed',1);
+        'fading_fd_hz',cd.fd_jakes,'snr_db',Inf,'seed',seed);
     [frame_ch_raw, ~] = gen_uwa_channel(frame_bb, ch_params);
     if length(frame_ch_raw) >= L_bb
         frame_ch = frame_ch_raw(1:L_bb);
@@ -154,7 +160,6 @@ else  % jakes
         frame_ch = [frame_ch_raw, zeros(1, L_bb-length(frame_ch_raw))];
     end
 end
-% 4. fifo + noise（capacity 与 P4 UI 一致：16s）
 fifo_capacity = round(16 * fs);
 ofs = round(1 * fs);
 if is_bp
@@ -173,7 +178,6 @@ end
 fn = length(tx_signal);
 fifo(ofs : ofs+fn-1) = fifo(ofs : ofs+fn-1) + tx_signal;
 fifo_write = ofs + fn + round(0.5 * fs);
-% 5. detect
 sync_det = detect_frame_stream(fifo, fifo_write, 0, sys_p, ...
     struct('frame_len_hint', fn));
 if ~sync_det.found
@@ -189,21 +193,14 @@ else
     fn_use = fn;
 end
 rx_seg = fifo(fs_pos : fs_pos + fn_use - 1);
-% α 补偿
 if abs(alpha_est) > 1e-6 && sync_det.alpha_confidence > 0.3
     rx_seg_comp = comp_resample_spline(rx_seg, alpha_est, fs, 'fast');
-    if is_bp
-        % 2026-05-01 H2 fix: 与 p4_demo_ui try_decode_frame 同步
-        t_rx = (0:length(rx_seg_comp)-1) / fs;
-        rx_seg_comp = rx_seg_comp .* exp(-1j * 2*pi * fc * alpha_est * t_rx);
-    end
     if length(rx_seg_comp) >= fn_use
         rx_seg = rx_seg_comp(1:fn_use);
     else
         rx_seg = [rx_seg_comp, zeros(1, fn_use-length(rx_seg_comp))];
     end
 end
-% 6. body 切 + decode
 if is_bp
     body_bb_rx = rx_seg(body_offset+1 : end);
 else
@@ -214,8 +211,4 @@ end
 [bits_out, ~] = modem_decode(body_bb_rx, sch, sys_p, meta_tx);
 n = min(length(bits_out), length(info_bits));
 ber = sum(bits_out(1:n) ~= info_bits(1:n)) / n;
-end
-
-function s = tern(c, a, b)
-if c, s = a; else, s = b; end
 end
