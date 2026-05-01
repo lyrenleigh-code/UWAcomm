@@ -255,8 +255,10 @@ function build_middle_panels(main)
     if isprop(tx_panel, 'BorderWidth'),  tx_panel.BorderWidth = 1; end
     tx_panel.Layout.Column = 1;
     app.tx_panel = tx_panel;
-    tx_grid = uigridlayout(tx_panel, [18 2]);
-    tx_grid.RowHeight = {25, 55, 25, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 25, '1x'};
+    tx_grid = uigridlayout(tx_panel, [22 2]);
+    % V3.0 (2026-05-01) 行扩展：14=blk_fft|pl_dd, 15=blk_cp, 16=pilot_per_blk,
+    %                          17=train_period_K, 18=V4.0 按钮, 19=iter, 20=OTFS pilot, 21-22=txinfo
+    tx_grid.RowHeight = {25, 55, 25, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 28, 32, 28, 28, 25, '1x'};
     tx_grid.ColumnWidth = {140, '1x'};
     tx_grid.RowSpacing = 4;
 
@@ -304,36 +306,60 @@ function build_middle_panels(main)
     lbl_mod = uilabel(tx_grid, 'Text', '调制参数:', 'FontWeight', 'bold');
     lbl_mod.Layout.Row = 13;
 
-    % SC-FDE 参数（行 14/15）
+    % SC-FDE 参数（行 14: blk_fft；15-18: V3.0 新增 blk_cp/pilot_per_blk/train_K/V4.0 按钮）
     app.lbl_blk = uilabel(tx_grid, 'Text', 'blk_fft:');
     app.lbl_blk.Layout.Row = 14; app.lbl_blk.Layout.Column = 1;
     app.blk_dd  = uidropdown(tx_grid, ...
         'Items', {'128 (推荐)', '256', '512'}, 'Value', '128 (推荐)');
     app.blk_dd.Layout.Row = 14; app.blk_dd.Layout.Column = 2;
 
+    % V3.0 (2026-05-01)：blk_cp 解耦 + pilot_per_blk + train_period_K + V4.0 推荐预设
+    app.lbl_blk_cp = uilabel(tx_grid, 'Text', 'blk_cp:');
+    app.lbl_blk_cp.Layout.Row = 15; app.lbl_blk_cp.Layout.Column = 1;
+    app.blk_cp_dd = uidropdown(tx_grid, ...
+        'Items', {'64', '128 (V4.0 推荐)', '256'}, 'Value', '128 (V4.0 推荐)');
+    app.blk_cp_dd.Layout.Row = 15; app.blk_cp_dd.Layout.Column = 2;
+
+    app.lbl_pilot_pb = uilabel(tx_grid, 'Text', 'pilot_per_blk:');
+    app.lbl_pilot_pb.Layout.Row = 16; app.lbl_pilot_pb.Layout.Column = 1;
+    app.pilot_pb_edit = uieditfield(tx_grid, 'numeric', 'Value', 0, ...
+        'Limits', [0 256], 'RoundFractionalValues', 'on', 'ValueDisplayFormat', '%d');
+    app.pilot_pb_edit.Layout.Row = 16; app.pilot_pb_edit.Layout.Column = 2;
+
+    app.lbl_train_K = uilabel(tx_grid, 'Text', 'train_period_K:');
+    app.lbl_train_K.Layout.Row = 17; app.lbl_train_K.Layout.Column = 1;
+    app.train_K_edit = uieditfield(tx_grid, 'numeric', 'Value', 31, ...
+        'Limits', [1 31], 'RoundFractionalValues', 'on', 'ValueDisplayFormat', '%d');
+    app.train_K_edit.Layout.Row = 17; app.train_K_edit.Layout.Column = 2;
+
+    app.preset_v40_btn = uibutton(tx_grid, 'push', 'Text', 'V4.0 Jakes 推荐 (256/128/128/31)', ...
+        'BackgroundColor', PALETTE.accent, 'FontColor', 'white', ...
+        'ButtonPushedFcn', @(~,~) on_apply_v40_preset());
+    app.preset_v40_btn.Layout.Row = 18; app.preset_v40_btn.Layout.Column = [1 2];
+
     app.lbl_iter = uilabel(tx_grid, 'Text', 'Turbo 迭代:');
-    app.lbl_iter.Layout.Row = 15; app.lbl_iter.Layout.Column = 1;
+    app.lbl_iter.Layout.Row = 19; app.lbl_iter.Layout.Column = 1;
     app.iter_edit = uieditfield(tx_grid, 'numeric', 'Value', 6, ...
         'Limits', [1 15], 'RoundFractionalValues', 'on', 'ValueDisplayFormat', '%d');
-    app.iter_edit.Layout.Row = 15; app.iter_edit.Layout.Column = 2;
+    app.iter_edit.Layout.Row = 19; app.iter_edit.Layout.Column = 2;
 
-    % FH-MFSK payload
+    % FH-MFSK payload（与 SC-FDE blk_fft 共享 Row 14，靠 visibility 切换）
     app.lbl_pl = uilabel(tx_grid, 'Text', 'payload bits:');
     app.lbl_pl.Layout.Row = 14; app.lbl_pl.Layout.Column = 1;
     app.pl_dd  = uidropdown(tx_grid, ...
         'Items', {'256', '512', '1024', '2048 (默认)'}, 'Value', '2048 (默认)');
     app.pl_dd.Layout.Row = 14; app.pl_dd.Layout.Column = 2;
 
-    % OTFS 导频模式（row 12，仅 OTFS 可见）
+    % OTFS 导频模式（V3.0 顺移 16→20，仅 OTFS 可见）
     app.lbl_pilot = uilabel(tx_grid, 'Text', 'OTFS 导频:');
-    app.lbl_pilot.Layout.Row = 16; app.lbl_pilot.Layout.Column = 1;
+    app.lbl_pilot.Layout.Row = 20; app.lbl_pilot.Layout.Column = 1;
     app.pilot_dd = uidropdown(tx_grid, ...
         'Items', {'impulse (冲激，高 SNR 最优，PAPR 20dB)', ...
                   'sequence (ZC，PAPR ↓9dB，5dB 轻微误码)', ...
                   'superimposed (叠加，能效最优)'}, ...
         'Value', 'impulse (冲激，高 SNR 最优，PAPR 20dB)', ...
         'ValueChangedFcn', @(~,~) on_pilot_mode_changed());
-    app.pilot_dd.Layout.Row = 16; app.pilot_dd.Layout.Column = 2;
+    app.pilot_dd.Layout.Row = 20; app.pilot_dd.Layout.Column = 2;
 
     % TX 信号信息面板（替换原 Log 区域）
     txinfo_panel = uipanel(tx_grid, 'Title', '  TX 信号信息', 'FontSize', SIZES.body, ...
@@ -341,7 +367,7 @@ function build_middle_panels(main)
         'ForegroundColor', PALETTE.text_muted, 'BorderType', 'line');
     if isprop(txinfo_panel, 'BorderColor'), txinfo_panel.BorderColor = PALETTE.border_subtle; end
     if isprop(txinfo_panel, 'BorderWidth'), txinfo_panel.BorderWidth = 1; end
-    txinfo_panel.Layout.Row = [17 18]; txinfo_panel.Layout.Column = [1 2];
+    txinfo_panel.Layout.Row = [21 22]; txinfo_panel.Layout.Column = [1 2];
     txinfo_grid = uigridlayout(txinfo_panel, [1 1]); txinfo_grid.Padding = [5 5 5 5];
     txinfo_grid.BackgroundColor = PALETTE.surface;
     app.txinfo_area = uitextarea(txinfo_grid, 'Editable', 'off', ...
@@ -699,12 +725,18 @@ function on_scheme_changed()
     sch = current_scheme();
     is_turbo = ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE', 'OTFS'});
     is_fhmfsk = strcmp(sch, 'FH-MFSK');
+    is_scfde = strcmp(sch, 'SC-FDE');
     show(app.lbl_blk,  ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE'}));
     show(app.blk_dd,   ismember(sch, {'SC-FDE', 'OFDM', 'SC-TDE'}));
     show(app.lbl_iter, is_turbo); show(app.iter_edit, is_turbo);
     show(app.lbl_pl,   is_fhmfsk); show(app.pl_dd,    is_fhmfsk);
     is_otfs = strcmp(sch, 'OTFS');
     show(app.lbl_pilot, is_otfs); show(app.pilot_dd, is_otfs);
+    % V3.0 (2026-05-01)：SC-FDE 专属控件
+    show(app.lbl_blk_cp,    is_scfde); show(app.blk_cp_dd,    is_scfde);
+    show(app.lbl_pilot_pb,  is_scfde); show(app.pilot_pb_edit, is_scfde);
+    show(app.lbl_train_K,   is_scfde); show(app.train_K_edit,  is_scfde);
+    show(app.preset_v40_btn, is_scfde);
     % 更新文本容量提示（单一事实源：p3_text_capacity）
     nb = p4_text_capacity(sch, app.sys);
     app.lbl_txt.Text = sprintf('发射文本 (max ~%dB):', nb);
@@ -734,6 +766,21 @@ function on_pilot_mode_changed()
     end
     append_log(sprintf('[OTFS] pilot_mode → %s', app.sys.otfs.pilot_mode));
     on_scheme_changed();
+end
+
+function on_apply_v40_preset()
+% V3.0 (2026-05-01)：V4.0 Jakes 推荐预设
+% 一键设 SC-FDE 协议层突破组合
+% 实测 (diag_p4_v40_preset_validation 2026-05-01)：jakes fd=1Hz BER mean = 0.68%
+%   SNR=10 1.50%, SNR=15 0.44%, SNR=20 0.11% — 14_Streaming 直接 modem_encode/decode 链路
+% 与 archive `2026-04-26-scfde-time-varying-pilot-arch.md` V5b PASS (3.37%) 对齐
+% 关键：K=31 (单训练块, N_blocks-1) + pilot=blk_cp (CP 全 pilot 干净 BEM obs)
+    app.blk_dd.Value         = '256';
+    app.blk_cp_dd.Value      = '128 (V4.0 推荐)';
+    app.pilot_pb_edit.Value  = 128;
+    app.train_K_edit.Value   = 31;
+    append_log('[预设] V4.0 Jakes：blk_fft=256, blk_cp=128, pilot_per_blk=128, train_period_K=31');
+    append_log('       直接链路实测 jakes fd=1Hz BER 0.68% (吞吐损失 50%)');
 end
 
 function on_tv_model_changed()
@@ -862,15 +909,39 @@ function on_transmit()
             return;
         end
 
+        % --- SC-FDE V3.0 控件校验（V3.0 2026-05-01 新增）---
+        if strcmp(sch, 'SC-FDE')
+            blk_fft_v = parse_lead_int(app.blk_dd.Value);
+            blk_cp_v  = parse_lead_int(app.blk_cp_dd.Value);
+            pilot_v   = app.pilot_pb_edit.Value;
+            if blk_cp_v > blk_fft_v
+                set_status(sprintf('blk_cp (%d) > blk_fft (%d)', blk_cp_v, blk_fft_v), 'error');
+                append_log(sprintf('[!] 配置错误: blk_cp=%d > blk_fft=%d，已取消发射', blk_cp_v, blk_fft_v));
+                return;
+            end
+            if pilot_v >= blk_fft_v
+                set_status(sprintf('pilot_per_blk (%d) >= blk_fft (%d)', pilot_v, blk_fft_v), 'error');
+                append_log(sprintf('[!] 配置错误: pilot_per_blk=%d >= blk_fft=%d (modem L36 assert)', pilot_v, blk_fft_v));
+                return;
+            end
+            if pilot_v > 0 && pilot_v ~= blk_cp_v
+                append_log(sprintf('[!] V4.0 干净 BEM 物理条件偏离: pilot_per_blk=%d != blk_cp=%d，BER 可能差', pilot_v, blk_cp_v));
+            end
+        end
+
         % --- 应用参数 ---
+        % V3.0 (2026-05-01)：加 blk_cp/pilot_per_blk/train_period_K 透传（SC-FDE 用）
         % V2.0 (2026-04-28)：加 fading_type/fd_hz 透传，让 UI 衰落选项真正影响
         % sys.{scheme}.fading_type / fd_hz（V1.0 hardcode static/0 修复）
         ui_vals = struct( ...
-            'blk_fft',     parse_lead_int(app.blk_dd.Value), ...
-            'turbo_iter',  app.iter_edit.Value, ...
-            'payload',     parse_lead_int(app.pl_dd.Value), ...
-            'fading_type', app.fading_dd.Value, ...
-            'fd_hz',       app.jakes_fd_edit.Value );
+            'blk_fft',        parse_lead_int(app.blk_dd.Value), ...
+            'blk_cp',         parse_lead_int(app.blk_cp_dd.Value), ...
+            'pilot_per_blk',  app.pilot_pb_edit.Value, ...
+            'train_period_K', app.train_K_edit.Value, ...
+            'turbo_iter',     app.iter_edit.Value, ...
+            'payload',        parse_lead_int(app.pl_dd.Value), ...
+            'fading_type',    app.fading_dd.Value, ...
+            'fd_hz',          app.jakes_fd_edit.Value );
         [N_info, app.sys] = p4_apply_scheme_params(sch, app.sys, ui_vals);
 
         % --- 信源：文本 -> bits ---

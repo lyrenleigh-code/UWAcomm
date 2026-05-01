@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
-> 最后更新：2026-04-25
-> 页面总数：53（conclusions 增 SC-TDE fd=1Hz V5.6 HFM-signature bias calibration 条目；4/5 接受准则 PASS + SNR=20 接近 oracle（0.92% vs 0.89%、6.7% vs 6.7%）；详见 conclusions 头部 + log）
+> 最后更新：2026-05-01
+> 页面总数：53（流式调试日志 +2026-05-01 P4 UI 解耦 SC-FDE blk_cp/blk_fft + V4.0 预设；diag 实测直接链路 jakes fd=1Hz BER 0.68%；UI 实测 50% 待 follow-up；详见 log + 流式调试日志）
 
 ## Architecture（架构页）
 

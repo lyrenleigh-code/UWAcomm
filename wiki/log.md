@@ -1,5 +1,17 @@
 # Wiki 操作日志
 
+## 2026-05-01
+
+- **P4 UI 解耦 SC-FDE blk_cp/blk_fft + V4.0 预设按钮（任务 1 算法层完成）**
+  - spec `2026-05-01-p4-ui-decouple-blk-cp-and-pilot-controls.md` + 同名 plan
+  - `p4_apply_scheme_params V2.0→V3.0`：删 L46 强制 `blk_cp=blk_fft`；改读 ui_vals.blk_cp（缺省=blk_fft）；N_info 改 V4.0 公式 `(blk_fft - pilot_per_blk) * N_data_blocks - mem`，K linspace 训练块分布
+  - `p4_demo_ui.m` Layout 18→22 行：加 blk_cp_dd / pilot_pb_edit / train_K_edit / preset_v40_btn 4 控件；on_scheme_changed 加可见性绑定（仅 SC-FDE）；on_transmit 加 SC-FDE 校验；ui_vals 加 3 字段透传；新回调 on_apply_v40_preset
+  - 单测 `test_p4_apply_scheme_params_v3.m` 6/6 PASS（C1 默认兼容 / C2 V4.0 推荐 / C3 自定义 / C4 OFDM 隔离 / C5 SC-TDE 隔离 / C6 fading 透传）
+  - diag `diag_p4_v40_preset_validation.m` 36-trial 端到端验证：v0_default jakes fd=1Hz 49.56%（重现 50% 灾难） / v3 (256/128/128/31) **0.68%** 最佳 / archive 标准 v2 (256/128/128/15+N=16) 2.46%（与 archive V5b PASS 写的 3.37% 接近）；多训练块 K=8/15 不优于单训练 K=31，A4 教训重现
+  - 预设按钮值修正：K=8 → K=31（保持 N_blocks=32 + 单训练块 + pilot=blk_cp 最简洁）
+  - 调试日志 `wiki/debug-logs/14_Streaming/流式调试日志.md` 加 2026-05-01 章节
+  - **未解 limitation**：UI 实测 V4.0 预设 + slow Jakes fd=1Hz 仍 50% + 触发循环发；直接链路 0.68% 证明算法无问题，差异在 UI 链路（同步 / 前导 / bypass）。归任务 3「runner ↔ UI 等价性单元测试」定位
+
 ## 2026-04-28
 
 - **P4 恒定多普勒对齐 codex（RX α 补偿符号 + α refinement 移植）**
