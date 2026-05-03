@@ -33,7 +33,11 @@ try
         case 'time_sparse'
             delays_samp = opts.delays_samp(:).';
             % h_est 第一列作为代表；h_true 按 delays_samp 下标抽取
-            h_est_vec  = h_est(:, min(size(h_est,2), max(1, round(size(h_est,2)/2))));
+            if isvector(h_est)
+                h_est_vec = h_est(:);
+            else
+                h_est_vec = h_est(:, min(size(h_est,2), max(1, round(size(h_est,2)/2))));
+            end
             sample_idx = getfield_def(opts, 'sample_idx', round(size(h_true,2)/2));
             sample_idx = max(1, min(sample_idx, size(h_true,2)));
             h_true_col = h_true(:, sample_idx);
@@ -64,11 +68,15 @@ try
                 end
                 h_td(idx) = h_td(idx) + h_true_col(p);
             end
-            H_true = fft(h_td);
-            H_est  = h_est(:, min(size(h_est,2), max(1, round(size(h_est,2)/2))));
+            H_true = fft(h_td).';
+            if isvector(h_est)
+                H_est = h_est(:);
+            else
+                H_est = h_est(:, min(size(h_est,2), max(1, round(size(h_est,2)/2))));
+            end
             n_common = min(numel(H_true), numel(H_est));
-            num = norm(H_est(1:n_common).' - H_true(1:n_common).')^2;
-            den = norm(H_true(1:n_common).')^2;
+            num = norm(H_est(1:n_common) - H_true(1:n_common))^2;
+            den = norm(H_true(1:n_common))^2;
 
         case 'dd_grid'
             % OTFS DD 域 NMSE 需要 TX 侧的 delay/doppler 真值
