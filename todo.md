@@ -138,8 +138,8 @@
 | **OTFS PAPR 专项降低** | 待做 | 需 SLM/PTS/削峰等专用技术 |
 | **OTFS 扩散 pilot** | 待做 | spec `2026-04-14-otfs-spread-pilot.md` |
 | ~~**14_Streaming P4 scheme routing**~~ | ✅ 2026-04-27 | spec `active/2026-04-15-streaming-p4-scheme-routing.md`（codex completed）；commit `ef0ed49` 移植 codex 8 文件（common 4 + tx/rx_stream_p4 + channel_simulator_frame + test_p4_scheme_routing）；test 4/4 PASS（mixed-scheme "FHMFSKSCFDEOFDMSCTDEDSSSOTFS" 6 schemes CRC 全 1 + dispatch all 6 + payload CRC fail missing frame + header fail skip）；不动 modem_encode/decode_scfde（保留 claude Phase 4+5）；P4 demo UI 17 文件之前已 done |
-| **14_Streaming P5（三进程并发）** | 待启动 | TX/Channel/RX 三进程并发；codex 已做 rx_daemon_p5/channel_daemon_p5/p5_channel_preset 可借鉴；spec `active/2026-04-15-streaming-p5-concurrent.md` |
-| **14_Streaming P6（AMC）** | 待 P5 | 物理层 AMC（link quality → scheme 自适应）；`amc/` 目录已占位 |
+| ~~**14_Streaming P5（三进程并发）**~~ | ✅ 2026-05-03 移植 codex | start_tx/start_channel/start_rx + channel_daemon_p5 + rx_daemon_p5 + p5_channel_preset；file-handshake 模型（tx_frames/channel_frames/rx_out + .ready）；test_p5_three_process_smoke 6/6 PASS（含 RX offline reconnect + 静态/低/高 Doppler preset 排序）|
+| ~~**14_Streaming P6（AMC）**~~ | ✅ 2026-05-03 移植 codex | amc/ 7 文件（mode_selector / link_quality_est / amc_make_ack / amc_tx_next_scheme / amc_update_session / amc_plot_history / amc_ctrl_codec）+ ui/p6_amc_demo_ui.m；test_p6_amc_decision 10/10 PASS（static→OFDM, low→SC-FDE, high→OTFS, cooldown, fixed-Doppler opt-in, hysteresis ±5dB, ACK fallback, session JSON/history）+ test_p6_amc_demo_ui_smoke 4/4 PASS |
 | **14_Streaming P4 真多普勒** | 待启动 | spec `active/2026-04-22-p4-real-doppler-fork.md`（codex 实施）；从 P3 fork 接 gen_doppler_channel V1.0（时变 α(t) + 多径）；P4 demo UI 已存在但未接 real Doppler |
 | ~~**P4 UI ↔ 算法对齐 + Jakes + 恒定多普勒**~~ | ✅ 2026-04-28 commit `44db87e` | spec active；3 段（V2.0 透传 + Jakes 接通 + α V7+refinement）已 commit |
 | **SC-FDE bypass=ON dop=10 残余 35.9%（H2 fix 不彻底）** | 待 spec | bypass=ON dop=10 H2 fix 后 OFDM/SC-TDE 0%、SC-FDE 仍 35.9%；bypass=OFF 同条件 6.2%；与 SC-FDE turbo iter / SNR 紧 / seed 抖动相关，独立调查 |
@@ -148,7 +148,7 @@
 | **P4 UI follow-up：暴露 oracle toggle**（runner 等价模式）| 待启动 | UI 加调试 checkbox，allow 透传 fading_type/sym_delays/noise_var 等 oracle 参数到 modem_decode；让用户能看到算法上界 |
 | ~~**P4 UI follow-up：runner ↔ UI 等价性单元测试**~~ | ✅ 2026-05-03 算法/测试层闭环 | spec `active/2026-05-03-p4-ui-runner-equivalence-rca.md`；3 测试落地：alignment 7/7 + runner-equivalence (R 2.28% ≈ U1 2.22% AWGN 5 seed mean) + jakes-α-gate-e2e（**Path B 49.90% ← 复现 50% / Path C 9.48% ← gate 修复**）；H5 命中根因 = jakes 假 α 反补偿；移植 codex `streaming_alpha_gate.m` + 测试 5/5 + 修 `p4_demo_ui.m` 反补偿/refinement 双路加 gate；UI 实测验证留用户 |
 | **P4 UI follow-up：tv 模型 + Jakes 组合** | 待启动 | 当前 jakes 模式下 tv 控件被忽略；`gen_uwa_channel` 不接受 tv struct，需写 jakes wrapper 或扩展 gen_uwa_channel |
-| **AMC 移植到 14_Streaming claude**（codex 已有 1800+ 行 P6 phase）| 待 P5 | codex 完整 AMC：mode_selector / p4_default_amc_opts / amc_state / amc_btn / streaming_apply_modem_params / p4_clear_profile_overrides；待 P5 三进程完成后再考虑 |
+| ~~**AMC 移植到 14_Streaming claude**~~ | ✅ 2026-05-03 见上方 P6 行 | 完成 |
 
 ### 🟢 低优先（技术债）
 
