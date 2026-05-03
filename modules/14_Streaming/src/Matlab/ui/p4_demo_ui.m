@@ -1354,8 +1354,16 @@ function try_decode_frame()
     % comp_resample_spline V7+ 约定：正 alpha 直接补偿接收端压缩。
     % detect_frame_stream 的 alpha_est 同样为"正 = 压缩"，因此直接传 alpha_est。
     % （2026-04-28 修：原代码 -alpha_est 是 V6 之前的废弃约定，对齐 codex worktree）
-    if abs(alpha_est_rx) > 1e-6 && alpha_conf > 0.3
-        rx_seg_comp = comp_resample_spline(rx_seg, alpha_est_rx, app.sys.fs, 'fast');
+    %
+    % 2026-05-03 加 streaming_alpha_gate（移植 codex P6.20）：
+    % Jakes 衰落下 dual-HFM 误报 alpha_raw≈3.67e-2（>>1e-2 物理上限），原门
+    % `abs(alpha_est_rx) > 1e-6 && alpha_conf > 0.3` 不能拦截 → 假 α 反补偿
+    % 完全打乱信号 → BER ~50%。spec `2026-05-03-p4-ui-runner-equivalence-rca.md`
+    % 复现：test_p4_ui_runner_equivalence.m R-jakes/U1-jakes 1-3% vs UI 实测 50%
+    alpha_gate = streaming_alpha_gate(alpha_est_rx, alpha_conf, app.sys);
+    if alpha_gate.accepted
+        alpha_use = alpha_gate.alpha;
+        rx_seg_comp = comp_resample_spline(rx_seg, alpha_use, app.sys.fs, 'fast');
         if app.bypass_rf
             % 2026-05-01 fix: bypass=ON baseband 路径补偿载波相位 exp(-j·2π·fc·α·t)
             % comp_resample_spline 对 baseband 只反时间伸缩；对 passband 等效同时反载波相位
@@ -1363,7 +1371,7 @@ function try_decode_frame()
             % bypass=ON 残留 fc·α 频偏 → body 整段相位旋转 → BER ~50%。
             % 验证：diag_p4_bypass_body_compare ON_raw 51.5% → ON_fix 0%（OFDM dop=10）
             t_rx = (0:length(rx_seg_comp)-1) / app.sys.fs;
-            rx_seg_comp = rx_seg_comp .* exp(-1j * 2*pi * app.sys.fc * alpha_est_rx * t_rx);
+            rx_seg_comp = rx_seg_comp .* exp(-1j * 2*pi * app.sys.fc * alpha_use * t_rx);
         end
         % 截/补到 fn 长度，保持下游处理兼容
         if length(rx_seg_comp) >= fn
@@ -1371,7 +1379,10 @@ function try_decode_frame()
         else
             rx_seg = [rx_seg_comp, zeros(1, fn-length(rx_seg_comp))];
         end
-        append_log(sprintf('[α-COMP] 反补偿 α=%+.3e 后解码', alpha_est_rx));
+        append_log(sprintf('[α-COMP] α=%+.3e (gate=%s) → 反补偿', alpha_use, alpha_gate.reason));
+    else
+        append_log(sprintf('[α-GATE] α=%+.3e conf=%.2f 拒绝（%s），跳过反补偿', ...
+            alpha_est_rx, alpha_conf, alpha_gate.reason));
     end
 
     if app.bypass_rf
@@ -1416,7 +1427,8 @@ function try_decode_frame()
     ber = n_err / n;
 
     % 2026-04-28 移植 codex：α refinement —— BER 高时在 ±2e-5 邻域扫 11 候选 α 重解码
-    if p4_should_refine_alpha(info, alpha_est_rx, alpha_conf)
+    % 2026-05-03：gate 拒绝时跳过（jakes 假报 α=3.67e-2 邻域 ±2e-5 扫描无意义）
+    if alpha_gate.accepted && p4_should_refine_alpha(info, alpha_est_rx, alpha_conf)
         score_before = p4_decode_score(info);
         best = p4_refine_alpha_decode(rx_seg_raw, fn, sch, meta, ...
             body_offset, alpha_est_rx);
@@ -1458,6 +1470,7 @@ function try_decode_frame()
     entry.sync_det  = sync_det;                      % 真同步检测结果（sync tab 用）
     entry.sync_diff = sync_diff;                     % 检测位置 - ground truth
     entry.alpha_true = app.tx_alpha_true;            % P4: 真实 α(t) 序列（时变多普勒可视化）
+    entry.alpha_gate = alpha_gate;                   % 2026-05-03: α gate 决策（accepted/reason/alpha_use）
 
     app.history{end+1} = entry;
     if length(app.history) > 20

@@ -146,7 +146,7 @@
 | **SC-FDE bypass=OFF dop=0 BER 24% 抖动** | 待确认 | turbo_iter=2 + 单 seed 不稳；提高 iter 或多 seed 验证可能解；非紧迫 |
 | ~~**P4 UI follow-up：解耦 SC-FDE blk_cp/blk_fft + 加 pilot 控件**（V4.0 自动激活）~~ | ✅ 2026-05-01 算法层 | spec/plan/code/单测6/6/diag 36-trial 全 PASS；V3.0 解耦 + pilot/train_period_K 控件 + V4.0 预设按钮（256/128/128/31）；直接链路 jakes fd=1Hz BER 0.68%（v0 baseline 49.56%，74× 改善）；**UI 实测 BER 仍 50% + 循环发 → 归 runner↔UI 等价性 follow-up 定位 UI 链路差异** |
 | **P4 UI follow-up：暴露 oracle toggle**（runner 等价模式）| 待启动 | UI 加调试 checkbox，allow 透传 fading_type/sym_delays/noise_var 等 oracle 参数到 modem_decode；让用户能看到算法上界 |
-| **P4 UI follow-up：runner ↔ UI 等价性单元测试** | 🔥 高优先（升级） | 固定 seed AWGN+静态，验证 13_SourceCode runner 与 14_Streaming UI 两条路径 BER 等价；2026-05-01 V4.0 直接链路 0.68% vs UI 50% 巨大差异指向 UI 链路严重 bug，必查 |
+| ~~**P4 UI follow-up：runner ↔ UI 等价性单元测试**~~ | ✅ 2026-05-03 算法/测试层闭环 | spec `active/2026-05-03-p4-ui-runner-equivalence-rca.md`；3 测试落地：alignment 7/7 + runner-equivalence (R 2.28% ≈ U1 2.22% AWGN 5 seed mean) + jakes-α-gate-e2e（**Path B 49.90% ← 复现 50% / Path C 9.48% ← gate 修复**）；H5 命中根因 = jakes 假 α 反补偿；移植 codex `streaming_alpha_gate.m` + 测试 5/5 + 修 `p4_demo_ui.m` 反补偿/refinement 双路加 gate；UI 实测验证留用户 |
 | **P4 UI follow-up：tv 模型 + Jakes 组合** | 待启动 | 当前 jakes 模式下 tv 控件被忽略；`gen_uwa_channel` 不接受 tv struct，需写 jakes wrapper 或扩展 gen_uwa_channel |
 | **AMC 移植到 14_Streaming claude**（codex 已有 1800+ 行 P6 phase）| 待 P5 | codex 完整 AMC：mode_selector / p4_default_amc_opts / amc_state / amc_btn / streaming_apply_modem_params / p4_clear_profile_overrides；待 P5 三进程完成后再考虑 |
 
