@@ -53,6 +53,10 @@ modules/14_Streaming/sessions/
 # 14_Streaming test 稳定可视化产物（每次跑测试自动刷新，不入库）
 modules/14_Streaming/src/Matlab/tests/p6_amc_history.png
 
+# simple UI smoke 测试输出 wav/json（每次跑测试重新生成，不入库）
+modules/14_Streaming/src/Matlab/tests/tx_simple_ui_smoke_out/
+modules/14_Streaming/src/Matlab/tests/rx_simple_ui_smoke_out/
+
 # Sensitive
 .env
 *.key

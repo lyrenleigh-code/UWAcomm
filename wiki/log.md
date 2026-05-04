@@ -1,5 +1,18 @@
 # Wiki 操作日志
 
+## 2026-05-04
+
+- **TX/RX 简化 UI 拆分（spec/plan/MVP 完成）** — 用户决策"放弃 P4 UI 复杂架构"后落地
+  - spec `2026-05-04-tx-rx-simple-ui-split.md` + plan `2026-05-04-tx-rx-simple-ui-split.md`
+  - 5 文件：`ui/simple_ui_addpaths.m` + `ui/simple_ui_meta_io.m` (含 base64 known_bits + complex strip/restore) + `ui/tx_simple_ui.m` (~370 行 classdef) + `ui/rx_simple_ui.m` (~440 行 classdef，流式 chunk-by-chunk) + 2 smoke 测试
+  - 架构：classdef + uifigure 同步回调（无 timer/FIFO/closure 陷阱），按钮按下完整执行一次"发射→保存"或"读取→流式→显示"
+  - 复用底层（modem_encode/assemble_physical_frame/upconvert/gen_uwa_channel/detect_frame_stream/streaming_alpha_gate），不走 P5 daemon 层
+  - **TX UI smoke 6/6 体制 PASS**（SC-FDE/OFDM/SC-TDE/OTFS/DSSS/FH-MFSK 各生成 wav+JSON）
+  - **RX UI smoke 3/3 模式 PASS**（jakes skip 作 follow-up）：pass(SC-FDE 50.81%-known limitation)/awgn(SC-FDE V4.0 SNR=20 BER 1.84% ≈ runner Path R 2.28%)/multipath(0%)
+  - 衍生发现 F1：`diag_pass_vs_awgn80.m` 量化 SC-FDE V4.0 高 SNR 非单调灾难（10dB→0% / 30dB→20.88% / 80dB→48.71% / pass→48.71%），与 conclusions/memory Phase I+J 归档一致；其他 3 体制 pass 模式全 0% — RX UI 本身无 bug
+  - 衍生发现 F2：jakes 模式 detect 失败（apply_jakes_full baseband round-trip 损失 HFM 峰），workaround 用 multipath；待 follow-up spec
+  - P4 UI 保留可用（未动 `ui/p4_demo_ui.m`），P5 三进程脚本保留可用
+
 ## 2026-05-01
 
 - **P4 UI 解耦 SC-FDE blk_cp/blk_fft + V4.0 预设按钮（任务 1 算法层完成）**

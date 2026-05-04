@@ -1,7 +1,7 @@
 # UWAcomm Wiki Index
 
-> 最后更新：2026-05-01
-> 页面总数：53（流式调试日志 +2026-05-01 P4 UI 解耦 SC-FDE blk_cp/blk_fft + V4.0 预设；diag 实测直接链路 jakes fd=1Hz BER 0.68%；UI 实测 50% 待 follow-up；详见 log + 流式调试日志）
+> 最后更新：2026-05-04
+> 页面总数：53（2026-05-04 TX/RX 简化 UI 拆分 MVP 落地：tx_simple_ui+rx_simple_ui+helper×2+smoke×2，6/6 体制 TX + 3/3 模式 RX PASS；jakes 模式 detect 失败 + SC-FDE V4.0 高 SNR 灾难量化为 known limitation；详见 log + spec `2026-05-04-tx-rx-simple-ui-split.md`）
 
 ## Architecture（架构页）
 
