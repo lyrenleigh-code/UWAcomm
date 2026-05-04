@@ -234,23 +234,15 @@ function bits_out = rx_sctde(rx_signal, params, tx_info, ch_info)
 end
 
 function bits_out = rx_otfs(rx_signal, params, tx_info, ch_info)
-%% ⚠️ ORACLE BASELINE — 由 params.rx.otfs_mode 选择路径
-%  默认 'oracle': 多重 oracle 泄漏，仅用作性能上界基准（见下方 ORACLE 标注）
-%  'real':       走真实接收（否则需 main_sim_single 同时开启 passband 路径）
-%
-%  真实接收路径参考 test_otfs_timevarying.m，需要 rx_signal 为通带信号（非占位）：
-%    - bb_rx = downconvert(rx_signal, fs_pb, fc)
-%    - [Y_dd, ~] = otfs_demodulate(bb_rx, N, M, cp_len, 'dft')
-%    - [h_dd, path_info] = ch_est_otfs_dd(Y_dd, pilot_info, N, M)
-%    - guard 区能量 → noise_var
-%    - 送 turbo_equalizer_otfs
-%  生产用户应直接用 test_otfs_timevarying 的完整路径。
-%
-%  main_sim_single DD 模式（`rx_signal = tx_signal` 占位）**本质就是 oracle 模式**，
-%  无法通过本函数 'real' 开关简单切换。真正的去 oracle 需要 main_sim_single 重构
-%  （独立 spec，2026-04-13-otfs-sync-architecture.md 的 DD→通带 集成）。
-%
-%  违反 CLAUDE.md §2/§7 第 2/3/4/6 条（接收端使用 TX 数据/真实信道/SNR）
+%% rx_otfs — 由 params.rx.otfs_mode 选择路径（sys_params 默认 'real'）
+%  'real'   ：走真实接收（rx_otfs_real，本文件下方）。
+%             链路 = frame_parse_otfs → otfs_demodulate → DD pilot 估计
+%                  (impulse/sequence/superimposed) → guard 噪声估计
+%                  → eq_otfs_lmmse / eq_otfs_uamp Turbo loop。
+%             由 main_sim_single 经 gen_uwa_channel 与其他 5 体制统一供给。
+%             实施日期 2026-04-27（commit 9e338a1）。
+%  'oracle' ：legacy DD baseline（仅作性能上界），违反 CLAUDE.md §2/§7
+%             第 2/3/4/6 条（使用 TX 数据/真实信道/SNR），见下方 ORACLE 标注。
 if isfield(params, 'rx') && isfield(params.rx, 'otfs_mode') && ...
    strcmpi(params.rx.otfs_mode, 'real')
     bits_out = rx_otfs_real(rx_signal, params, tx_info, ch_info);

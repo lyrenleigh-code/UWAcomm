@@ -38,7 +38,7 @@
 | 10 多普勒处理 | `10_DopplerProc/` | 15 | ✅ comp_resample farrow V5+spline V7 统一方向 |
 | 11 阵列预处理 | `11_ArrayProc/` | 8 | ✅ |
 | 12 Turbo 迭代调度 | `12_IterativeProc/` | 7 | ✅ 5 均衡器 + La_dec_info 反馈修复 |
-| 13 端到端仿真 | `13_SourceCode/` | 27 | 🔶 6 体制 E2E 完成；rx_otfs oracle 已标注但未重写 |
+| 13 端到端仿真 | `13_SourceCode/` | 27 | ✅ 6 体制 E2E 完成；rx_otfs 真重写完成（2026-04-27 commit `9e338a1`） |
 | 14 流式仿真框架 | `14_Streaming/` | 70+ | ✅ P1-P3 完成 + P4 scheme routing 4/4 PASS（2026-04-27 移植 codex）+ 真同步 + 深色科技风 UI + 8 tab 可视化 |
 
 ---
@@ -114,7 +114,7 @@
 | **L5/L6 ch_est_gamp V1.1→V1.4 修复链 + SNR 受限归档** | 2026-04-23 | 修订：真根因是 `ch_est_gamp.m`（不是 BEM，static 路径走 GAMP）；V1.1 divergence guard+LS fallback / V1.2 双跑 / V1.3 CV 撤回 / V1.4 偏 LS 0.8；30 seed Monte Carlo: 灾难率 10% → 0%/6.7%；残余 2/30 验证 SNR=15 恢复 0% → 边界 limitation，非 bug |
 | ~~**（可选）static 路径换 `ch_est_ls`/`ch_est_omp` 替代 GAMP**~~ | ❌ 试败（2026-04-23） | spec `2026-04-23-scfde-omp-replace-gamp-and-oracle-clean.md`；OMP K=6 反而 +1e-2 灾难率 6.7%→10%（残差驱动选错 support）；保留作 `tog.use_omp_static` toggle，默认仍 GAMP V1.4 |
 | ~~**SC-FDE sps 相位选择真去 oracle**（架构改动）~~ | ✅ 2026-04-24（Phase 1+2） | spec `archive/2026-04-24-scfde-sps-deoracle-arch.md`；**第 4 次尝试成功**：迁移 14_Streaming 架构（第 0 block=training seed=77，RX 本地重建）；sps+GAMP 去 oracle 完成；Phase 3 BEM 单 block 证伪（fd=1Hz 0.16%→49.64%）回滚，BEM 判决反馈 2 阶段留 Phase 3b（spec `active/2026-04-24-scfde-bem-decision-feedback-arch.md`）；static/discrete_doppler 加 OFFLINE ORACLE BASELINE 声明 |
-| **rx_chain.rx_otfs 真重写（main_sim_single 改造）** | 骨架占位 | rx_otfs_real 已加入 switch 路径但未实现；需 main_sim_single 开启真实 passband + 信道 + rx_otfs_real 填充。独立 spec 待创建 |
+| ~~**rx_chain.rx_otfs 真重写（main_sim_single 改造）**~~ | ✅ 2026-04-27 漏登（2026-05-04 补登） | commit `9e338a1`，移植 codex spec `archive/2026-04-25-rx-chain-otfs-real-rewrite.md`；`rx_otfs_real` 完整实现（frame_parse_otfs + DD pilot 估计 impulse/ZC/superimposed + pilot contribution removal + guard 噪声估计 + LMMSE/UAMP Turbo loop）；`main_sim_single` OTFS real 与其他 5 体制统一经 `gen_uwa_channel`；`sys_params` 默认 `otfs_mode='real'`。**2026-05-04 验真**：`main_sim_single` SNR=10 dB / 5径 static / 6 体制全 0%（OTFS N_info=1857）|
 | ~~**OTFS 离散 Doppler 32% BER 专项 debug**~~ | ✅ 2026-04-21 | 根因 = `pilot_mode='sequence'` regression（非 Doppler 问题）。回滚 default → impulse，3 信道 × 3 trial BER 0-0.04%。详见 `wiki/modules/13_SourceCode/OTFS调试日志.md` |
 | ~~**α 补偿推广到其他 4 体制**~~ | 🟡 部分完成（2026-04-21） | OFDM/DSSS/FH-MFSK 推广成功（A2 全 0%，D |α|≤1e-2 大部分工作）；SC-TDE 失败（下游 α 敏感，独立 spec 待开） |
 
@@ -168,6 +168,7 @@
 | **P4 UI 解耦 SC-FDE blk_cp/blk_fft + V4.0 预设按钮** | **2026-05-01** | spec `active/2026-05-01-p4-ui-decouple-blk-cp-and-pilot-controls.md` + plan；`p4_apply_scheme_params V3.0` 删强制 blk_cp=blk_fft + N_info V4.0 公式；`p4_demo_ui` Layout 18→22 行加 4 控件（blk_cp/pilot_per_blk/train_period_K + V4.0 预设按钮）；单测 6/6 PASS；diag_p4_v40_preset_validation 36-trial 实测 v0_default 49.56% / v3 (256/128/128/31) **0.68%**（最佳）；预设值 K=8→K=31 修正；**UI 实测 50% 是 UI 链路独立问题，归 runner↔UI 等价性 follow-up** |
 | **P4 UI bypass=ON 路径 H2 carrier-phase fix** | **2026-05-01** | spec `archive/2026-05-01-p4-bypass-on-doppler-ber-rca.md`；Phase 0 SNR sweep 证伪 H1（SNR 15→35 全 50%）；Phase 1 body 对比锁定 H2（dop=10 corr=0.03→0.996）；fix 在 try_decode_frame + p4_refine_alpha_decode 加 `exp(-j·2π·fc·α·t)`；OFDM/SC-TDE bypass=ON dop=10 BER 51%→0%、DSSS 2.75%→0%；SC-FDE 49%→35.9%（残余作 known limitation） |
 | **P4 UI tx_pending leak 防御 + bypass=ON detect 路径修复 + FH-MFSK N_shaped 字段对齐** | **2026-05-01** | commit `062d1f3`/`44db87e`；try_decode_frame 整体 try/catch + modem_decode catch 清状态（防 fifo 残段 false-positive 循环触发）；detect_frame_stream 加 isreal 分支（bypass=ON complex baseband 跳过 downconvert）；modem_encode_fhmfsk 补 meta.N_shaped（对齐 5 体制） |
+| **rx_chain.rx_otfs 真重写（main_sim_single 改造）** | **2026-04-27**（2026-05-04 补登） | commit `9e338a1`，移植 codex spec `archive/2026-04-25-rx-chain-otfs-real-rewrite.md`；`rx_otfs_real` 完整实现（frame_parse_otfs + DD pilot 估计 + pilot contribution removal + guard 噪声估计 + LMMSE/UAMP Turbo），main_sim_single OTFS real 经 `gen_uwa_channel` 与 5 体制统一，`sys_params` 默认 `otfs_mode='real'`。2026-05-04 main_sim_single SNR=10 dB / 5径 static / 6 体制全 0%；rx_chain.m 函数头陈旧注释同步清理 |
 | 离散 Doppler 信道全体制对比 | 2026-04-13 | 6 体制 × 6 信道 BER 矩阵 |
 | SC-TDE V5.2 优化 | 2026-04-14 | 时变跳过训练精估+nv_post 兜底 |
 | 14_Streaming P1（FH-MFSK loopback + GUI） | 2026-04-15 | passband 信道 + Jakes 时变 |
