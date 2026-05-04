@@ -56,6 +56,7 @@ modules/14_Streaming/src/Matlab/tests/p6_amc_history.png
 # simple UI smoke 测试输出 wav/json（每次跑测试重新生成，不入库）
 modules/14_Streaming/src/Matlab/tests/tx_simple_ui_smoke_out/
 modules/14_Streaming/src/Matlab/tests/rx_simple_ui_smoke_out/
+modules/14_Streaming/src/Matlab/tests/simple_ui_full_matrix_out/
 
 # Sensitive
 .env

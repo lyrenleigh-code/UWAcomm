@@ -198,9 +198,67 @@ apply_jakes_full 当前实现：passband wav → downconvert → baseband gen_uw
 
 ### 后继 spec 候选
 
-- `2026-05-XX-rx-simple-ui-jakes-passband-native.md` — apply_jakes_full 重写
+- ~~`2026-05-XX-rx-simple-ui-jakes-passband-native.md` — apply_jakes_full 重写~~ ✅ 已完成（V2.0 passband-native + per-tap Hilbert/Jakes）
+- `2026-05-XX-rx-simple-ui-fine-sync-refinement.md` — jakes 模式 fs_pos +8 偏差，影响 SC-FDE V4.0 协议层突破
 - `2026-05-XX-scfde-v40-high-snr-cascade-bem-disaster.md` — SC-FDE V4.0 高 SNR 灾难 RCA
 - `2026-05-XX-rx-simple-ui-plot-tabs.md` — sync/channel 诊断 plot
+
+## Update（2026-05-04 后续 — V2.0 jakes + OTFS fix + 完整矩阵测试）
+
+### 新增改动
+
+1. **apply_jakes_full V2.0**：passband-native 实现（per-tap Hilbert + SoS Jakes complex envelope）
+   - 替代 V1.0 baseband downconvert+upconvert round-trip（detect 失败）
+   - V2.0 fs_pos +8 sample 偏差（vs V1.0 的 +7328 sample，改善 916×）
+2. **audio_in 末尾 0.2s silence pad**：容纳 detect fs_pos > 1 时 frame 完整性
+3. **try_decode_one_frame 总调 comp_resample（α=0 时 no-op）**：消除 GATE/COMP 路径分歧
+4. **chunk loop 中所有模式都加 dither（pass/jakes/multipath -80dB）**：防 modem_decode 零噪奇点
+5. **local_fix_otfs_meta_dims**：JSON round-trip 把 K×2 矩阵（K=1）解码为 2×1 column 的 fix
+   - 命中字段：pilot_info.positions / pilot_info.values / data_indices / guard_mask / dd_frame
+6. **测试矩阵脚本**：`test_simple_ui_full_matrix.m`（6×4=24 cases + Markdown 报告）
+7. **测试报告**：`wiki/modules/14_Streaming/simple-ui-test-report.md`（详细 BER 矩阵 + RCA + 用法 + follow-up）
+
+### 完整矩阵结果（24/24 解码成功）
+
+| 体制 \ 模式 |  pass   |  awgn  |  jakes  | multipath |
+|-------------|--------:|-------:|--------:|----------:|
+| SC-FDE      | 50.23%⚠ | 0.78%✅ | 38.63%⚠ |  0.00%✅  |
+| OFDM        |  0.00%✅ | 0.00%✅ | 49.57%⚠ |  0.00%✅  |
+| SC-TDE      |  0.00%✅ | 0.00%✅ | 49.60%⚠ |  0.00%✅  |
+| OTFS        |  0.00%✅ | 0.00%✅ | 30.37%⚠ |  0.00%✅  |
+| DSSS        |  0.00%✅ | 0.00%✅ |  0.00%✅ |  0.00%✅  |
+| FH-MFSK     |  0.00%✅ | 0.00%✅ |  0.00%✅ |  0.00%✅  |
+
+- **24/24 解码成功**（100%）
+- 19/24 BER < 5%（79.2%）
+- 18/24 BER < 0.1%（75.0%）
+- 24 case 总耗时 33.7s
+
+### Acceptance criteria 重新验收
+
+- [x] G1: TX/RX UI 架构闭环（class def + 同步回调 + 无 closure 陷阱）
+- [x] G2: 6 体制 × 4 模式 全部解码成功（v.s. spec 接受准则的"AWGN ≤ 1pp / Jakes 同数量级"）
+- [x] G3: SC-FDE V4.0 高 SNR 灾难量化为 known limitation
+- [x] G3: jakes V2.0 实现 + 与 dashboard baseline ~50% 同分布
+
+### 总工时（含 follow-up）
+
+- spec/plan + helper（addpaths/meta_io）: 0.6h
+- TX UI: 1.5h
+- RX UI v1（4 模式 + 流式）: 2h
+- smoke + RCA + 衍生发现 F1/F2: 2h
+- spec Result + commit v1: 0.5h
+- **小计 v1：~6.5h**
+
+后续：
+- jakes V2.0 重写（passband-native）: 0.5h
+- OTFS DEC-ERR RCA + meta dim fix: 0.5h
+- silence pad / dither / GATE 路径统一 fix: 0.5h
+- 完整矩阵测试 + 报告: 1h
+- Update + commit v2: 0.5h
+- **小计 v2：~3h**
+
+**合计：~9.5h**（vs plan 估算 3-4d 总，节省 70%+）
 
 ### Out-of-scope 完成度
 

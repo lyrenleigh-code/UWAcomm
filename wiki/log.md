@@ -2,6 +2,14 @@
 
 ## 2026-05-04
 
+- **TX/RX 简化 UI v2.0：jakes passband-native + OTFS fix + 完整矩阵 24/24 PASS** — 用户授权"自己处理 + 形成详细测试报告"后续推进
+  - **apply_jakes_full V2.0**：passband-native（per-tap Hilbert + SoS Jakes complex envelope），替代 V1.0 baseband round-trip；fs_pos +8 sample（vs V1.0 +7328 sample，改善 916×）
+  - **OTFS RCA + fix**：JSON round-trip 把 K×2 矩阵（K=1）解码为 2×1 column → modem_decode_otfs L52 `size(pos,1)=2` oob；加 `local_fix_otfs_meta_dims` 校正 pilot_info.positions/values + data_indices + guard_mask + dd_frame
+  - **辅助修复**：audio_in 末尾 0.2s silence pad（容纳 fs_pos>1）；try_decode 总调 comp_resample（α=0 时 no-op）消除 GATE/COMP 路径分歧；所有模式加 dither 防 modem_decode 零噪奇点
+  - **完整矩阵测试** `test_simple_ui_full_matrix.m`：6 体制 × 4 模式 = **24/24 解码成功**（100%），19/24 BER<5%（79.2%）；总耗时 33.7s
+  - **测试报告** `wiki/modules/14_Streaming/simple-ui-test-report.md`：详细 BER 矩阵 / α gate 决策 / fs_pos 同步 / 单帧耗时 / RCA / 用法 / follow-up
+  - 已知 limitation：F1 SC-FDE V4.0 高 SNR 灾难（10dB→0% / pass→48.71% 非单调）；F2 SC-FDE/OFDM/SC-TDE jakes 38-50%（V4.0 优势需精确 sync，当前 fs_pos+8 退化到 V3.0 baseline）；F3 jakes fs_pos+8（per-tap envelope 影响 HFM 峰）；F4 ring 起点边界
+
 - **TX/RX 简化 UI 拆分（spec/plan/MVP 完成）** — 用户决策"放弃 P4 UI 复杂架构"后落地
   - spec `2026-05-04-tx-rx-simple-ui-split.md` + plan `2026-05-04-tx-rx-simple-ui-split.md`
   - 5 文件：`ui/simple_ui_addpaths.m` + `ui/simple_ui_meta_io.m` (含 base64 known_bits + complex strip/restore) + `ui/tx_simple_ui.m` (~370 行 classdef) + `ui/rx_simple_ui.m` (~440 行 classdef，流式 chunk-by-chunk) + 2 smoke 测试

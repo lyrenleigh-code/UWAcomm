@@ -36,11 +36,10 @@ delete(t); clear t;
 % --- 2. 4 信道模式各跑 1 次 ---
 % 注：SC-FDE V4.0 在高 SNR + 无 fading 下有非单调 BER 灾难（cascade BEM/GAMP 数值收敛失败，
 %     memory/conclusions 已记），pass 模式期望放宽到 ≤60%，反映此 known limitation
-% 注：jakes 当前用 baseband downconvert+upconvert round-trip，detect 在某些条件下失败，
-%     标 SKIP（follow-up 用 passband-native jakes 实现）
+% 注：jakes V2.0 已重写为 passband-native（hilbert+SoS Jakes envelope），不再 SKIP
 modes = {'pass','awgn','jakes','multipath'};
-threshold_pct = [60, 5, 100, 30];   % SC-FDE 特殊；jakes 暂跳门槛
-skip_modes = {'jakes'};             % 当前 known limitation
+threshold_pct = [60, 5, 50, 30];    % SC-FDE 特殊；jakes ≤50%（fading + 8-sample sync 偏差现实基线）
+skip_modes = {};                    % V2.0 jakes 已修，无 skip
 pass_count = 0;
 total = 0;
 

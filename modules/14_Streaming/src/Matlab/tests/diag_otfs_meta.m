@@ -1,0 +1,16 @@
+clear all; clc;
+this_dir = 'D:/Claude/TechReq/UWAcomm-claude/modules/14_Streaming/src/Matlab/tests';
+addpath(fullfile(fileparts(this_dir), 'ui'));
+addpath(fullfile(fileparts(this_dir), 'common'));
+out_dir = fullfile(this_dir, 'simple_ui_full_matrix_out');
+files = dir(fullfile(out_dir, 'tx_OTFS_*.json'));
+[~, idx] = sort([files.datenum], 'descend');
+fid = fopen(fullfile(out_dir, files(idx(1)).name), 'r');
+js = fread(fid, '*char').'; fclose(fid);
+m = simple_ui_meta_io('decode', js);
+pi = m.encode_meta.pilot_info;
+fprintf('pilot_info.positions size: %s\n', mat2str(size(pi.positions)));
+fprintf('pilot_info.positions value: %s\n', mat2str(pi.positions));
+fprintf('size(positions, 1) = %d\n', size(pi.positions, 1));
+fprintf('size(positions, 2) = %d\n', size(pi.positions, 2));
+fprintf('positions(1,:): %s\n', mat2str(pi.positions(1,:)));

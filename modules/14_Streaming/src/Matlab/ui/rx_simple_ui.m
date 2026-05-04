@@ -249,8 +249,10 @@ classdef rx_simple_ui < handle
                 end
                 this.append_log(sprintf('[CHAN] mode=%s', this.channel_mode));
 
-                % --- 3. ring buffer init ---
+                % --- 3. ring buffer init + silence pad（容纳 detect fs_pos > 1 的偏移）---
                 fn_hint = this.meta.frame.frame_pb_samples;
+                tail_pad_n = round(0.2 * this.meta.sys.fs);   % 0.2s 末尾静音 pad
+                audio_in = [audio_in, zeros(1, tail_pad_n)];
                 this.ring_capacity = max(8 * fn_hint, length(audio_in) + 16000);
                 this.ring = zeros(1, this.ring_capacity);
                 this.ring_write = 0;
@@ -303,6 +305,8 @@ classdef rx_simple_ui < handle
                     end
                 end
 
+                this.append_log(sprintf('[STREAM-END] ring_write=%d audio_in_len=%d fn_hint=%d last_decode_at=%d', ...
+                    this.ring_write, length(audio_in), fn_hint, this.last_decode_at));
                 % 最后再试一次（防止刚好结尾差一点）
                 if this.ring_write >= this.last_decode_at + fn_hint
                     decoded = this.try_decode_one_frame(sys_dec, fn_hint);
@@ -344,7 +348,11 @@ classdef rx_simple_ui < handle
             % detect_frame_stream
             sync_det = detect_frame_stream(this.ring, this.ring_write, ...
                 this.last_decode_at, sys_dec, struct('frame_len_hint', fn_hint));
-            if ~sync_det.found, return; end
+            if ~sync_det.found
+                this.append_log(sprintf('[DETECT-MISS] ring_write=%d last_decode_at=%d fn_hint=%d found=0', ...
+                    this.ring_write, this.last_decode_at, fn_hint));
+                return;
+            end
 
             fs_pos = sync_det.fs_pos;
             if this.ring_write < fs_pos + fn_hint - 1, return; end
@@ -388,6 +396,8 @@ classdef rx_simple_ui < handle
             % decode：用 TX encode_meta（白名单字段，复数已 strip → 恢复）
             if isfield(this.meta, 'encode_meta') && ~isempty(this.meta.encode_meta)
                 meta_dec = local_restore_complex(this.meta.encode_meta);
+                % JSON round-trip 把 1×N row vector 解码为 N×1 column；OTFS K×2 时尤其失维度
+                meta_dec = local_fix_otfs_meta_dims(meta_dec, this.meta.scheme);
             else
                 meta_dec = struct();
             end
@@ -396,6 +406,11 @@ classdef rx_simple_ui < handle
                 [bits_out, info] = modem_decode(body_bb_rx, this.meta.scheme, sys_dec, meta_dec);
             catch ME
                 this.append_log(sprintf('[DEC-ERR] %s', ME.message));
+                if ~isempty(ME.stack)
+                    for si = 1:min(3, length(ME.stack))
+                        this.append_log(sprintf('  @ %s L%d', ME.stack(si).name, ME.stack(si).line));
+                    end
+                end
                 this.last_decode_at = fs_pos;  % skip 这帧
                 return;
             end
@@ -423,34 +438,73 @@ classdef rx_simple_ui < handle
 
         % =================================================================
         function audio_out = apply_jakes_full(this, audio_in)
-            % 用 gen_uwa_channel 一次过加 jakes（基带），但 audio_in 是 passband
-            % → 简化：在 passband 上 conv 一个 jakes-tap-only 滤波器（大约等价 narrowband 假设）
-            % → 或更精确：downconvert 到 baseband → gen_uwa_channel → upconvert 回
-            % 简化版用后者（更精确）
-            sys_use = this.meta.sys;
-            % 1. downconvert
-            [bb, ~] = downconvert(audio_in, sys_use.fs, sys_use.fc, sys_use.fs);
-            % 2. gen_uwa_channel
-            ch_params = struct( ...
-                'fs',            sys_use.fs, ...
-                'num_paths',     5, ...
-                'delay_profile', 'custom', ...
-                'delays_s',      [0, 0.167, 0.5, 0.833, 1.333] * 1e-3, ...
-                'gains',         [1, 0.5, 0.3, 0.2, 0.1], ...
-                'doppler_rate',  this.channel_params.doppler_rate, ...
-                'fading_type',   this.channel_params.fading_type, ...
-                'fading_fd_hz',  this.channel_params.fading_fd_hz, ...
-                'snr_db',        this.channel_params.snr_db, ...
-                'seed',          12345 );
-            [bb_ch, ~] = gen_uwa_channel(bb, ch_params);
-            if length(bb_ch) > length(bb)
-                bb_ch = bb_ch(1:length(bb));
-            elseif length(bb_ch) < length(bb)
-                bb_ch = [bb_ch, zeros(1, length(bb) - length(bb_ch))];
+            % Passband-native Jakes 多径衰落（V2.0 2026-05-04 重写）
+            % 替代 V1.0 的 baseband downconvert+gen_uwa_channel+upconvert round-trip
+            % （V1.0 detect 失败：HFM 峰被 round-trip 滤波 + jakes fading 双重损失）
+            %
+            % 实现：
+            %   1. Hilbert 转 analytic signal（passband real → analytic complex）
+            %   2. 各 path 独立 Jakes SoS 复 envelope（narrowband 假设）
+            %   3. delay + Jakes envelope 调制 + multipath gain × sum
+            %   4. real() 回 passband + AWGN
+            %
+            % 与 baseband round-trip 区别：
+            %   - 不做 downconvert/upconvert（避免相位/包络损失）
+            %   - HFM 前导峰保留完整（detect 工作）
+            %   - narrowband 假设下与 baseband Jakes 数学等价
+
+            fs = this.meta.sys.fs;
+            fd = this.channel_params.fading_fd_hz;
+            snr_db = this.channel_params.snr_db;
+            base_seed = this.channel_params.mp_seed;
+
+            % multipath tap 复用 multipath edit field（默认 5 tap）
+            try
+                delays_ms_vec = sscanf(this.channel_params.mp_delays_ms, '%f');
+                gains_static  = sscanf(this.channel_params.mp_gains, '%f');
+                if length(gains_static) ~= length(delays_ms_vec) || isempty(delays_ms_vec)
+                    error('fallback');
+                end
+            catch
+                delays_ms_vec = [0, 0.167, 0.5, 0.833, 1.333]';
+                gains_static  = [1, 0.5, 0.3, 0.2, 0.1]';
             end
-            % 3. upconvert
-            [audio_out, ~] = upconvert(bb_ch, sys_use.fs, sys_use.fc);
-            audio_out = real(audio_out);
+
+            N = length(audio_in);
+            % Hilbert 转 analytic（passband real → complex analytic）
+            x_an = hilbert(audio_in(:)).';   % 1×N complex
+
+            audio_out = zeros(1, N);
+            for p = 1:length(delays_ms_vec)
+                tau = round(delays_ms_vec(p) * 1e-3 * fs);
+                if tau >= N, continue; end
+                % delayed analytic
+                if tau > 0
+                    path_an = [zeros(1, tau), x_an(1:N-tau)];
+                else
+                    path_an = x_an;
+                end
+                % per-path Jakes SoS 复 envelope（独立 seed）
+                if fd > 0
+                    h_t = local_jakes_sos_envelope(N, fs, fd, base_seed + 13*p);
+                else
+                    h_t = ones(1, N);   % static fading
+                end
+                % Jakes 调制 + multipath gain
+                path_faded_an = path_an .* h_t;
+                audio_out = audio_out + gains_static(p) * real(path_faded_an);
+            end
+
+            % AWGN
+            sig_pwr = mean(audio_out.^2);
+            if sig_pwr <= 0, return; end
+            if snr_db < 100
+                nv = sig_pwr * 10^(-snr_db/10);
+            else
+                nv = sig_pwr * 10^(-80/10);   % dither
+            end
+            rng(base_seed + 999);
+            audio_out = audio_out + sqrt(nv) * randn(1, N);
         end
 
         function audio_out = apply_multipath_full(this, audio_in)
@@ -523,6 +577,61 @@ classdef rx_simple_ui < handle
             scroll(this.log_area, 'bottom');
         end
     end
+end
+
+%% =========================================================================
+function meta = local_fix_otfs_meta_dims(meta, scheme)
+% JSON round-trip 把 K×2 矩阵（K=1 时）变成 2×1 column。OTFS pilot_info.positions
+% 在 K=1 默认配置下尤其踩坑（modem_decode_otfs L52 size(pos,1)=2 触发 oob）。
+% 通用 fix：对 OTFS encode_meta 中已知 K×2 字段做形状校正（行向量化）。
+if ~strcmpi(scheme, 'OTFS'), return; end
+if ~isfield(meta, 'pilot_info') || ~isstruct(meta.pilot_info), return; end
+pi = meta.pilot_info;
+% positions: 期望 K×2
+if isfield(pi, 'positions') && size(pi.positions, 2) == 1 && size(pi.positions, 1) == 2
+    pi.positions = pi.positions(:).';   % 2×1 → 1×2
+end
+% values: 期望 K×1
+if isfield(pi, 'values') && isrow(pi.values)
+    pi.values = pi.values(:);           % 1×K → K×1（如果被 round-trip 翻了）
+end
+meta.pilot_info = pi;
+% guard_mask: OTFS 期望 N×M（jsondecode 通常正确，作 safety check）
+if isfield(meta, 'guard_mask') && isfield(meta, 'N') && isfield(meta, 'M')
+    if numel(meta.guard_mask) == meta.N * meta.M && ~isequal(size(meta.guard_mask), [meta.N, meta.M])
+        meta.guard_mask = reshape(meta.guard_mask, meta.N, meta.M);
+    end
+end
+% dd_frame: N×M complex
+if isfield(meta, 'dd_frame') && isfield(meta, 'N') && isfield(meta, 'M')
+    if numel(meta.dd_frame) == meta.N * meta.M && ~isequal(size(meta.dd_frame), [meta.N, meta.M])
+        meta.dd_frame = reshape(meta.dd_frame, meta.N, meta.M);
+    end
+end
+% data_indices: K×1 list of linear index
+if isfield(meta, 'data_indices') && isrow(meta.data_indices)
+    meta.data_indices = meta.data_indices(:);
+end
+end
+
+%% =========================================================================
+function h = local_jakes_sos_envelope(N, fs, fd, seed)
+% Sum-of-Sinusoids Jakes 复 envelope 生成器（M=16 振荡器）
+% h(t) = (1/sqrt(M)) * sum_{n=1..M} exp(j*(2π·fd·cos(α_n)·t + φ_n))
+% 输出归一化到 mean(|h|^2) ≈ 1
+M = 16;
+rng(seed);
+phi_n = 2*pi*rand(1, M);   % 随机初始 phase
+alpha_n = 2*pi*((1:M) - 0.5) / M + (rand(1, M) - 0.5) * (pi/M);   % 抖动避免周期对称
+t = (0:N-1) / fs;
+h_real = zeros(1, N);
+h_imag = zeros(1, N);
+for n = 1:M
+    omega_n = 2*pi*fd*cos(alpha_n(n));
+    h_real = h_real + cos(omega_n*t + phi_n(n));
+    h_imag = h_imag + sin(omega_n*t + phi_n(n));
+end
+h = (h_real + 1j*h_imag) / sqrt(M);
 end
 
 %% =========================================================================

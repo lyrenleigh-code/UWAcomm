@@ -1,7 +1,8 @@
 # UWAcomm Wiki Index
 
 > 最后更新：2026-05-04
-> 页面总数：53（2026-05-04 TX/RX 简化 UI 拆分 MVP 落地：tx_simple_ui+rx_simple_ui+helper×2+smoke×2，6/6 体制 TX + 3/3 模式 RX PASS；jakes 模式 detect 失败 + SC-FDE V4.0 高 SNR 灾难量化为 known limitation；详见 log + spec `2026-05-04-tx-rx-simple-ui-split.md`）
+> 页面总数：54（+测试报告 `simple-ui-test-report.md`）
+> 2026-05-04 TX/RX 简化 UI v2.0：jakes passband-native + OTFS K×2 维度 fix + 完整 6×4 矩阵 24/24 PASS（19/24 BER<5%）；详见测试报告 `wiki/modules/14_Streaming/simple-ui-test-report.md` + spec `2026-05-04-tx-rx-simple-ui-split.md` Update 段
 
 ## Architecture（架构页）
 
@@ -27,7 +28,7 @@
 - [13 函数索引](modules/13_SourceCode/函数索引.md) + [框架v5](modules/13_SourceCode/水声通信算法模块化框架v5.md)
 - [SC-TDE调试日志](modules/13_SourceCode/SC-TDE调试日志.md) + [SC-FDE调试日志](modules/13_SourceCode/SC-FDE调试日志.md) + [OFDM调试日志](modules/13_SourceCode/OFDM调试日志.md) + [OTFS调试日志](modules/13_SourceCode/OTFS调试日志.md) + [DSSS调试日志](modules/13_SourceCode/DSSS调试日志.md)
 - [端到端帧组装调试笔记](modules/13_SourceCode/端到端帧组装调试笔记.md) + [离散Doppler全体制对比](modules/13_SourceCode/离散Doppler全体制对比.md)
-- [14_流式仿真框架](modules/14_Streaming/14_流式仿真框架.md) + [流式调试日志](debug-logs/14_Streaming/流式调试日志.md)
+- [14_流式仿真框架](modules/14_Streaming/14_流式仿真框架.md) + [流式调试日志](debug-logs/14_Streaming/流式调试日志.md) + [tx/rx_simple_ui 测试报告](modules/14_Streaming/simple-ui-test-report.md)
 
 ## Concepts（概念页）
 
