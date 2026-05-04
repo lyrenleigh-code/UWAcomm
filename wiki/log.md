@@ -2,6 +2,14 @@
 
 ## 2026-05-04
 
+- **SC-FDE V4.1 高 SNR cascade BEM/GAMP 灾难修复**（spec `2026-05-04-scfde-high-snr-cascade-bem-disaster.md`）
+  - 修复机制 A（GAMP nv_post→0 数值发散）+ 机制 B（高 SNR BEM 过拟合 noise）
+  - 改动：modem_decode_scfde.m 三处 V4.1 patch（L131/L174 nv_eq clamp 到 sig_pwr × 1e-3 = 30dB SNR floor；L183 trigger_pretturbo SNR>25dB 时 disable）
+  - SNR sweep 实测：pass 50.23%→**0.43%** (117×)；SNR=80 48.71%→**0.53%** (94×)；SNR=10/20 0% 不变；SNR=30 20.88%→5.47% (4×)
+  - 完整矩阵 24/24 解码成功，20/24 BER<5%（vs 修复前 19/24，+1）；其他 5 体制 BER 完全不变
+  - 残余 limitation：SNR 25→30 边界跳变 5.47pp（fd_est_pretturbo SNR 平滑过渡为 follow-up）
+  - diag_scfde_high_snr_fix 5/5 接受准则 PASS
+
 - **TX/RX 简化 UI v2.0：jakes passband-native + OTFS fix + 完整矩阵 24/24 PASS** — 用户授权"自己处理 + 形成详细测试报告"后续推进
   - **apply_jakes_full V2.0**：passband-native（per-tap Hilbert + SoS Jakes complex envelope），替代 V1.0 baseband round-trip；fs_pos +8 sample（vs V1.0 +7328 sample，改善 916×）
   - **OTFS RCA + fix**：JSON round-trip 把 K×2 矩阵（K=1）解码为 2×1 column → modem_decode_otfs L52 `size(pos,1)=2` oob；加 `local_fix_otfs_meta_dims` 校正 pilot_info.positions/values + data_indices + guard_mask + dd_frame

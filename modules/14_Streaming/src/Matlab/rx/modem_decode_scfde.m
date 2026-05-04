@@ -130,6 +130,16 @@ rx_train = rx_sym_all(train_blk1_start+1 : train_blk1_start+sym_per_block);
 h0_rough = sum(rx_train(blk_cp+1:end) .* conj(train_sym)) / blk_fft;
 nv_eq = max(mean(abs(rx_train(blk_cp+1:end) - h0_rough * train_sym).^2), 1e-10);
 
+% V4.1 (2026-05-04): 高 SNR clamp 防 GAMP/BEM 数值崩
+% Spec: 2026-05-04-scfde-high-snr-cascade-bem-disaster.md
+% nv_eq floor = sig_pwr * 1e-3 → 等价 SNR 上限 ~30 dB
+% 修复机制 A（GAMP nv_post→0 数值发散）+ 机制 B（BEM 在高 SNR 过拟合）
+sig_pwr_train = mean(abs(rx_train(blk_cp+1:end)).^2);
+nv_eq_floor = max(sig_pwr_train * 10^(-30/10), 1e-10);
+if nv_eq < nv_eq_floor
+    nv_eq = nv_eq_floor;
+end
+
 %% ---- 5. 信道估计（第一个训练块 GAMP + 自动时延发现）----
 usable = blk_cp;
 T_mat = zeros(usable, L_max);
@@ -175,12 +185,25 @@ nv_eq = max(mean(abs(noise_freq).^2), 1e-10);
 % 信号功率（供 SNR 估计用）
 P_sig_train = mean(abs(H_est_init .* X_train_freq).^2);
 
+% V4.1 (2026-05-04): 频域 nv_eq 同样 clamp（机制 A 一致性）
+% 训练块 H_est_init 可能 over-fit 让 noise_freq → 0；按符号功率 floor
+nv_eq_floor_freq = max(P_sig_train * 10^(-30/10), 1e-10);
+if nv_eq < nv_eq_floor_freq
+    nv_eq = nv_eq_floor_freq;
+end
+
 %% ---- 5b. Phase 5/4-revision: pre-Turbo BEM (pure pilot 估时变 H) ----
 % 触发条件（任一满足）：
 %   (a) Phase 5 方案 E：N_pilot_per_blk > 0（每 data block 末 pilot 段提供干净 obs）
 %   (b) Phase 4-revision：N_train_blocks > 1（多 train block 提供干净 obs，无 pilot 也能 BEM）
 % iter=0..1 H_est_blocks 由时变 BEM h_tv 替代单块 GAMP（避开软符号-BEM 鸡蛋耦合）
 trigger_pretturbo = (N_pilot_per_blk > 0) || (length(train_block_indices) > 1);
+% V4.1 (2026-05-04): 高 SNR 禁用 pre-Turbo BEM（机制 B 直接 fix）
+% 高 SNR 下信道近似 AWGN/static，BEM 反而过拟合 noise → 退化到 V3.0 单训练块 GAMP
+est_snr_init_db = 10*log10(P_sig_train / nv_eq);
+if est_snr_init_db > 25 && trigger_pretturbo
+    trigger_pretturbo = false;
+end
 if trigger_pretturbo
     fd_est_pretturbo = 20;   % Phase 5 调优：10→20 Hz 上界（覆盖 fd=5Hz 时变 V5c）
     [obs_y_pre, obs_x_pre, obs_n_pre] = build_bem_obs_pretturbo( ...
