@@ -79,4 +79,47 @@ $$Y[k_p, l] = \sum_{(\tau,\nu) \in paths} h(\tau,\nu) \cdot p[(l-\tau) \mod M] \
 
 ## Result
 
-_待填写_
+**完成日期**：2026-04-27（commit `c9c0601`，移植 codex 已 completed 实施）
+**补登日期**：2026-05-04（claude 分支漏登）
+
+### 实施
+
+借鉴 UWAcomm-codex 已 completed spec 移植到 claude 分支：
+
+- **方案 C（superimposed pilot）落地**：所有 DD 位置 data + smooth pilot，
+  RX 端做 pilot contribution removal 后估计信道。
+  实施在：
+  - `modules/06_MultiCarrier/src/Matlab/otfs_pilot_embed.m` 加 `'superimposed'` 模式
+  - `modules/07_ChannelEstEq/src/Matlab/ch_est_otfs_superimposed.m`（新增）
+  - `modules/13_SourceCode/src/Matlab/tests/OTFS/test_otfs_timevarying.m`
+    bench 注入 `bench_otfs_pilot_mode` / `bench_otfs_superimposed_power`
+  - `modules/13_SourceCode/src/Matlab/common/rx_chain.m::rx_otfs_real`
+    pilot mode 三分派（impulse / sequence / superimposed）
+
+- **方案 B（ZC sequence）保留**：`ch_est_otfs_zc.m` 已存在但不作默认（4-21 发现 SNR=10 BER 28-32% regression）。
+
+- **方案 A/D 未实施**（superimposed 已达成 PAPR 目标，无需重叠）。
+
+### 验收
+
+| Criterion | 目标 | 实测 |
+|-----------|------|------|
+| 时域 PAPR | ≤10 dB | **8.9 dB** ✅（test_multicarrier 4.4） |
+| 信道估计精度 | 不退化 | guard 区域噪声估计正常 ✅ |
+| BER（5/6 fading SNR≥10 dB） | 0% @10dB+ | impulse / superimposed 全 0%（static + disc-5Hz + hyb-K{5,10,20}）✅ |
+| 数据率 | 不降低 | 5357→5902 bps（+10%，superimposed 把 pilot 单元让渡给 data）✅ |
+| **BER（jakes5Hz 连续谱）** | 0% @10dB+ | impulse 33-35% / superimposed 42-44% 🔴 |
+
+### Limitation（已知）
+
+- **jakes5Hz 灾难（impulse 33-35% / superimposed 42-44%）**：连续谱时变 + 单
+  pilot/frame 协议的物理 limitation（与 SC-FDE jakes fd=1Hz 50% 灾难同根因），
+  decoder 层不可解，需协议层改动（多 pilot 块周期插入，类比 SC-FDE Phase 5
+  方案 A/E）。conclusions.md #46 已记录。
+- **superimposed 弱 K=5/10 hybrid 下轻微 BER 退化**：能量交叉污染。
+
+### 单测
+
+- `test_multicarrier.m` 4.3 SLM PASS / 4.4 spread pilot PAPR PASS（24/24 总计）
+- `test_otfs_timevarying.m` 5/6 fading × SNR≥10 dB BER 全 0%（rect 脉冲）
+

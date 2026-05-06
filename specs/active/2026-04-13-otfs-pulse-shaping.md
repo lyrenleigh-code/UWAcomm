@@ -88,3 +88,36 @@ tags: [模块06, OTFS, 脉冲成形, PAPR, 模糊度函数]
 - RX不做窗补偿，窗效应由均衡器自然吸收
 
 **待验证**：Hann脉冲成形在离散Doppler信道下BER是否退化（Phase 4）
+
+### Phase 4 实测（2026-05-04）
+
+诊断脚本：`modules/13_SourceCode/src/Matlab/tests/OTFS/diag_phase4_hann_ber.m`
+（rect / hann × {static, disc-5Hz, hyb-K5} × SNR={10,15} dB, seed=42）。
+
+**BER 矩阵（%）**：
+
+| Fading | rect@10dB | hann@10dB | rect@15dB | hann@15dB |
+|--------|----------:|----------:|----------:|----------:|
+| static | 0.000 | **11.147** | 0.000 | 1.885 |
+| disc-5Hz | 0.000 | **14.755** | 0.000 | 3.554 |
+| hyb-K5 | 0.269 | **12.924** | 0.000 | 2.262 |
+
+**Acceptance criterion #4（BER 不退化 / 离散 Doppler 0%@10dB+）：0/6 PASS** 🔴
+
+**根因证据**：hann 路径 loopback 验证误差 **2.78e+01**（rect 路径 1.26e-15 量级），
+说明 TX 加 hann 时域窗后 mod→demod 已不闭环 → spec Phase 0-2 假设
+"RX 不做窗补偿，窗效应由均衡器自然吸收"在端到端实测下不成立。
+`eq_otfs_lmmse` 未将 pulse_type 纳入有效信道；`otfs_demodulate` 未传 pulse_type
+反向加窗。
+
+**决议（2026-05-04）：维持 rect 默认部署**
+
+- Phase 0-2 PSL 改善 13.8 dB（频谱旁瓣维度）+ 模糊度多普勒 PSL 改善 33 dB
+  保留作脉冲设计层面的理论参考；
+- production 路径 OTFS 仍用 rect 脉冲（`bench_otfs_pulse_type='rect'` 默认）；
+- Phase 4 BER 未达成 → 不部署 hann；
+- 重启路径（如未来需要）：先修 RX 链路（`otfs_demodulate` + `eq_otfs_lmmse`
+  传 `pulse_type` 实现反向加窗或纳入有效信道矩阵），再重跑 Phase 4。
+- 解耦说明：PAPR 路径 ≠ Phase 4 路径。PAPR 通过 SLM/clip16/superimposed pilot
+  达成（commit `c9c0601`，PAPR 16.8→8.9 dB），与 Hann 脉冲端到端 BER 失败独立。
+
